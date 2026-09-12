@@ -19,8 +19,8 @@ from app.config import Settings, get_settings
 from app.core.llm_router import LLMMessage, LLMRouter, LLMRouterError
 from app.core.logging import get_logger
 from app.services.ai_cs.context import (
+    build_image_context,
     content_text_and_images,
-    extract_image_context,
     format_question,
 )
 from app.services.knowledge_feedback.service import KnowledgeFeedbackDisabledError, build_client
@@ -155,7 +155,7 @@ def answer_question(
                 product = line.name if line else ""
         _, urls = content_text_and_images(content)
         _, title_urls = content_text_and_images(title)
-        images = extract_image_context(attachments=[], urls=urls + title_urls, settings=settings)
+        images = build_image_context(attachments=[], urls=urls + title_urls, settings=settings)
         question = format_question(
             title=title, body=content, product=product, code=code, images=images
         )
