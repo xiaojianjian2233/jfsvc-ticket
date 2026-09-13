@@ -148,7 +148,7 @@ def build_image_context(
         if url and url not in seen:
             seen.add(url)
             items.append((None, url))
-    limit = max(0, getattr(settings, "vision_max_images_per_ticket", 5))
+    limit = max(0, min(5, getattr(settings, "vision_max_images_per_ticket", 5)))
     result: list[str] = []
     for index, (att, url) in enumerate(items, 1):
         label = f"图片{index}" + (f"（附件{att.id}）" if att else "（正文链接）")
@@ -222,3 +222,11 @@ def build_hub_question(db: Session, hub: HubIssue, *, settings: Settings) -> str
         supplements=list(dict.fromkeys(supplements)),
         images=images,
     )
+
+
+def prepare_answer_inputs(question: str) -> tuple[str, list[str]]:
+    """Split rendered context into channel question + top-level images array."""
+    clean, images = content_text_and_images(question)
+    if len(images) > 5:
+        raise ValueError("images must contain at most 5 URLs")
+    return clean, images

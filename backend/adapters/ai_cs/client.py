@@ -23,6 +23,7 @@ import hashlib
 import time
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -169,6 +170,46 @@ class AiCsClient:
             skills_used=[str(s) for s in used] if isinstance(used, list) else [],
             trace_id=str(d.get("trace_id") or ""),
         )
+
+    def answer_with_images(
+        self,
+        *,
+        question: str,
+        images: list[str],
+        skill: str | None = None,
+    ) -> ReplayResult:
+        """Official channel image contract: init → answer_no_stream → end.
+
+        Images are a top-level array, never HTML inside replay.question. This
+        endpoint does not document cited_knowledge; do not invent citations.
+        """
+        if not 1 <= len(images) <= 5:
+            raise ValueError("images must contain 1 to 5 URLs")
+        if any(urlsplit(url).scheme not in ("http", "https") for url in images):
+            raise ValueError("images require HTTP/HTTPS URLs")
+        initialized = self._request("GET", "/open-api/ask/ask_init")
+        cid = initialized.get("ai_agent_cid") if isinstance(initialized, dict) else None
+        if not isinstance(cid, str) or not cid:
+            raise AiCsBusinessError("AI 客服初始化会话未返回 ai_agent_cid")
+        try:
+            body: dict[str, Any] = {"question": question, "ai_agent_cid": cid, "images": images}
+            if skill:
+                body["skill"] = skill
+            data = self._request("POST", "/open-api/ask/answer_no_stream", json=body)
+            if not isinstance(data, list) or not data or not all(isinstance(r, dict) for r in data):
+                raise AiCsBusinessError("AI 客服图片答复返回格式错误")
+            return ReplayResult(
+                answer="\n\n".join(str(row.get("answer") or "") for row in data),
+                cited_knowledge=[],
+                skills_used=[],
+                trace_id="",
+            )
+        finally:
+            try:
+                self._request("POST", "/open-api/ask/end_session", json={"ai_agent_cid": cid})
+            except Exception as exc:
+                # Cleanup must not discard a successful answer or mask the primary error.
+                logger.warning("ai_cs_image_session_cleanup_failed", error_type=type(exc).__name__)
 
     # ---- auth -------------------------------------------------------
 

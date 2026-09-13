@@ -22,6 +22,7 @@ from app.services.ai_cs.context import (
     build_image_context,
     content_text_and_images,
     format_question,
+    prepare_answer_inputs,
 )
 from app.services.knowledge_feedback.service import KnowledgeFeedbackDisabledError, build_client
 from app.services.skills.prompt_store import load_prompt
@@ -70,7 +71,13 @@ def replay_with_retry(
     last_err: AiCsError | None = None
     for attempt in range(1, _REPLAY_MAX_ATTEMPTS + 1):
         try:
-            result = client.replay(question=question, skill=skill, use_latest_knowledge=True)
+            clean_question, images = prepare_answer_inputs(question)
+            if images:
+                result = client.answer_with_images(
+                    question=clean_question, images=images, skill=skill
+                )
+            else:
+                result = client.replay(question=question, skill=skill, use_latest_knowledge=True)
             return str(result.answer)
         except AiCsNetworkError as e:
             last_err = e

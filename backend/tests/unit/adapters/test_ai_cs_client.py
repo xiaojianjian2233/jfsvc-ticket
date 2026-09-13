@@ -392,3 +392,56 @@ def test_replay_with_session_id() -> None:
 def test_replay_requires_session_or_question() -> None:
     with _client() as c, pytest.raises(ValueError, match="session_id or question"):
         c.replay()
+
+
+@respx.mock
+def test_image_answer_uses_channel_contract_and_closes_session():
+    import json
+
+    _token_route()
+    respx.get(f"{BASE}/open-api/ask/ask_init").mock(
+        return_value=httpx.Response(200, json=_ok({"ai_agent_cid": "cid-1"}))
+    )
+    answer = respx.post(f"{BASE}/open-api/ask/answer_no_stream").mock(
+        return_value=httpx.Response(200, json=_ok([{"answer": "读图成功"}]))
+    )
+    end = respx.post(f"{BASE}/open-api/ask/end_session").mock(
+        return_value=httpx.Response(200, json=_ok(None))
+    )
+    with _client() as c:
+        result = c.answer_with_images(
+            question="请读图", images=["https://example.com/a.png"], skill="customer-service"
+        )
+    assert json.loads(answer.calls[0].request.content) == {
+        "question": "请读图",
+        "images": ["https://example.com/a.png"],
+        "ai_agent_cid": "cid-1",
+        "skill": "customer-service",
+    }
+    assert json.loads(end.calls[0].request.content) == {"ai_agent_cid": "cid-1"}
+    assert result.answer == "读图成功"
+    assert result.cited_knowledge == [] and result.trace_id == ""
+
+
+@respx.mock
+def test_image_failure_preserved_even_when_session_cleanup_fails():
+    _token_route()
+    respx.get(f"{BASE}/open-api/ask/ask_init").mock(
+        return_value=httpx.Response(200, json=_ok({"ai_agent_cid": "cid-1"}))
+    )
+    respx.post(f"{BASE}/open-api/ask/answer_no_stream").mock(
+        return_value=httpx.Response(200, json={"errcode": "500002", "description": "图片识别失败"})
+    )
+    end = respx.post(f"{BASE}/open-api/ask/end_session").mock(return_value=httpx.Response(500))
+    with _client() as c, pytest.raises(AiCsBusinessError) as error:
+        c.answer_with_images(question="读图", images=["https://example.com/a.png"])
+    assert error.value.error_code == "500002"
+    assert end.called
+
+
+@pytest.mark.parametrize(
+    "images", [[], ["https://example.com/a.png"] * 6, ["data:image/png;base64,abc"], ["/tmp/a.png"]]
+)
+def test_image_input_rejected_before_network(images):
+    with _client() as c, pytest.raises(ValueError):
+        c.answer_with_images(question="读图", images=images)

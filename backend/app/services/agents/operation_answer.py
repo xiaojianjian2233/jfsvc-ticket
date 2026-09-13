@@ -20,7 +20,7 @@ from app.core.llm_router import LLMMessage, LLMRouter, LLMRouterError
 from app.core.logging import get_logger
 from app.models import AgentDecision, HubIssue, SyncOutbox, Ticket
 from app.services.agents.answer_accuracy import score_answer_accuracy
-from app.services.ai_cs.context import build_hub_question
+from app.services.ai_cs.context import build_hub_question, prepare_answer_inputs
 from app.services.cascade.reply_sync import ReplySyncError, author_reply
 from app.services.hub_issues.op_status import (
     OP_ANSWERED,
@@ -163,9 +163,15 @@ def _replay_with_retry(
     last_err: AiCsError | None = None
     for attempt in range(1, _REPLAY_MAX_ATTEMPTS + 1):
         try:
-            result = client.replay(  # type: ignore[attr-defined]
-                question=question, skill=skill, use_latest_knowledge=True
-            )
+            clean_question, images = prepare_answer_inputs(question)
+            if images:
+                result = client.answer_with_images(  # type: ignore[attr-defined]
+                    question=clean_question, images=images, skill=skill
+                )
+            else:
+                result = client.replay(  # type: ignore[attr-defined]
+                    question=question, skill=skill, use_latest_knowledge=True
+                )
             return result  # type: ignore[no-any-return]
         except AiCsNetworkError as e:
             last_err = e

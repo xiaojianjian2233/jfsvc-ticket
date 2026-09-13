@@ -161,7 +161,9 @@ def test_operation_replay_receives_resolved_context_and_image(db_session):
     h.op_status, h.op_handler = "processing", "agent"
     db_session.commit()
     fake = Mock()
-    fake.replay.return_value = ReplayResult("请检查开票规则及单据数据。", [], [], "trace")
+    fake.answer_with_images.return_value = ReplayResult(
+        "请检查开票规则及单据数据。", [], [], "trace"
+    )
     with (
         patch("app.services.agents.operation_answer.build_client", return_value=fake),
         patch(
@@ -172,9 +174,11 @@ def test_operation_replay_receives_resolved_context_and_image(db_session):
         auto_answer_operation(
             db_session, h.id, settings=Settings(operation_auto_reply_enabled=True)
         )
-    q = fake.replay.call_args.kwargs["question"]
+    q = fake.answer_with_images.call_args.kwargs["question"]
     assert "星瀚-开票" in q and "开票合并失败" in q
-    assert '<img src="https://example.com/a.png">' in q
+    assert "<img" not in q
+    assert fake.answer_with_images.call_args.kwargs["images"] == ["https://example.com/a.png"]
+    fake.replay.assert_not_called()
 
 
 def test_public_query_forwards_image_without_separate_vision():
@@ -182,7 +186,7 @@ def test_public_query_forwards_image_without_separate_vision():
     from app.services.ai_cs.query import AnswerRoute, answer_question
 
     fake = Mock()
-    fake.replay.return_value = ReplayResult("已找到错误。", [], [], "trace")
+    fake.answer_with_images.return_value = ReplayResult("已找到错误。", [], [], "trace")
     with (
         patch("app.services.ai_cs.query.build_client", return_value=fake),
         patch("app.services.ai_cs.query.route_answer", return_value=AnswerRoute("D")),
@@ -194,7 +198,9 @@ def test_public_query_forwards_image_without_separate_vision():
             product_category="星瀚-开票",
             settings=Settings(vision_enabled=True),
         )
-    q = fake.replay.call_args.kwargs["question"]
-    assert "【补充信息—图片】" in q and '<img src="https://example.com/a.png">' in q
+    q = fake.answer_with_images.call_args.kwargs["question"]
+    assert "【补充信息—图片】" in q and "<img" not in q
+    assert fake.answer_with_images.call_args.kwargs["images"] == ["https://example.com/a.png"]
+    fake.replay.assert_not_called()
     vision.assert_not_called()
     fake.close.assert_called_once()
