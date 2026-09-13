@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { http, HttpResponse } from "msw";
@@ -59,6 +59,36 @@ function mockAuth(role: string) {
 }
 
 describe("DailyDashboardPage", () => {
+  it("filters the assignee table without changing overall daily cards", async () => {
+    mockAuth("supervisor");
+    server.use(http.get("*/api/metrics/daily-dashboard", () => HttpResponse.json(sampleDaily)));
+    renderPage();
+    const table = await screen.findByRole("table", { name: "处理人数据明细" });
+    expect(within(table).getAllByRole("row")).toHaveLength(3);
+    fireEvent.change(screen.getByLabelText("搜索处理人"), { target: { value: "张三" } });
+    expect(within(table).getAllByRole("row")).toHaveLength(2);
+    expect(within(table).queryByText("(未分配)")).not.toBeInTheDocument();
+    expect(screen.getByTestId("kpi-received")).toHaveTextContent("12");
+    expect(screen.getByTestId("kpi-supplemented")).toHaveTextContent("3");
+    fireEvent.change(screen.getByLabelText("搜索处理人"), { target: { value: "不存在" } });
+    expect(screen.getByText(/没有匹配的处理人/)).toBeInTheDocument();
+    localStorage.clear();
+  });
+
+  it("does not send an empty date to the API", async () => {
+    mockAuth("supervisor");
+    let calls = 0;
+    server.use(http.get("*/api/metrics/daily-dashboard", () => { calls++; return HttpResponse.json(sampleDaily); }));
+    renderPage();
+    await screen.findByTestId("kpi-received");
+    const picker = screen.getByTestId("date-picker") as HTMLInputElement;
+    const date = picker.value;
+    fireEvent.change(picker, { target: { value: "" } });
+    expect(picker.value).toBe(date);
+    expect(calls).toBe(1);
+    localStorage.clear();
+  });
+
   it("shows a permission notice for non-supervisor roles", () => {
     mockAuth("member");
     renderPage();

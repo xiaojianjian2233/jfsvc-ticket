@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, it, expect, beforeEach } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { http, HttpResponse } from "msw";
@@ -80,6 +81,56 @@ function mockAuth(role: string) {
 }
 
 describe("AnalyticsPage", () => {
+  beforeEach(() => {
+    server.use(http.get("*/api/admin/product-lines", () => HttpResponse.json([
+      { code: "PROLINE6055", name: "星瀚-开票", is_active: true },
+    ])));
+  });
+
+  it("sends product and Beijing month filters and resets them", async () => {
+    mockAuth("supervisor");
+    const requests: URL[] = [];
+    server.use(http.get("*/api/metrics/ticket-analytics", ({ request }) => {
+      requests.push(new URL(request.url));
+      return HttpResponse.json(sampleAnalytics);
+    }));
+    renderPage();
+    await screen.findByTestId("kpi-total");
+    await screen.findByRole("option", { name: "星瀚-开票 (PROLINE6055)" });
+    await userEvent.selectOptions(screen.getByLabelText("产品线"), "PROLINE6055");
+    await waitFor(() => expect(requests.at(-1)?.searchParams.get("product_line")).toBe("PROLINE6055"));
+    await screen.findByTestId("kpi-total");
+    await userEvent.selectOptions(screen.getByLabelText("接收月份"), "2026-07");
+    await waitFor(() => expect(requests.at(-1)?.searchParams.get("start")).toBe("2026-07-01T00:00:00+08:00"));
+    expect(requests.at(-1)?.searchParams.get("end")).toBe("2026-08-01T00:00:00+08:00");
+    await userEvent.click(screen.getByRole("button", { name: "重置筛选" }));
+    expect(screen.getByLabelText("产品线")).toHaveValue("");
+    expect(screen.getByLabelText("接收月份")).toHaveValue("__all__");
+    localStorage.clear();
+  });
+
+  it("shows a clear empty state for filters without tickets", async () => {
+    mockAuth("supervisor");
+    server.use(http.get("*/api/metrics/ticket-analytics", () => HttpResponse.json({
+      ...sampleAnalytics, kpi: { ...sampleAnalytics.kpi, total: 0 },
+    })));
+    renderPage();
+    expect(await screen.findByText(/当前筛选下暂无工单/)).toBeInTheDocument();
+    expect(screen.queryByTestId("trend-line-chart")).not.toBeInTheDocument();
+    localStorage.clear();
+  });
+
+  it("accounts for types outside the four main categories", async () => {
+    mockAuth("supervisor");
+    server.use(http.get("*/api/metrics/ticket-analytics", () => HttpResponse.json({
+      ...sampleAnalytics, kpi: { ...sampleAnalytics.kpi, total: 137 },
+    })));
+    renderPage();
+    expect(await screen.findByText("其他 / 未分类")).toBeInTheDocument();
+    expect(screen.getByTestId("kpi-total")).toHaveTextContent("137");
+    localStorage.clear();
+  });
+
   it("shows a permission notice for non-supervisor roles", () => {
     mockAuth("member");
     renderPage();

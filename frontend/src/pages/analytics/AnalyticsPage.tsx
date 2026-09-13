@@ -1,16 +1,5 @@
-/**
- * 统计看板（Task 4，2026-08）— 领导层研发管理视角的工单维度统计。
- *
- * 数据源：GET /api/metrics/ticket-analytics（require_supervisor，见
- * backend/app/services/metrics/analytics.py）。前端只做时间范围/产品线筛选 +
- * recharts 可视化，聚合全部在后端算好。
- *
- * 顶部：时间范围切换（最近3月/全部）+ 产品线下拉（可选，复用 ProductLineSelect）。
- * ① KPI 行：总量 / 类型分布饼图 / 平均处理时长 / SLA 达成率（<80% 标红）
- * ② 模块 × 类型堆叠柱状图（这批工单产品线单一，module 才有区分度）
- * ③ 处理人负载横向柱状图
- * ④ 月度趋势折线图（total + median/p90 处理时长）+ 耗时区间直方图
- */
+/** 综合看板：按接收月份、产品线查看工单规模、效率与分布。聚合口径由后端提供。 */
+import { MetricCard, SectionTitle, dashboardPage } from "./DashboardUI";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -29,6 +18,7 @@ import {
   Line,
 } from "recharts";
 import { api } from "@/api/client";
+import { ProductLineSelect } from "@/components/selectors";
 import { isSupervisor } from "@/api/auth";
 
 const ALL_MONTHS = "__all__";
@@ -82,29 +72,39 @@ export function AnalyticsPage() {
 
 function AnalyticsPageInner() {
   const [month, setMonth] = useState<string>(ALL_MONTHS);
+  const [productLine, setProductLine] = useState<string>();
 
   const params = useMemo(() => {
-    if (month === ALL_MONTHS) return {};
-    return monthRange(month);
-  }, [month]);
+    return { ...(month === ALL_MONTHS ? {} : monthRange(month)), product_line: productLine };
+  }, [month, productLine]);
 
   const query = useQuery({
-    queryKey: ["ticket-analytics", month],
+    queryKey: ["ticket-analytics", month, productLine],
     queryFn: () => api.get("/api/metrics/ticket-analytics", params),
+    staleTime: 60_000,
   });
 
   // 月份下拉选项来自后端 available_months（全量，不随筛选变化）
-  const months = ((query.data?.available_months ?? []) as string[]).slice();
+  const months = Array.from(new Set([
+    ...((query.data?.available_months ?? []) as string[]),
+    ...(month === ALL_MONTHS ? [] : [month]),
+  ])).sort().reverse();
 
   return (
-    <div className="font-hub text-hub-text text-[13px] -m-6 min-h-screen bg-hub-page px-7 pt-5 pb-10">
+    <div className={dashboardPage}>
       {/* 页头 */}
-      <div className="flex items-end gap-3.5 mb-3.5">
+      <div className="flex flex-wrap items-end gap-3.5 mb-6">
         <div>
-          <h1 className="m-0 text-[17px] font-bold">统计看板</h1>
-          <div className="text-[11.5px] text-hub-textFaint mt-0.5">工单维度统计（研发管理视角）</div>
+          <h1 className="m-0 text-[24px] font-semibold tracking-tight">综合看板</h1>
+          <div className="text-[11.5px] text-hub-textFaint mt-0.5">查看工单规模、处理效率与人员分布</div>
         </div>
         <div className="flex-1" />
+        <label className="flex flex-col gap-1 text-xs text-hub-textMuted">
+          产品线
+          <ProductLineSelect value={productLine} onChange={setProductLine} placeholder="全部产品线" />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-hub-textMuted">
+          接收月份
         <select
           value={month}
           onChange={(e) => setMonth(e.target.value)}
@@ -118,18 +118,25 @@ function AnalyticsPageInner() {
             </option>
           ))}
         </select>
+        </label>
+        <button type="button" onClick={() => { setMonth(ALL_MONTHS); setProductLine(undefined); }} className="px-3 py-2 text-hub-textSecondary hover:bg-white rounded-lg">重置筛选</button>
+        <button type="button" disabled={query.isFetching} onClick={() => void query.refetch()} className="px-3 py-2 bg-white border border-hub-border rounded-lg disabled:opacity-50">{query.isFetching ? "刷新中…" : "刷新数据"}</button>
       </div>
+      <p className="text-xs text-hub-textMuted mb-4">按工单接收时间（北京时间）筛选；耗时仅统计有处理时长记录的工单，未记录值显示“—”。</p>
 
       {query.isLoading ? (
-        <div className="bg-white border border-hub-border rounded-[10px] p-4 mb-6 text-xs text-hub-textFaint">
+        <div className="min-w-0 bg-white border border-hub-borderLight rounded-2xl p-5 shadow-sm mb-6 text-xs text-hub-textFaint">
           加载中…
         </div>
       ) : query.error ? (
-        <div className="bg-white border border-hub-border rounded-[10px] p-4 mb-6 text-xs text-hub-rose">
-          看板加载失败：{String(query.error)}
+        <div className="min-w-0 bg-white border border-hub-borderLight rounded-2xl p-5 shadow-sm mb-6 text-xs text-hub-rose">
+          看板加载失败，请稍后重试。
+          <button type="button" onClick={() => void query.refetch()} className="ml-3 underline">重新加载</button>
         </div>
       ) : query.data ? (
-        <AnalyticsBody data={query.data} />
+        query.data.kpi.total === 0 ? (
+          <div className="bg-white border border-hub-border rounded-xl p-10 text-center text-hub-textMuted">当前筛选下暂无工单，请调整月份或产品线。</div>
+        ) : <AnalyticsBody data={query.data} />
       ) : null}
     </div>
   );
@@ -141,11 +148,15 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
   const kpi = data.kpi;
   const slaLow = kpi.sla_rate !== null && kpi.sla_rate !== undefined && kpi.sla_rate < 0.8;
 
-  const typePieData = HUB_TYPES.map((t) => ({
+  const typePieData: { name: string; type: string; value: number }[] = HUB_TYPES.map((t) => ({
     name: TYPE_LABELS[t],
     type: t,
     value: (kpi.by_type as Record<string, number>)[t] ?? 0,
   }));
+
+  const otherCount = Math.max(0, kpi.total - typePieData.reduce((sum, item) => sum + item.value, 0));
+  if (otherCount > 0) typePieData.push({ name: "其他 / 未分类", type: "Other", value: otherCount });
+  const typeColor = (type: string) => TYPE_COLORS[type as HubType] ?? "#94a3b8";
 
   const byModule = (data.by_module ?? []) as Array<Record<string, any>>;
   const plChartData = byModule.map((row) => ({
@@ -176,92 +187,44 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* ① KPI 行 */}
-      <div>
-        <div className="text-xs font-semibold text-hub-textSecondary mb-2">工单总览</div>
-        <div className="grid grid-cols-5 gap-3">
-          <div className="border border-hub-borderLight bg-white rounded-[9px] px-3.5 py-3 flex flex-col justify-center">
-            <div className="text-[11.5px] text-hub-textMuted">工单总量</div>
-            <div className="text-[26px] font-bold leading-none font-mono mt-1.5" data-testid="kpi-total">
-              {kpi.total.toLocaleString()}
-            </div>
+      <section>
+        <SectionTitle title="工单总览" note="先了解规模与效率，再查看人员和模块分布" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <MetricCard label="工单总量" value={kpi.total.toLocaleString()} note="所选接收范围内的全部工单" testId="kpi-total" />
+          <MetricCard label="平均处理时长" value={fmtHours(kpi.avg_handle_hours)} note="仅包含已记录处理时长的工单" tone="blue" />
+          <MetricCard label="SLA 达成率" value={fmtPct(kpi.sla_rate)} tone={slaLow ? "rose" : "teal"} testId="kpi-sla-rate" noteTestId="kpi-sla-base" note={`基于 ${kpi.sla_base?.toLocaleString() ?? 0} 条耗时及 SLA 标准完整的工单`} />
+          <MetricCard label="未分配工单" value={(kpi.unassigned_count ?? 0).toLocaleString()} note={`平均处理时长 ${fmtHours(kpi.unassigned_avg_hours)} · 所选范围内`} tone={(kpi.unassigned_count ?? 0) > 0 ? "amber" : "neutral"} testId="kpi-unassigned" />
+        </div>
+      </section>
+      <section className="rounded-2xl border border-hub-borderLight bg-white p-5 shadow-sm">
+        <SectionTitle title="工单类型分布" note="按工单类型查看数量与占比" />
+        <div className="flex flex-col sm:flex-row items-center gap-6">
+          <div className="w-full sm:w-52 shrink-0" style={{ height: 160 }} data-testid="type-pie-chart">
+            <ResponsiveContainer width="100%" height="100%"><PieChart><Pie isAnimationActive={false} data={typePieData} dataKey="value" nameKey="name" innerRadius={48} outerRadius={68} paddingAngle={3} stroke="none">{typePieData.map(d => <Cell key={d.type} fill={typeColor(d.type)} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer>
           </div>
-
-          <div className="border border-hub-borderLight bg-white rounded-[9px] px-3.5 py-3">
-            <div className="text-[11.5px] text-hub-textMuted mb-1">类型分布</div>
-            <div style={{ width: "100%", height: 110 }} data-testid="type-pie-chart">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={typePieData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={22}
-                    outerRadius={40}
-                  >
-                    {typePieData.map((d) => (
-                      <Cell key={d.type} fill={TYPE_COLORS[d.type]} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                  <Legend wrapperStyle={{ fontSize: 10.5 }} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div className="border border-hub-borderLight bg-white rounded-[9px] px-3.5 py-3 flex flex-col justify-center">
-            <div className="text-[11.5px] text-hub-textMuted">平均处理时长</div>
-            <div className="text-[26px] font-bold leading-none font-mono mt-1.5">
-              {fmtHours(kpi.avg_handle_hours)}
-            </div>
-          </div>
-
-          <div className="border border-hub-borderLight bg-white rounded-[9px] px-3.5 py-3 flex flex-col justify-center">
-            <div className="text-[11.5px] text-hub-textMuted">SLA 达成率</div>
-            <div
-              className="text-[26px] font-bold leading-none font-mono mt-1.5"
-              style={{ color: slaLow ? "#b04a4a" : undefined }}
-              data-testid="kpi-sla-rate"
-            >
-              {fmtPct(kpi.sla_rate)}
-            </div>
-            <div className="text-[10.5px] text-hub-textFaint mt-1" data-testid="kpi-sla-base">
-              基于 {kpi.sla_base?.toLocaleString() ?? 0} 条已完成工单
-            </div>
-          </div>
-
-          <div className="border border-hub-borderLight bg-white rounded-[9px] px-3.5 py-3 flex flex-col justify-center">
-            <div className="text-[11.5px] text-hub-textMuted">未分配工单</div>
-            <div
-              className="text-[26px] font-bold leading-none font-mono mt-1.5"
-              style={{ color: (kpi.unassigned_count ?? 0) > 0 ? "#b04a4a" : undefined }}
-              data-testid="kpi-unassigned"
-            >
-              {(kpi.unassigned_count ?? 0).toLocaleString()}
-            </div>
-            <div className="text-[10.5px] text-hub-textFaint mt-1">
-              平均 {fmtHours(kpi.unassigned_avg_hours)}
-            </div>
+          <div className="grid w-full grid-cols-2 lg:grid-cols-4 gap-4">
+            {typePieData.map(d => <div key={d.type} className="rounded-xl bg-slate-50 p-4">
+              <div className="flex items-center gap-2 text-xs text-hub-textSecondary"><span className="h-2 w-2 rounded-full" style={{ background: typeColor(d.type) }} />{d.name}</div>
+              <div className="mt-2 text-2xl font-semibold tabular-nums">{d.value.toLocaleString()}</div>
+              <div className="mt-1 text-xs text-hub-textMuted">占全部 {fmtPct(kpi.total ? d.value / kpi.total : null)}</div>
+            </div>)}
           </div>
         </div>
-      </div>
+      </section>
 
       {/* ② 研发人员维度（Bug修复/需求/内部任务 三类研发工单） */}
       <div>
-        <div className="text-xs font-semibold text-hub-textSecondary mb-2">
+        <div className="text-sm font-semibold text-hub-text mb-4">
           研发人员维度（Bug修复 / 需求 / 内部任务）
         </div>
         {devChartData.length === 0 ? (
-          <div className="bg-white border border-hub-border rounded-[10px] p-4 text-xs text-hub-textFaint">
+          <div className="min-w-0 bg-white border border-hub-borderLight rounded-2xl p-5 shadow-sm text-xs text-hub-textFaint">
             暂无研发工单
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             {/* 工单量堆叠柱状 */}
-            <div className="bg-white border border-hub-border rounded-[10px] p-4">
+            <div className="min-w-0 bg-white border border-hub-borderLight rounded-2xl p-5 shadow-sm">
               <div className="text-[11.5px] text-hub-textMuted mb-2">研发工单量（按类型）</div>
               <div
                 style={{ width: "100%", height: Math.max(200, devChartData.length * 30) }}
@@ -269,7 +232,7 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
               >
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={devChartData} layout="vertical" margin={{ left: 40 }}>
-                    <CartesianGrid strokeDasharray="3 3" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e9edf1" />
                     <XAxis type="number" tick={{ fontSize: 11 }} />
                     <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={80} />
                     <Tooltip />
@@ -288,7 +251,7 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
               </div>
             </div>
             {/* 耗时表格 */}
-            <div className="bg-white border border-hub-border rounded-[10px] p-4">
+            <div className="min-w-0 bg-white border border-hub-borderLight rounded-2xl p-5 shadow-sm">
               <div className="text-[11.5px] text-hub-textMuted mb-2">研发人员处理耗时</div>
               <table className="w-full text-[11.5px]" data-testid="dev-staff-table">
                 <thead>
@@ -317,15 +280,15 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
 
       {/* ③ 模块 × 类型 */}
       <div>
-        <div className="text-xs font-semibold text-hub-textSecondary mb-2">模块 × 类型分布</div>
-        <div className="bg-white border border-hub-border rounded-[10px] p-4">
+        <div className="text-sm font-semibold text-hub-text mb-4">模块 × 类型分布（工单量前 10）</div>
+        <div className="min-w-0 bg-white border border-hub-borderLight rounded-2xl p-5 shadow-sm">
           {plChartData.length === 0 ? (
             <div className="text-xs text-hub-textFaint">暂无数据</div>
           ) : (
             <div style={{ width: "100%", height: 280 }} data-testid="module-bar-chart">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={plChartData}>
-                  <CartesianGrid strokeDasharray="3 3" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e9edf1" />
                   <XAxis dataKey="module" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} />
                   <Tooltip
@@ -380,10 +343,10 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
         </div>
       </div>
 
-      {/* ③ 处理人负载 */}
+      {/* ③ 处理人工单量 */}
       <div>
-        <div className="text-xs font-semibold text-hub-textSecondary mb-2">处理人负载</div>
-        <div className="bg-white border border-hub-border rounded-[10px] p-4">
+        <div className="text-sm font-semibold text-hub-text mb-4">处理人工单量（前 15）</div>
+        <div className="min-w-0 bg-white border border-hub-borderLight rounded-2xl p-5 shadow-sm">
           {assigneeChartData.length === 0 ? (
             <div className="text-xs text-hub-textFaint">暂无数据</div>
           ) : (
@@ -393,7 +356,7 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
             >
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={assigneeChartData} layout="vertical" margin={{ left: 40 }}>
-                  <CartesianGrid strokeDasharray="3 3" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e9edf1" />
                   <XAxis type="number" tick={{ fontSize: 11 }} />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={80} />
                   <Tooltip
@@ -418,17 +381,17 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
       </div>
 
       {/* ④ 月度趋势 + 耗时直方图 */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <div>
-          <div className="text-xs font-semibold text-hub-textSecondary mb-2">月度趋势</div>
-          <div className="bg-white border border-hub-border rounded-[10px] p-4">
+          <div className="text-sm font-semibold text-hub-text mb-4">月度趋势</div>
+          <div className="min-w-0 bg-white border border-hub-borderLight rounded-2xl p-5 shadow-sm">
             {trend.length === 0 ? (
               <div className="text-xs text-hub-textFaint">暂无数据</div>
             ) : (
               <div style={{ width: "100%", height: 240 }} data-testid="trend-line-chart">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={trend}>
-                    <CartesianGrid strokeDasharray="3 3" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e9edf1" />
                     <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                     {/* 双 Y 轴：工单量(~千) 与 处理时长(~小时) 量级差百倍，同轴会把时长线压平 */}
                     <YAxis
@@ -476,15 +439,15 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
         </div>
 
         <div>
-          <div className="text-xs font-semibold text-hub-textSecondary mb-2">处理时长分布</div>
-          <div className="bg-white border border-hub-border rounded-[10px] p-4">
+          <div className="text-sm font-semibold text-hub-text mb-4">处理时长分布</div>
+          <div className="min-w-0 bg-white border border-hub-borderLight rounded-2xl p-5 shadow-sm">
             {hist.length === 0 ? (
               <div className="text-xs text-hub-textFaint">暂无数据</div>
             ) : (
               <div style={{ width: "100%", height: 240 }} data-testid="hist-bar-chart">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={hist}>
-                    <CartesianGrid strokeDasharray="3 3" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e9edf1" />
                     <XAxis dataKey="bucket" tick={{ fontSize: 11 }} />
                     <YAxis tick={{ fontSize: 11 }} />
                     <Tooltip />
