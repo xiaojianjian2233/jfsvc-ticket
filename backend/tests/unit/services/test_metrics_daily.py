@@ -106,6 +106,52 @@ def test_completed_counts_released_and_op_closed(db_session):
     assert t1.hub_issue_id == hub1.id and t2.hub_issue_id == hub2.id
 
 
+def test_completed_counts_historical_completion_and_deduplicates(db_session):
+    db_session.add(User(id=1, feishu_uid="ou_a", name="甲", role="assignee"))
+    db_session.commit()
+
+    historical = _tk(
+        db_session,
+        status="closed",
+        handler_user_id=1,
+        actual_resolved_at=datetime(2026, 9, 1, 5, 0, tzinfo=UTC),
+        source_payload={
+            "_historical_completion": {"count_in_daily": True},
+        },
+    )
+    hub = _hub(db_session, type="Bug_fix", status="released")
+    historical.hub_issue_id = hub.id
+    StatusHistoryRepository(db_session).record(
+        entity_type="hub_issue",
+        entity_id=hub.id,
+        from_status="in_progress",
+        to_status="released",
+        changed_by="system:cascade",
+        reason=None,
+    )
+    db_session.execute(
+        StatusHistory.__table__.update()
+        .where(StatusHistory.entity_id == hub.id)
+        .values(changed_at=datetime(2026, 9, 1, 4, 0, tzinfo=UTC))
+    )
+    _tk(
+        db_session,
+        status="closed",
+        handler_user_id=None,
+        actual_resolved_at=datetime(2026, 9, 1, 6, 0, tzinfo=UTC),
+        source_payload={
+            "_historical_completion": {"count_in_daily": True},
+        },
+    )
+    db_session.commit()
+
+    result = compute_daily_dashboard(db_session, date="2026-09-01")
+    assert result.totals.completed == 2
+    by_name = {row.name: row for row in result.by_assignee}
+    assert by_name["甲"].completed == 1
+    assert by_name["(未分配)"].completed == 1
+
+
 def test_returned_to_ksm_counts_by_sent_at(db_session):
     db_session.add(User(id=1, feishu_uid="ou_a", name="甲", role="assignee"))
     db_session.commit()

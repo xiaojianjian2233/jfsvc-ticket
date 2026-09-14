@@ -9,6 +9,7 @@
 - 完成：hub_issue 当日进入终态——研发类 `status_history(to_status='released')`，
   或 Operation 类 `status_history(to_status='closed', changed_by LIKE 'op:%')`；
   一个 hub 可能挂多条来源 ticket，每条各计一次（跟"接收"同一统计单位：工单数）。
+  经审核导入的历史归档工单按 `actual_resolved_at` 计入，并通过 ticket id 去重。
 - 退回KSM：`sync_outbox(kind='return', status='sent')` 当日 `sent_at`（KSM 确认
   送达成功才计，不计仅入队未送达的）。
 - KSM打回（客户驳回）/ 补充资料：ticket/hub_issue 上无专门字段，均从
@@ -153,6 +154,20 @@ def _completed_counts(
     )
     hub_ids = released_ids | op_closed_ids
     tickets = _tickets_for_hub_ids(db, hub_ids)
+    historical_tickets = list(
+        db.scalars(
+            select(Ticket).where(
+                Ticket.deleted_at.is_(None),
+                Ticket.status == "closed",
+                Ticket.actual_resolved_at >= start,
+                Ticket.actual_resolved_at < end,
+                Ticket.source_payload["_historical_completion"][
+                    "count_in_daily"
+                ].as_boolean(),
+            )
+        )
+    )
+    tickets = list({ticket.id: ticket for ticket in [*tickets, *historical_tickets]}.values())
     by_handler: dict[int | None, int] = {}
     for t in tickets:
         by_handler[t.handler_user_id] = by_handler.get(t.handler_user_id, 0) + 1
