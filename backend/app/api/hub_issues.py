@@ -1257,7 +1257,8 @@ def confirm_subtask_endpoint(
         try:
             from app.services.agents.operation_answer import auto_answer_operation
 
-            success = auto_answer_operation(db, hub.id)
+            # 用户主动点击“AI作答”属于显式请求，不受后台自动答复总开关影响。
+            success = auto_answer_operation(db, hub.id, force=True)
             if success:
                 db.refresh(hub)
                 generated_answer = hub.reply_content

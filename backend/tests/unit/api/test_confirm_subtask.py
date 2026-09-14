@@ -136,6 +136,36 @@ def test_confirm_subtask_success_pushes_linear(
     assert hub.assigned_user_id == 10
 
 
+def test_confirm_operation_explicit_ai_answer_bypasses_automatic_switch(
+    app_client: TestClient, subtask_world: Session
+) -> None:
+    hub = HubIssue(
+        ticket_id=100,
+        short_code="HUB-OP-1",
+        type="Operation",
+        title="应用咨询",
+        canonical_body="如何处理",
+        reply_content="已有草稿",
+        status="draft",
+        op_status="processing",
+        op_handler="agent",
+    )
+    subtask_world.add(hub)
+    subtask_world.commit()
+
+    with patch(
+        "app.services.agents.operation_answer.auto_answer_operation", return_value=False
+    ) as mock_answer:
+        response = app_client.post(
+            f"/api/hub-issues/{hub.id}/confirm-subtask",
+            json={},
+            headers=_bearer(2),
+        )
+
+    assert response.status_code == 200
+    mock_answer.assert_called_once_with(subtask_world, hub.id, force=True)
+
+
 def test_get_catalog_module_owner(app_client: TestClient, subtask_world: Session) -> None:
     """GET /api/hub-issues/catalog/module-owner 能正确解析出指定责任人。"""
     from app.models import Module
@@ -201,4 +231,3 @@ def test_update_subtask_matches_owner_for_operation_type(
 
     subtask_world.refresh(hub)
     assert hub.assigned_user_id == 10
-
