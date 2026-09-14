@@ -376,3 +376,48 @@ def test_no_override_falls_back_to_builtin_default(base_world: Session) -> None:
     notif = base_world.query(NotificationLog).first()
     assert notif is not None
     assert notif.payload["threshold_hours"] == 4.0
+
+
+def test_historical_archive_excluded_without_hiding_live_tickets(db_session):
+    from app.repositories.ticket import TicketRepository
+
+    now = datetime.now(UTC)
+    db_session.add_all(
+        [
+            Ticket(
+                short_code="HIST-test",
+                source_code="ksm",
+                source_ticket_id="hist-test",
+                type="Raw",
+                status="processing",
+                received_at=now - timedelta(days=60),
+                source_payload={"_historical_import": {"archive_only": True}},
+            ),
+            Ticket(
+                short_code="LIVE-test",
+                source_code="ksm",
+                source_ticket_id="live-test",
+                type="Raw",
+                status="processing",
+                received_at=now - timedelta(days=60),
+            ),
+            Ticket(
+                short_code="LIVE-meta",
+                source_code="ksm",
+                source_ticket_id="live-meta",
+                type="Raw",
+                status="processing",
+                received_at=now - timedelta(days=60),
+                source_payload={"_historical_import": {"archive_only": False}},
+            ),
+        ]
+    )
+    db_session.flush()
+    found = {
+        t.short_code
+        for t in TicketRepository(db_session).find_unreplied_overdue(
+            threshold=timedelta(hours=1), now=now
+        )
+    }
+    assert "HIST-test" not in found
+    assert {"LIVE-test", "LIVE-meta"} <= found
