@@ -726,7 +726,6 @@ def test_replay_failure_aborts_if_hub_settled_concurrently(db_session: Session) 
     assert ticket.status == "transferred_return"
 
 
-
 # ---- answer-router _route_answer 单测 ----
 
 from types import SimpleNamespace  # noqa: E402

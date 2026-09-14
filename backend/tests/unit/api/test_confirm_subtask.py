@@ -201,4 +201,3 @@ def test_update_subtask_matches_owner_for_operation_type(
 
     subtask_world.refresh(hub)
     assert hub.assigned_user_id == 10
-

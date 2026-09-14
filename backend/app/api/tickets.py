@@ -286,7 +286,9 @@ def list_tickets(
     source_ticket_q: str | None = Query(None),  # 来源工单号/本系统编号子串搜索（全表）
     op_status: str | None = Query(None),  # 处理状态筛选（所挂 hub_issue 的 op_status）
     op_statuses: list[str] | None = Query(None),  # 处理状态多选筛选
-    process_stages: list[str] | None = Query(None),  # 处理环节多选筛选（服务处理 / 研发处理 / 完成）
+    process_stages: list[str] | None = Query(
+        None
+    ),  # 处理环节多选筛选（服务处理 / 研发处理 / 完成）
     received_from: date | None = Query(None),  # 提单时间起
     received_to: date | None = Query(None),  # 提单时间止
     created_from: date | None = Query(None),  # 创建时间起

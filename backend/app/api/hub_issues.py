@@ -1335,7 +1335,11 @@ def confirm_subtask_endpoint(
         push_res = push_hub_issue_to_linear(hub.id, db, assignee_override_user_id=assignee_id)
 
         settings = get_settings()
-        if settings.linear_push_enabled and push_res is None:
+        if (
+            settings.linear_push_enabled
+            and push_res is None
+            and not (hub.linear_uuid or hub.linear_identifier)
+        ):
             from app.models import StatusHistory
 
             last_pending = (

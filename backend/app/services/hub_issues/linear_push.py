@@ -285,6 +285,11 @@ def push_hub_issue_to_linear(
                 hub_issue_id=hub_issue_id,
                 linear_identifier=hub.linear_identifier,
             )
+            # 已经推送过：将可能被误重置为 draft/created 的状态纠偏回 processing 并对齐环节
+            if hub.status in ("draft", "created"):
+                hub.status = "processing"
+                _sync_tickets_dev_stage(db, hub)
+                db.commit()
             return None
         # creator 毕业时已 hub-dedup 合并 → 不重复查/推
         if hub.superseded_by_hub_issue_id is not None:

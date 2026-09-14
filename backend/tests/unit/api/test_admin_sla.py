@@ -47,7 +47,10 @@ def test_sla_permissions(app_client: TestClient, sla_world: Session) -> None:
     assert app_client.put("/api/admin/sla-levels/SEVERLEVEL0001", json={}).status_code == 401
 
     # 403 for non-admin
-    assert app_client.get("/api/admin/sla-levels", headers=_bearer(3, role="supervisor")).status_code == 403
+    assert (
+        app_client.get("/api/admin/sla-levels", headers=_bearer(3, role="supervisor")).status_code
+        == 403
+    )
 
 
 def test_list_sla_levels(app_client: TestClient, sla_world: Session) -> None:
