@@ -15,8 +15,24 @@ from app.config import get_settings
 from app.core.logging import get_logger
 from app.db import make_session
 from app.services.agents.operation_answer import drain_operation_auto_reply
+from app.services.agents.operation_answer import auto_answer_operation
 
 logger = get_logger(__name__)
+
+
+@shared_task(name="app.services.agents.operation_answer_task.generate_initial_ai_answer")  # type: ignore[untyped-decorator]
+def generate_initial_ai_answer_task(hub_issue_id: int) -> dict[str, object]:
+    """Generate a display-only answer draft for every newly routed ticket type."""
+    db = make_session()
+    try:
+        answered = auto_answer_operation(db, hub_issue_id, force=True, draft_only=True)
+        return {"hub_issue_id": hub_issue_id, "answered": answered}
+    except Exception:
+        db.rollback()
+        logger.exception("initial_ai_answer_unexpected_failure", hub_issue_id=hub_issue_id)
+        return {"hub_issue_id": hub_issue_id, "answered": False}
+    finally:
+        db.close()
 
 
 @shared_task(name="app.services.agents.operation_answer_task.drain_operation_auto_reply")  # type: ignore[untyped-decorator]  # celery decorator is untyped

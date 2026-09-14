@@ -242,6 +242,7 @@ def auto_answer_operation(
     *,
     settings: Settings | None = None,
     force: bool = False,
+    draft_only: bool = False,
 ) -> bool:
     """对 Operation hub_issue 跑一次 replay→answer-router→落状态。True=已答复，False=留主管。
 
@@ -254,14 +255,14 @@ def auto_answer_operation(
         return False
 
     hub = db.get(HubIssue, hub_issue_id)
-    if hub is None or hub.deleted_at is not None or hub.type != "Operation":
+    if hub is None or hub.deleted_at is not None or (hub.type != "Operation" and not draft_only):
         return False
 
     # 闸门①守卫：pending_review 是毕业后停摆待主管确认分类的态，还没过闸门
     # 不该被自动答复——这条对 force 同样适用（不因 force 豁免，同 ai_cs 排除
     # 守卫）。gate①-parked Operation 的 op_handler 恒为 'agent'（创建时预置，
     # 未经改判），re-answer API 已挡 op_handler=='agent'，此处是防御性兜底。
-    if hub.status == "pending_review":
+    if hub.status == "pending_review" and not draft_only:
         return False
 
     # 若工单已处于已答复或终态，绝不继续自动答复或转人工
@@ -331,6 +332,25 @@ def auto_answer_operation(
 
     answer = replay_result.answer
     cited_knowledge = replay_result.cited_knowledge
+
+    if draft_only:
+        if not (answer or "").strip():
+            return False
+        _save_draft_reply(db, hub, content=answer)
+        extra: dict[str, object] = {"cited_knowledge": cited_knowledge, "draft_only": True}
+        if skill:
+            extra["skills_used"] = [skill]
+        _record_decision(
+            db,
+            hub.id,
+            branch="preview",
+            question=question,
+            answer=answer,
+            supply_note="",
+            extra=extra,
+        )
+        logger.info("initial_ai_answer_draft_saved", hub_issue_id=hub.id, type=hub.type)
+        return True
 
     # answer-router LLM 判 C/D/transfer
     route = _route_answer(question, answer)

@@ -73,7 +73,11 @@ def _route_by_type(
         return  # 投诉停 ticket 层，进工作台高亮人工队列
     if not (settings.hub_issue_auto_enabled and confidence >= bar):
         return
-    create_hub_issue_for_ticket_auto(ticket_id)
+    result = create_hub_issue_for_ticket_auto(ticket_id)
+    if result is not None and result.created:
+        from app.services.agents.operation_answer_task import generate_initial_ai_answer_task
+
+        generate_initial_ai_answer_task.delay(result.hub_issue_id)
     # Operation 自动答复不在入库主链路同步跑——replay 走 LLM 可能长达 2-3 分钟，会长时间
     # 占用 worker。改由 Celery beat 任务 drain_operation_auto_reply 异步处理（每 2min 扫描
     # 已毕业未答复的 Operation hub），兼作偶发失败的补偿重试。

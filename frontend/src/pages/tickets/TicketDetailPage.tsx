@@ -3888,15 +3888,12 @@ function SubTicketList({
           },
         );
         const res: any = await postByPath(
-          "/api/hub-issues/{hub_issue_id}/confirm-subtask",
+          "/api/hub-issues/{hub_issue_id}/generate-ai-answer" as any,
           { hub_issue_id: key },
-          { assignee_override_user_id: null },
+          {} as any,
         );
-        if (res?.need_manual_assignee) {
-          setManualAssignModal({ hubId: key, title: rowTitle });
-        }
-        if (res?.solution || res?.reply_content) {
-          const newSol = res.solution || res.reply_content;
+        if (res?.reply_content) {
+          const newSol = res.reply_content;
           updateRow(key, { solution: newSol, confirmed: true, status: "processing" });
         } else {
           updateRow(key, { confirmed: true, status: "processing" });
@@ -4245,6 +4242,7 @@ function SubTicketList({
                             重新推送
                           </button>
                         ) : isDev ? (
+                          <>
                           <button
                             type="button"
                             aria-label="去补充"
@@ -4272,6 +4270,17 @@ function SubTicketList({
                           >
                             去补充
                           </button>
+                          <button
+                            type="button"
+                            aria-label="AI作答"
+                            disabled={!canEdit || currentAiStatus === "loading"}
+                            onClick={() => handleAiAnswer(rowKey, rowTitle, st)}
+                            className="font-medium text-[#6085e7] hover:underline cursor-pointer disabled:opacity-50"
+                            title="再次调用 Agent 生成答复草稿"
+                          >
+                            {currentAiStatus === "loading" ? "AI作答中..." : "AI作答"}
+                          </button>
+                          </>
                         ) : currentAiStatus === "loading" ? (
                           <span className="inline-flex items-center gap-1 text-[#6085e7] text-[11px] font-medium opacity-80 cursor-wait">
                             <svg
@@ -4573,6 +4582,7 @@ function SubTicketList({
                             重新推送
                           </button>
                         ) : isDev ? (
+                          <>
                           <button
                             type="button"
                             aria-label="去补充"
@@ -4600,6 +4610,17 @@ function SubTicketList({
                           >
                             去补充
                           </button>
+                          <button
+                            type="button"
+                            aria-label="AI作答"
+                            disabled={!canEditThisRow || currentAiStatus === "loading"}
+                            onClick={() => handleAiAnswer(rowKey, rowTitle, st)}
+                            className="font-medium text-[#6085e7] hover:underline cursor-pointer disabled:opacity-50"
+                            title="再次调用 Agent 生成答复草稿"
+                          >
+                            {currentAiStatus === "loading" ? "AI作答中..." : "AI作答"}
+                          </button>
+                          </>
                         ) : currentAiStatus === "loading" ? (
                           <span className="inline-flex items-center gap-1 text-[#6085e7] text-[11px] font-medium opacity-80 cursor-wait">
                             <svg

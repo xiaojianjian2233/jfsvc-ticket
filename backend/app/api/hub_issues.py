@@ -845,6 +845,34 @@ class ReAnswerResponse(BaseModel):
     answered: bool
 
 
+class GenerateAiAnswerResponse(BaseModel):
+    hub_issue_id: int
+    answered: bool
+    reply_content: str | None
+
+
+@router.post("/{hub_issue_id}/generate-ai-answer", response_model=GenerateAiAnswerResponse)
+def generate_ai_answer_endpoint(
+    hub_issue_id: int,
+    user: AuthedUser = Depends(require_user),
+    db: Session = Depends(get_session),
+) -> GenerateAiAnswerResponse:
+    """User-triggered AI answer draft for every task type, without changing routing state."""
+    _authorize_hub_handler(db, hub_issue_id, user)
+    hub = db.get(HubIssue, hub_issue_id)
+    if hub is None or hub.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="hub_issue not found")
+    answered = auto_answer_operation(db, hub_issue_id, force=True, draft_only=True)
+    db.refresh(hub)
+    if not answered:
+        raise HTTPException(status_code=502, detail="AI 未生成答复，请稍后重试")
+    return GenerateAiAnswerResponse(
+        hub_issue_id=hub.id,
+        answered=True,
+        reply_content=hub.reply_content,
+    )
+
+
 @router.post("/{hub_issue_id}/re-answer", response_model=ReAnswerResponse)
 def re_answer_endpoint(
     hub_issue_id: int,

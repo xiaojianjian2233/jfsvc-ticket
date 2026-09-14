@@ -166,6 +166,36 @@ def test_confirm_operation_explicit_ai_answer_bypasses_automatic_switch(
     mock_answer.assert_called_once_with(subtask_world, hub.id, force=True)
 
 
+def test_generate_ai_answer_accepts_bug_without_changing_routing_state(
+    app_client: TestClient, subtask_world: Session
+) -> None:
+    hub = HubIssue(
+        ticket_id=100,
+        short_code="HUB-BUG-AI",
+        type="Bug_fix",
+        title="Bug 也先生成答复",
+        canonical_body="错误截图",
+        status="pending_review",
+    )
+    subtask_world.add(hub)
+    subtask_world.commit()
+
+    with patch(
+        "app.api.hub_issues.auto_answer_operation", return_value=True
+    ) as mock_answer:
+        response = app_client.post(
+            f"/api/hub-issues/{hub.id}/generate-ai-answer",
+            json={},
+            headers=_bearer(2),
+        )
+
+    assert response.status_code == 200
+    mock_answer.assert_called_once_with(subtask_world, hub.id, force=True, draft_only=True)
+    subtask_world.refresh(hub)
+    assert hub.type == "Bug_fix"
+    assert hub.status == "pending_review"
+
+
 def test_get_catalog_module_owner(app_client: TestClient, subtask_world: Session) -> None:
     """GET /api/hub-issues/catalog/module-owner 能正确解析出指定责任人。"""
     from app.models import Module
