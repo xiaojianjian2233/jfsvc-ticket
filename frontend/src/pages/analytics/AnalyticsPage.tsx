@@ -188,6 +188,17 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
   return (
     <div className="flex flex-col gap-6">
       <section>
+        <SectionTitle title="处理进展" note="按所选月份和产品线统计；待处理含处理中、待审核、补充资料、处理异常" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          <MetricCard label="待处理工单总数" value={(kpi.pending_count ?? 0).toLocaleString()} note="处理中、待审核、补充资料、处理异常" tone="amber" />
+          <MetricCard label="运营类工单" value={(kpi.pending_operation_count ?? 0).toLocaleString()} note="待处理的运营类工单" tone="blue" />
+          <MetricCard label="Bug/需求类工单" value={(kpi.pending_dev_count ?? 0).toLocaleString()} note="待处理的 Bug、需求类工单" tone="blue" />
+          <MetricCard label="超期工单" value={(kpi.overdue_count ?? 0).toLocaleString()} note="接收至今：运营超过24小时，Bug/需求超过40小时" tone="rose" />
+          <MetricCard label="驳回工单" value={(kpi.rejected_count ?? 0).toLocaleString()} note="发生过客户驳回的工单，按工单去重" tone="rose" />
+          <MetricCard label="处理完成" value={(kpi.completed_count ?? 0).toLocaleString()} note="已答复、已关闭、转单退回" tone="teal" />
+        </div>
+      </section>
+      <section>
         <SectionTitle title="工单总览" note="先了解规模与效率，再查看人员和模块分布" />
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           <MetricCard label="工单总量" value={kpi.total.toLocaleString()} note="所选接收范围内的全部工单" testId="kpi-total" />

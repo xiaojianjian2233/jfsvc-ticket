@@ -15,13 +15,13 @@ UTC/北京月份边界，因此两种路径在测试断言上等价。中位数/
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import ColumnElement, and_, func, select
+from sqlalchemy import ColumnElement, and_, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import Ticket, User
+from app.models import StatusHistory, Ticket, User
 
 _TYPES = ("Operation", "Bug_fix", "Demand", "Internal_task")
 _DEV_TYPES = ("Bug_fix", "Internal_task", "Demand")
@@ -40,6 +40,12 @@ class KpiBlock:
     sla_base: int  # SLA 达成率的分母（handle+std 都非空的工单数），供前端标注口径
     unassigned_count: int  # 未分配处理人的工单数
     unassigned_avg_hours: float | None  # 未分配工单的平均处理时长
+    pending_count: int = 0
+    completed_count: int = 0
+    pending_operation_count: int = 0
+    pending_dev_count: int = 0
+    overdue_count: int = 0
+    rejected_count: int = 0
 
 
 @dataclass(slots=True)
@@ -97,6 +103,38 @@ def compute_ticket_analytics(
     product_line: str | None = None,
 ) -> TicketAnalytics:
     flt = _base_filter(start, end, product_line)
+    pending = Ticket.status.in_(("processing", "reviewing", "supplementing", "exception"))
+    completed = Ticket.status.in_(("answered", "closed", "transferred_return"))
+    now = datetime.now(UTC)
+    overdue = and_(
+        pending,
+        or_(
+            and_(
+                Ticket.predicted_type == "Operation", Ticket.received_at < now - timedelta(hours=24)
+            ),
+            and_(
+                Ticket.predicted_type.in_(("Bug_fix", "Demand")),
+                Ticket.received_at < now - timedelta(hours=40),
+            ),
+        ),
+    )
+    rejected = (
+        select(StatusHistory.id)
+        .where(
+            or_(
+                and_(StatusHistory.entity_type == "ticket", StatusHistory.entity_id == Ticket.id),
+                and_(
+                    StatusHistory.entity_type == "hub_issue",
+                    StatusHistory.entity_id == Ticket.hub_issue_id,
+                ),
+            ),
+            StatusHistory.reason.like("客户驳回%"),
+        )
+        .exists()
+    )
+
+    def count_matching(condition):
+        return db.scalar(select(func.count(Ticket.id)).where(flt, condition)) or 0
 
     total = db.execute(select(func.count()).select_from(Ticket).where(flt)).scalar() or 0
 
@@ -165,6 +203,14 @@ def compute_ticket_analytics(
         sla_base=sla_base,
         unassigned_count=unassigned_count,
         unassigned_avg_hours=unassigned_avg_hours,
+        pending_count=count_matching(pending),
+        completed_count=count_matching(completed),
+        pending_operation_count=count_matching(and_(pending, Ticket.predicted_type == "Operation")),
+        pending_dev_count=count_matching(
+            and_(pending, Ticket.predicted_type.in_(("Bug_fix", "Demand")))
+        ),
+        overdue_count=count_matching(overdue),
+        rejected_count=count_matching(rejected),
     )
 
     # 模块 × 类型（这批工单产品线单一=金蝶发票云，无区分度；module 才是有意义的细分维度）
@@ -194,9 +240,7 @@ def compute_ticket_analytics(
         .where(
             and_(
                 flt,
-                Ticket.handle_hours.is_not(None),
-                Ticket.sla_standard_hours.is_not(None),
-                Ticket.handle_hours > Ticket.sla_standard_hours,
+                overdue,
             )
         )
         .group_by(Ticket.module)

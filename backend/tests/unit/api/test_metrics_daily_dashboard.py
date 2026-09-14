@@ -46,6 +46,7 @@ def test_ok_for_supervisor(app_client: TestClient, world: Session) -> None:
     body = resp.json()
     assert body["date"] == "2026-09-01"
     assert set(body["totals"]) == {
+        "transferred_to_dev",
         "received",
         "completed",
         "returned_to_ksm",

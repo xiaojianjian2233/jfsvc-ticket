@@ -147,6 +147,12 @@ def workbench_metrics(
 
 
 class KpiOut(BaseModel):
+    pending_count: int = 0
+    completed_count: int = 0
+    pending_operation_count: int = 0
+    pending_dev_count: int = 0
+    overdue_count: int = 0
+    rejected_count: int = 0
     total: int
     by_type: dict[str, int]
     avg_handle_hours: float | None
@@ -187,6 +193,7 @@ def ticket_analytics(
 
 
 class DailyTotalsOut(BaseModel):
+    transferred_to_dev: int = 0
     received: int
     completed: int
     returned_to_ksm: int
@@ -195,6 +202,7 @@ class DailyTotalsOut(BaseModel):
 
 
 class DailyByAssigneeOut(BaseModel):
+    transferred_to_dev: int = 0
     user_id: int | None
     name: str
     received: int

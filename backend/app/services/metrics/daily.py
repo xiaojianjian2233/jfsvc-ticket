@@ -24,10 +24,10 @@ from datetime import UTC, datetime, timedelta
 from datetime import date as date_cls
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import StatusHistory, SyncOutbox, Ticket, User
+from app.models import HubIssue, StatusHistory, SyncOutbox, Ticket, User
 from app.services.metrics.workbench import _IN_PROGRESS_STATUSES, _RESOLVED_STATUSES
 
 BEIJING_OFFSET_HOURS = 8
@@ -41,6 +41,7 @@ class DailyTotals:
     returned_to_ksm: int
     ksm_rejected: int
     supplemented: int
+    transferred_to_dev: int = 0
 
 
 @dataclass(slots=True, frozen=True)
@@ -52,6 +53,7 @@ class DailyByAssignee:
     returned_to_ksm: int = 0
     ksm_rejected: int = 0
     supplemented: int = 0
+    transferred_to_dev: int = 0
 
 
 @dataclass(slots=True, frozen=True)
@@ -95,6 +97,7 @@ def _bucket_get(
             "returned_to_ksm": 0,
             "ksm_rejected": 0,
             "supplemented": 0,
+            "transferred_to_dev": 0,
         }
     return buckets[user_id]
 
@@ -123,7 +126,17 @@ def _tickets_for_hub_ids(db: Session, hub_ids: set[int]) -> list[Ticket]:
         return []
     return list(
         db.scalars(
-            select(Ticket).where(Ticket.deleted_at.is_(None), Ticket.hub_issue_id.in_(hub_ids))
+            select(Ticket).where(
+                Ticket.deleted_at.is_(None),
+                or_(
+                    Ticket.hub_issue_id.in_(hub_ids),
+                    Ticket.id.in_(
+                        select(HubIssue.ticket_id).where(
+                            HubIssue.id.in_(hub_ids), HubIssue.deleted_at.is_(None)
+                        )
+                    ),
+                ),
+            )
         )
     )
 
@@ -131,39 +144,39 @@ def _tickets_for_hub_ids(db: Session, hub_ids: set[int]) -> list[Ticket]:
 def _completed_counts(
     db: Session, start: datetime, end: datetime
 ) -> tuple[int, dict[int | None, int]]:
-    released_ids = set(
+    hub_ids = set(
         db.scalars(
             select(StatusHistory.entity_id).where(
                 StatusHistory.entity_type == "hub_issue",
-                StatusHistory.to_status == "released",
+                StatusHistory.to_status.in_(("answered", "closed", "transferred_return")),
                 StatusHistory.changed_at >= start,
                 StatusHistory.changed_at < end,
             )
         )
     )
-    op_closed_ids = set(
-        db.scalars(
-            select(StatusHistory.entity_id).where(
-                StatusHistory.entity_type == "hub_issue",
-                StatusHistory.to_status == "closed",
-                StatusHistory.changed_by.like("op:%"),
-                StatusHistory.changed_at >= start,
-                StatusHistory.changed_at < end,
-            )
-        )
-    )
-    hub_ids = released_ids | op_closed_ids
     tickets = _tickets_for_hub_ids(db, hub_ids)
+    ticket_event_ids = set(
+        db.scalars(
+            select(StatusHistory.entity_id).where(
+                StatusHistory.entity_type == "ticket",
+                StatusHistory.to_status.in_(("answered", "closed", "transferred_return")),
+                StatusHistory.changed_at >= start,
+                StatusHistory.changed_at < end,
+            )
+        )
+    )
+    tickets.extend(
+        db.scalars(
+            select(Ticket).where(Ticket.id.in_(ticket_event_ids), Ticket.deleted_at.is_(None))
+        )
+    )
     historical_tickets = list(
         db.scalars(
             select(Ticket).where(
                 Ticket.deleted_at.is_(None),
-                Ticket.status == "closed",
+                Ticket.status.in_(("answered", "closed", "transferred_return")),
                 Ticket.actual_resolved_at >= start,
                 Ticket.actual_resolved_at < end,
-                Ticket.source_payload["_historical_completion"][
-                    "count_in_daily"
-                ].as_boolean(),
             )
         )
     )
@@ -191,6 +204,28 @@ def _reason_matched_counts(
     by_handler: dict[int | None, int] = {}
     for t in tickets:
         by_handler[t.handler_user_id] = by_handler.get(t.handler_user_id, 0) + 1
+    return len(tickets), by_handler
+
+
+def _dev_transfer_counts(db: Session, start: datetime, end: datetime):
+    hub_ids = set(
+        db.scalars(
+            select(StatusHistory.entity_id).where(
+                StatusHistory.entity_type == "hub_issue",
+                StatusHistory.changed_at >= start,
+                StatusHistory.changed_at < end,
+                or_(
+                    StatusHistory.reason == "转研发成功",
+                    StatusHistory.reason.like("转研发 webhook%成功%"),
+                    StatusHistory.reason.like("Linear%推送成功%"),
+                ),
+            )
+        )
+    )
+    tickets = _tickets_for_hub_ids(db, hub_ids)
+    by_handler = {}
+    for ticket in tickets:
+        by_handler[ticket.handler_user_id] = by_handler.get(ticket.handler_user_id, 0) + 1
     return len(tickets), by_handler
 
 
@@ -260,6 +295,7 @@ def compute_daily_dashboard(db: Session, *, date: str) -> DailyDashboard:
     supplemented_total, supplemented_by = _reason_matched_counts(
         db, start, end, reason_like="%补料回流%"
     )
+    dev_total, dev_by = _dev_transfer_counts(db, start, end)
 
     user_ids = {
         uid
@@ -269,6 +305,7 @@ def compute_daily_dashboard(db: Session, *, date: str) -> DailyDashboard:
             | set(returned_by)
             | set(rejected_by)
             | set(supplemented_by)
+            | set(dev_by)
         )
         if uid is not None
     }
@@ -294,6 +331,10 @@ def compute_daily_dashboard(db: Session, *, date: str) -> DailyDashboard:
         b = _bucket_get(buckets, uid, names.get(uid, _UNASSIGNED_NAME) if uid else _UNASSIGNED_NAME)
         b["supplemented"] += cnt
 
+    for uid, cnt in dev_by.items():
+        b = _bucket_get(buckets, uid, names.get(uid, _UNASSIGNED_NAME) if uid else _UNASSIGNED_NAME)
+        b["transferred_to_dev"] += cnt
+
     by_assignee = [
         DailyByAssignee(
             user_id=b["user_id"],
@@ -303,6 +344,7 @@ def compute_daily_dashboard(db: Session, *, date: str) -> DailyDashboard:
             returned_to_ksm=b["returned_to_ksm"],
             ksm_rejected=b["ksm_rejected"],
             supplemented=b["supplemented"],
+            transferred_to_dev=b["transferred_to_dev"],
         )
         for b in sorted(
             buckets.values(),
@@ -330,6 +372,7 @@ def compute_daily_dashboard(db: Session, *, date: str) -> DailyDashboard:
             returned_to_ksm=returned_total,
             ksm_rejected=rejected_total,
             supplemented=supplemented_total,
+            transferred_to_dev=dev_total,
         ),
         lifetime=_lifetime_totals(db),
         by_assignee=by_assignee,

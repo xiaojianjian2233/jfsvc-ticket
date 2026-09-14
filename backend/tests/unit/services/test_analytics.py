@@ -1,5 +1,7 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+
+from freezegun import freeze_time
 
 from app.models import Ticket, User
 from app.services.metrics.analytics import compute_ticket_analytics
@@ -69,13 +71,14 @@ def test_by_module_and_assignee(db_session):
 
 
 def test_by_module_overdue_count(db_session):
-    # 一条超期(50>40) + 一条达标(6<=8)，同一模块
+    # 只统计仍待处理且接收超过40小时的Bug；已完成不算超期。
     _tk(
         db_session,
         module="收票管理",
         predicted_type="Bug_fix",
         handle_hours=Decimal("50"),
         sla_standard_hours=Decimal("40"),
+        status="processing",
     )
     _tk(
         db_session,
@@ -89,6 +92,32 @@ def test_by_module_overdue_count(db_session):
     m = next(x for x in r.by_module if x["module"] == "收票管理")
     assert m["total"] == 2
     assert m["overdue_count"] == 1
+
+
+@freeze_time("2026-09-14 04:00:00")
+def test_pending_and_overdue_thresholds(db_session):
+    now = datetime(2026, 9, 14, 4, tzinfo=UTC)
+    for kind, status, hours in [
+        ("Operation", "processing", 24),
+        ("Operation", "reviewing", 25),
+        ("Bug_fix", "supplementing", 40),
+        ("Demand", "exception", 41),
+        ("Operation", "answered", 80),
+        ("Bug_fix", "closed", 80),
+        ("Demand", "transferred_return", 80),
+        ("Internal_task", "processing", 80),
+        ("Operation", "received", 80),
+    ]:
+        _tk(
+            db_session, predicted_type=kind, status=status, received_at=now - timedelta(hours=hours)
+        )
+    db_session.commit()
+    result = compute_ticket_analytics(db_session)
+    assert result.kpi.pending_count == 5
+    assert result.kpi.pending_operation_count == 2
+    assert result.kpi.pending_dev_count == 2
+    assert result.kpi.completed_count == 3
+    assert result.kpi.overdue_count == 2
 
 
 def test_trend_by_month(db_session):

@@ -46,28 +46,23 @@ function DailyDashboardPageInner() {
 
 type DailyDashboardData = Awaited<ReturnType<typeof api.get<"/api/metrics/daily-dashboard">>>;
 const SERIES = [
+  { key: "transferred_to_dev", label: "转研发数量", name: "转研发", color: "#5868aa", tone: "blue", note: "当日成功转研发的工单，按工单去重" },
   { key: "received", label: "当日接收", name: "接收", color: "#3d6bb3", tone: "blue", note: "所选日期接收的工单" },
   { key: "completed", label: "当日完成", name: "完成", color: "#177e83", tone: "teal", note: "所选日期完成的工单" },
   { key: "returned_to_ksm", label: "退回KSM", name: "退回KSM", color: "#c98a1e", tone: "amber", note: "当日退回来源系统" },
   { key: "ksm_rejected", label: "KSM打回", name: "KSM打回", color: "#b04a4a", tone: "rose", note: "当日被来源系统打回" },
   { key: "supplemented", label: "补充资料", name: "补充资料", color: "#7a5ba6", tone: "neutral", note: "当日收到补充资料" },
 ] as const;
-const LIFETIME = [
-  { key: "total", label: "问题总数", tone: "blue" },
-  { key: "in_progress", label: "处理中总数", tone: "amber" },
-  { key: "completed", label: "处理完成总数", tone: "teal" },
-  { key: "returned_to_ksm_total", label: "累计客户驳回次数", tone: "rose" },
-] as const;
 
 function DailyDashboardBody({ data }: { data: DailyDashboardData }) {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<(typeof SERIES)[number]["key"]>("received");
-  const byAssignee = [...(data.by_assignee ?? [])].filter(row => row.name.toLowerCase().includes(search.trim().toLowerCase())).sort((a, b) => b[sort] - a[sort] || a.name.localeCompare(b.name, "zh-CN"));
+  const byAssignee = [...(data.by_assignee ?? [])].filter(row => row.name.toLowerCase().includes(search.trim().toLowerCase())).sort((a, b) => (b[sort] ?? 0) - (a[sort] ?? 0) || a.name.localeCompare(b.name, "zh-CN"));
   return <div className="space-y-7">
     <section>
       <SectionTitle title="当日统计" note={`${data.date} · 各项按对应事件计数，完成与接收不一定来自同一批工单`} />
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
-        {SERIES.map(s => <MetricCard key={s.key} label={s.label} value={data.totals[s.key].toLocaleString()} note={s.note} tone={s.tone} testId={`kpi-${s.key}`} />)}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        {SERIES.map(s => <MetricCard key={s.key} label={s.label} value={(data.totals[s.key] ?? 0).toLocaleString()} note={s.note} tone={s.tone} testId={`kpi-${s.key}`} />)}
       </div>
     </section>
     <section className={dashboardPanel}>
@@ -94,14 +89,10 @@ function DailyDashboardBody({ data }: { data: DailyDashboardData }) {
         <div className="mt-5 overflow-x-auto rounded-xl border border-hub-borderLight">
           <table className="w-full min-w-[580px] text-xs" aria-label="处理人数据明细">
             <thead className="bg-slate-50 text-hub-textSecondary"><tr><th scope="col" className="p-3 text-left font-medium">处理人</th>{SERIES.map(s => <th scope="col" key={s.key} className="p-3 text-right font-medium">{s.name}</th>)}</tr></thead>
-            <tbody>{byAssignee.map(row => <tr key={row.user_id ?? "unassigned"} className="border-t border-hub-borderLight hover:bg-slate-50"><th scope="row" className="p-3 text-left font-medium">{row.name}</th>{SERIES.map(s => <td key={s.key} className="p-3 text-right tabular-nums">{row[s.key].toLocaleString()}</td>)}</tr>)}</tbody>
+            <tbody>{byAssignee.map(row => <tr key={row.user_id ?? "unassigned"} className="border-t border-hub-borderLight hover:bg-slate-50"><th scope="row" className="p-3 text-left font-medium">{row.name}</th>{SERIES.map(s => <td key={s.key} className="p-3 text-right tabular-nums">{(row[s.key] ?? 0).toLocaleString()}</td>)}</tr>)}</tbody>
           </table>
         </div>
       </>}
-    </section>
-    <section>
-      <SectionTitle title="累计统计" note="当前全量数据 · 不随上方日期切换，各状态指标不可直接相加" />
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">{LIFETIME.map(s => <MetricCard key={s.key} label={s.label} value={data.lifetime[s.key].toLocaleString()} note={s.key === "returned_to_ksm_total" ? "历史驳回事件次数，可重复计数" : "当前全量工单状态"} tone={s.tone} testId={`lifetime-${s.key}`} />)}</div>
     </section>
   </div>;
 }

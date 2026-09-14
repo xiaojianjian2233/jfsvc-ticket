@@ -109,10 +109,8 @@ describe("DailyDashboardPage", () => {
     expect(screen.getByTestId("kpi-returned_to_ksm")).toHaveTextContent("2");
     expect(screen.getByTestId("kpi-ksm_rejected")).toHaveTextContent("1");
 
-    expect(screen.getByTestId("lifetime-total")).toHaveTextContent("500");
-    expect(screen.getByTestId("lifetime-in_progress")).toHaveTextContent("60");
-    expect(screen.getByTestId("lifetime-completed")).toHaveTextContent("420");
-    expect(screen.getByTestId("lifetime-returned_to_ksm_total")).toHaveTextContent("30");
+    expect(screen.queryByText("累计统计")).not.toBeInTheDocument();
+    expect(screen.getByTestId("kpi-transferred_to_dev")).toHaveTextContent("0");
 
     expect(screen.getByTestId("by-assignee-bar-chart")).toBeInTheDocument();
 

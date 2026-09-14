@@ -180,6 +180,11 @@ def _build_description(db: Session, hub: HubIssue) -> str:
 
 def _sync_tickets_dev_stage(db: Session, hub: HubIssue) -> None:
     """推送 Linear 成功后，同步将关联工单的处理环节流转为「研发处理」。"""
+    StatusHistoryRepository(db).record(
+        entity_type="hub_issue", entity_id=hub.id,
+        from_status=hub.status, to_status="dev_transferred",
+        changed_by="system:dev_transfer", reason="转研发成功",
+    )
     tickets = (
         db.query(Ticket)
         .filter(

@@ -63,6 +63,41 @@ def test_received_counts_by_day_and_handler(db_session):
     assert r2.totals.received == 1
 
 
+def test_dev_transfer_counts_success_once_per_ticket_and_beijing_day(db_session):
+    hub = _hub(db_session, type="Bug_fix")
+    _tk(db_session, hub_issue_id=hub.id)
+    for hour, reason in [(3, "转研发成功"), (4, "转研发成功"), (17, "转研发成功")]:
+        db_session.add(
+            StatusHistory(
+                entity_type="hub_issue",
+                entity_id=hub.id,
+                from_status="processing",
+                to_status="processing",
+                changed_by="system:dev_transfer",
+                reason=reason,
+                changed_at=datetime(2026, 9, 1, hour, tzinfo=UTC),
+            )
+        )
+    other = _hub(db_session, type="Demand")
+    _tk(db_session, hub_issue_id=other.id)
+    db_session.add(
+        StatusHistory(
+            entity_type="hub_issue",
+            entity_id=other.id,
+            from_status="created",
+            to_status="pending",
+            changed_by="agent:linear_push",
+            reason="转研发 webhook 推送失败",
+            changed_at=datetime(2026, 9, 1, 3, tzinfo=UTC),
+        )
+    )
+    db_session.commit()
+    result = compute_daily_dashboard(db_session, date="2026-09-01")
+    assert result.totals.transferred_to_dev == 1
+    assert sum(row.transferred_to_dev for row in result.by_assignee) == 1
+    assert compute_daily_dashboard(db_session, date="2026-09-02").totals.transferred_to_dev == 1
+
+
 def test_completed_counts_released_and_op_closed(db_session):
     db_session.add(User(id=1, feishu_uid="ou_a", name="甲", role="assignee"))
     db_session.commit()
@@ -101,8 +136,8 @@ def test_completed_counts_released_and_op_closed(db_session):
     db_session.commit()
 
     r = compute_daily_dashboard(db_session, date="2026-09-01")
-    assert r.totals.completed == 2
-    assert next(a for a in r.by_assignee if a.name == "甲").completed == 2
+    assert r.totals.completed == 1
+    assert next(a for a in r.by_assignee if a.name == "甲").completed == 1
     assert t1.hub_issue_id == hub1.id and t2.hub_issue_id == hub2.id
 
 

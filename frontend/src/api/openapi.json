@@ -1392,29 +1392,10 @@
       },
       "DailyByAssigneeOut": {
         "properties": {
-          "completed": {
-            "title": "Completed",
-            "type": "integer"
-          },
-          "ksm_rejected": {
-            "title": "Ksm Rejected",
-            "type": "integer"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "received": {
-            "title": "Received",
-            "type": "integer"
-          },
-          "returned_to_ksm": {
-            "title": "Returned To Ksm",
-            "type": "integer"
-          },
-          "supplemented": {
-            "title": "Supplemented",
-            "type": "integer"
+          "transferred_to_dev": {
+            "type": "integer",
+            "title": "Transferred To Dev",
+            "default": 0
           },
           "user_id": {
             "anyOf": [
@@ -1426,8 +1407,33 @@
               }
             ],
             "title": "User Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "received": {
+            "type": "integer",
+            "title": "Received"
+          },
+          "completed": {
+            "type": "integer",
+            "title": "Completed"
+          },
+          "returned_to_ksm": {
+            "type": "integer",
+            "title": "Returned To Ksm"
+          },
+          "ksm_rejected": {
+            "type": "integer",
+            "title": "Ksm Rejected"
+          },
+          "supplemented": {
+            "type": "integer",
+            "title": "Supplemented"
           }
         },
+        "type": "object",
         "required": [
           "user_id",
           "name",
@@ -1437,8 +1443,7 @@
           "ksm_rejected",
           "supplemented"
         ],
-        "title": "DailyByAssigneeOut",
-        "type": "object"
+        "title": "DailyByAssigneeOut"
       },
       "DailyDashboardOut": {
         "properties": {
@@ -1471,27 +1476,33 @@
       },
       "DailyTotalsOut": {
         "properties": {
-          "completed": {
-            "title": "Completed",
-            "type": "integer"
-          },
-          "ksm_rejected": {
-            "title": "Ksm Rejected",
-            "type": "integer"
+          "transferred_to_dev": {
+            "type": "integer",
+            "title": "Transferred To Dev",
+            "default": 0
           },
           "received": {
-            "title": "Received",
-            "type": "integer"
+            "type": "integer",
+            "title": "Received"
+          },
+          "completed": {
+            "type": "integer",
+            "title": "Completed"
           },
           "returned_to_ksm": {
-            "title": "Returned To Ksm",
-            "type": "integer"
+            "type": "integer",
+            "title": "Returned To Ksm"
+          },
+          "ksm_rejected": {
+            "type": "integer",
+            "title": "Ksm Rejected"
           },
           "supplemented": {
-            "title": "Supplemented",
-            "type": "integer"
+            "type": "integer",
+            "title": "Supplemented"
           }
         },
+        "type": "object",
         "required": [
           "received",
           "completed",
@@ -1499,8 +1510,7 @@
           "ksm_rejected",
           "supplemented"
         ],
-        "title": "DailyTotalsOut",
-        "type": "object"
+        "title": "DailyTotalsOut"
       },
       "DashboardOut": {
         "properties": {
@@ -4473,6 +4483,47 @@
       },
       "KpiOut": {
         "properties": {
+          "pending_count": {
+            "type": "integer",
+            "title": "Pending Count",
+            "default": 0
+          },
+          "completed_count": {
+            "type": "integer",
+            "title": "Completed Count",
+            "default": 0
+          },
+          "pending_operation_count": {
+            "type": "integer",
+            "title": "Pending Operation Count",
+            "default": 0
+          },
+          "pending_dev_count": {
+            "type": "integer",
+            "title": "Pending Dev Count",
+            "default": 0
+          },
+          "overdue_count": {
+            "type": "integer",
+            "title": "Overdue Count",
+            "default": 0
+          },
+          "rejected_count": {
+            "type": "integer",
+            "title": "Rejected Count",
+            "default": 0
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "by_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Type"
+          },
           "avg_handle_hours": {
             "anyOf": [
               {
@@ -4483,17 +4534,6 @@
               }
             ],
             "title": "Avg Handle Hours"
-          },
-          "by_type": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "title": "By Type",
-            "type": "object"
-          },
-          "sla_base": {
-            "title": "Sla Base",
-            "type": "integer"
           },
           "sla_rate": {
             "anyOf": [
@@ -4506,9 +4546,13 @@
             ],
             "title": "Sla Rate"
           },
-          "total": {
-            "title": "Total",
-            "type": "integer"
+          "sla_base": {
+            "type": "integer",
+            "title": "Sla Base"
+          },
+          "unassigned_count": {
+            "type": "integer",
+            "title": "Unassigned Count"
           },
           "unassigned_avg_hours": {
             "anyOf": [
@@ -4520,12 +4564,9 @@
               }
             ],
             "title": "Unassigned Avg Hours"
-          },
-          "unassigned_count": {
-            "title": "Unassigned Count",
-            "type": "integer"
           }
         },
+        "type": "object",
         "required": [
           "total",
           "by_type",
@@ -4535,8 +4576,7 @@
           "unassigned_count",
           "unassigned_avg_hours"
         ],
-        "title": "KpiOut",
-        "type": "object"
+        "title": "KpiOut"
       },
       "KsmNode": {
         "description": "一个 KSM 处理节点（前端处理节点时间轴用）。",

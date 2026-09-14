@@ -3240,6 +3240,7 @@ export interface components {
         };
         /** DailyByAssigneeOut */
         DailyByAssigneeOut: {
+            transferred_to_dev?: number;
             /** Completed */
             completed: number;
             /** Ksm Rejected */
@@ -3266,6 +3267,7 @@ export interface components {
         };
         /** DailyTotalsOut */
         DailyTotalsOut: {
+            transferred_to_dev?: number;
             /** Completed */
             completed: number;
             /** Ksm Rejected */
@@ -4273,6 +4275,12 @@ export interface components {
         };
         /** KpiOut */
         KpiOut: {
+            pending_count?: number;
+            completed_count?: number;
+            pending_operation_count?: number;
+            pending_dev_count?: number;
+            overdue_count?: number;
+            rejected_count?: number;
             /** Avg Handle Hours */
             avg_handle_hours: number | null;
             /** By Type */
