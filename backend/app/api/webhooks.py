@@ -43,6 +43,7 @@ from app.services.agents.classify import classify_ticket
 from app.services.agents.escalation_classify import classify_escalation_ticket
 from app.services.agents.split import execute_split_for_ticket as execute_split_for_ticket
 from app.services.agents.triage import run_ticket_triage
+from app.services.agents.vision_extract import extract_ticket_attachments
 from app.services.hub_issues.creator import create_hub_issue_for_ticket_auto
 from app.services.ingest.escalation_ingester import EscalationIngester
 from app.services.ingest.escalation_ingester import IngestError as EscalationIngestError
@@ -193,6 +194,8 @@ def run_post_ingest_agents(ticket_id: int) -> None:
 
     generate_initial_ticket_answer(ticket_id)
     settings = get_settings()
+    if settings.vision_enabled:
+        extract_ticket_attachments(ticket_id)
 
     tri = run_ticket_triage(ticket_id)
     if tri is None:
@@ -220,6 +223,8 @@ def run_escalation_agents(ticket_id: int) -> None:
 
     generate_initial_ticket_answer(ticket_id)
     settings = get_settings()
+    if settings.vision_enabled:
+        extract_ticket_attachments(ticket_id)
     cls = classify_escalation_ticket(ticket_id)
     if cls is None:
         return

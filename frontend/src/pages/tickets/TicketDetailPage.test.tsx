@@ -94,6 +94,9 @@ function renderTicket(
     ...(customHandlers ?? [
       http.get("*/api/admin/product-lines", () => HttpResponse.json([])),
       http.get("*/api/hub-issues/catalog/modules", () => HttpResponse.json([])),
+      http.get("*/api/hub-issues/catalog/module-owner", () =>
+        HttpResponse.json({ product_line_code: "pl-test", module: "m-test", user_id: 42, user_name: "测试责任人" }),
+      ),
     ]),
     http.get("*/api/admin/users", () => HttpResponse.json([])),
     http.patch("*/api/hub-issues/:hub_issue_id/subtask", async ({ request, params }) => {
@@ -469,25 +472,110 @@ describe("TicketDetailPage 出站回写失败横幅", () => {
     expect(screen.queryByText(/最大 2000 字符 · 保存随页面「确认」按钮入库/)).not.toBeInTheDocument();
   });
 
-  it("未分类工单可连续调用 AI 两次且不改变任务状态", async () => {
-    let calls = 0;
-    let mutations = 0;
-    renderTicket({ status: "received", predicted_type: null, product_line_code: null, module: null },
-      undefined, [
-        http.post("*/api/tickets/10/generate-ai-answer", () => {
-          calls += 1;
-          return HttpResponse.json({ answered: true, reply_content: `AI草稿${calls}` });
-        }),
-        http.patch("*/api/hub-issues/:id/subtask", () => { mutations += 1; return HttpResponse.json({}); }),
-      ]);
-    fireEvent.click(await screen.findByRole("button", { name: "AI作答" }));
-    await waitFor(() => expect(calls).toBe(1));
-    await waitFor(() => expect(screen.getByRole("button", { name: "AI作答" })).not.toBeDisabled());
-    fireEvent.click(screen.getByRole("button", { name: "AI作答" }));
-    await waitFor(() => expect(calls).toBe(2));
-    expect(mutations).toBe(0);
-    expect(screen.getByDisplayValue("选择类型")).toBeInTheDocument();
-    expect(screen.queryByRole("cell", { name: "处理中" })).not.toBeInTheDocument();
+  it("子任务操作列已移除修改说明按钮；缺少字段时点击确认在页面顶部提示补充缺失字段，补齐后确认按钮置灰且状态变为处理中", async () => {
+    renderTicket(
+      {
+        status: "in_progress",
+        predicted_type: null,
+        product_line_code: null,
+        module: null,
+      },
+      undefined,
+      [
+        http.get("*/api/admin/product-lines", () =>
+          HttpResponse.json([{ code: "pl-test", name: "测试分类", is_active: true }]),
+        ),
+        http.get("*/api/hub-issues/catalog/modules", () =>
+          HttpResponse.json([{ code: "m-test", name: "测试模块" }]),
+        ),
+      ],
+    );
+
+    // 1. 验证操作列按钮为【AI作答】
+    const confirmBtn = await screen.findByRole("button", { name: "AI作答" });
+    expect(confirmBtn).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "修改说明" })).not.toBeInTheDocument();
+
+    // 2. 字段为空时点击 AI作答
+    expect(confirmBtn).not.toBeDisabled();
+    fireEvent.click(confirmBtn);
+
+    // 页面顶部提示缺失字段
+    expect(
+      await screen.findByText(/请先补充.*缺失字段后再进行AI作答/),
+    ).toBeInTheDocument();
+
+    // 3. 选择任务类型、产品分类、问题模块
+    const typeSelect = screen.getByDisplayValue("选择类型");
+    fireEvent.change(typeSelect, { target: { value: "Operation" } });
+
+    const plcTrigger = screen.getByLabelText("子任务产品分类");
+    fireEvent.click(plcTrigger);
+    const plcOption = await screen.findByRole("button", { name: "测试分类" });
+    fireEvent.click(plcOption);
+
+    const moduleTrigger = await screen.findByLabelText("子任务问题模块");
+    fireEvent.click(moduleTrigger);
+    const moduleOption = await screen.findByRole("button", { name: "测试模块" });
+    fireEvent.click(moduleOption);
+
+    // 4. 再次点击 AI作答
+    fireEvent.click(confirmBtn);
+
+    // AI 作答完成后按钮变成【人工完善】
+    const manualBtn = await screen.findByRole("button", { name: "人工完善" });
+    expect(manualBtn).toBeInTheDocument();
+
+    // 任务状态列更新为「处理中」
+    expect(screen.getByRole("cell", { name: "处理中" })).toBeInTheDocument();
+  });
+
+  it("子任务列表中选择产品分类与问题模块后，任务处理人即时自动变更为指定责任人", async () => {
+    renderTicket(
+      {
+        id: 10,
+        status: "in_progress",
+        predicted_type: "Operation",
+        product_line_code: null,
+        module: null,
+        assigned_user_name: "原处理人",
+      },
+      undefined,
+      [
+        http.get("*/api/admin/product-lines", () =>
+          HttpResponse.json([{ code: "pl-test", name: "数电票", is_active: true }]),
+        ),
+        http.get("*/api/hub-issues/catalog/modules", () =>
+          HttpResponse.json([{ code: "m-test", name: "测试模块", is_active: true }]),
+        ),
+        http.get("*/api/hub-issues/catalog/module-owner", () =>
+          HttpResponse.json({
+            product_line_code: "pl-test",
+            module: "m-test",
+            user_id: 88,
+            user_name: "模块指定责任人",
+          }),
+        ),
+      ],
+    );
+
+    // 初始显示原处理人
+    expect((await screen.findAllByText("原处理人")).length).toBeGreaterThan(0);
+
+    // 1. 选择产品分类
+    const plcTrigger = screen.getByLabelText("子任务产品分类");
+    fireEvent.click(plcTrigger);
+    const plcOption = await screen.findByRole("button", { name: "数电票" });
+    fireEvent.click(plcOption);
+
+    // 2. 选择问题模块
+    const moduleTrigger = await screen.findByLabelText("子任务问题模块");
+    fireEvent.click(moduleTrigger);
+    const moduleOption = await screen.findByRole("button", { name: "测试模块" });
+    fireEvent.click(moduleOption);
+
+    // 3. 验证任务处理人自动变更为「模块指定责任人」
+    expect(await screen.findByText("模块指定责任人")).toBeInTheDocument();
   });
 
   it("子任务列表点击添加后仅新增一行，系统自动生成的第一行保持保留不被覆盖", async () => {
@@ -865,12 +953,12 @@ describe("TicketDetailPage 出站回写失败横幅", () => {
       const drawerTitle = await screen.findByText("维护知识库");
       expect(drawerTitle).toBeInTheDocument();
 
-      // 3. 在富文本录入框中输入解决方案并点击「提交并作答」
+      // 3. 在富文本录入框中输入解决方案并点击「作答并新增知识库」
       const editorBox = screen.getByRole("textbox", { name: "富文本知识内容" });
       editorBox.innerHTML = "已协助处理解绑成功";
       fireEvent.input(editorBox);
 
-      const saveBtn = screen.getByRole("button", { name: "提交并作答" });
+      const saveBtn = screen.getByRole("button", { name: "作答并新增知识库" });
       fireEvent.click(saveBtn);
 
       // 4. 验证抽屉关闭，且处理说明在单任务下不做问题拆分，直接显示关联任务的解决方案
@@ -1587,6 +1675,134 @@ describe("TicketDetailPage 出站回写失败横幅", () => {
       ).toBeGreaterThan(0);
       expect(screen.getByLabelText("处理环节：服务处理")).toBeInTheDocument();
       expect(transferDevBtn).not.toBeDisabled();
+    });
+
+    it("子任务列表隐藏【责任田人】列，且将【任务处理人】修改为【责任田责任人】", async () => {
+      renderTicket(
+        {
+          id: 501,
+          status: "in_progress",
+          predicted_type: "Operation",
+          product_line_code: "pl-test",
+          module: "m-test",
+          assigned_user_name: "客服小李",
+        },
+        undefined,
+        [
+          http.get("*/api/admin/product-lines", () =>
+            HttpResponse.json([{ code: "pl-test", name: "发票标准版", is_active: true }]),
+          ),
+          http.get("*/api/hub-issues/catalog/modules", () =>
+            HttpResponse.json([{ code: "m-test", name: "开票模块", is_active: true }]),
+          ),
+          http.get("*/api/hub-issues/catalog/module-owner", () =>
+            HttpResponse.json({
+              product_line_code: "pl-test",
+              module: "m-test",
+              user_id: 99,
+              user_name: "研发责任人张工",
+            }),
+          ),
+        ],
+      );
+
+      // 表头必须包含【责任田责任人】，且【责任田人】与【任务处理人】不出现
+      expect(await screen.findByRole("columnheader", { name: "责任田责任人" })).toBeInTheDocument();
+      expect(screen.queryByRole("columnheader", { name: "责任田人" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("columnheader", { name: "任务处理人" })).not.toBeInTheDocument();
+    });
+
+    it("维护知识库抽屉中点击【仅作答】按钮，内容回写至任务处理说明且不向知识库发送新增请求", async () => {
+      let kbPostCalled = false;
+      renderTicket(
+        {
+          id: 502,
+          status: "in_progress",
+          predicted_type: "Operation",
+          product_line_code: "pl-test",
+          module: "m-test",
+        },
+        undefined,
+        [
+          http.get("*/api/admin/product-lines", () =>
+            HttpResponse.json([{ code: "pl-test", name: "发票标准版", is_active: true }]),
+          ),
+          http.get("*/api/hub-issues/catalog/modules", () =>
+            HttpResponse.json([{ code: "m-test", name: "开票模块", is_active: true }]),
+          ),
+          http.post("*/api/knowledge-base", () => {
+            kbPostCalled = true;
+            return HttpResponse.json({ ok: true });
+          }),
+        ],
+      );
+
+      // 1. 点击子任务列表中「无方案，去完善」打开维护知识库抽屉
+      const enrichBtn = await screen.findByRole("button", { name: "无方案，去完善" });
+      fireEvent.click(enrichBtn);
+
+      const drawer = await screen.findByRole("dialog");
+      expect(drawer).toBeInTheDocument();
+
+      // 2. 抽屉底部存在【仅作答】按钮和【作答并新增知识库】按钮
+      const answerOnlyBtn = within(drawer).getByRole("button", { name: "仅作答" });
+      const submitAndAnswerBtn = within(drawer).getByRole("button", { name: "作答并新增知识库" });
+      expect(answerOnlyBtn).toBeInTheDocument();
+      expect(submitAndAnswerBtn).toBeInTheDocument();
+
+      // 3. 在富文本录入框中输入答复内容
+      const editorBox = within(drawer).getByRole("textbox", { name: "富文本知识内容" });
+      expect(editorBox).toBeInTheDocument();
+      editorBox.innerHTML = "已协助排查转单退回";
+      fireEvent.input(editorBox);
+
+      // 4. 点击【仅作答】
+      fireEvent.click(answerOnlyBtn);
+
+      // 5. 校验：知识库创建接口未被调用，抽屉关闭，任务解决方案已更新
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+      expect(kbPostCalled).toBe(false);
+      expect(screen.getAllByText(/已协助排查转单退回/).length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("子任务列表应用类点击「无方案，去完善」打开维护知识库面板时，自动带入当前任务的产品分类和问题模块", async () => {
+      renderTicket(
+        {
+          id: 503,
+          status: "in_progress",
+          predicted_type: "Operation",
+          product_line_code: "pl-test",
+          module: "m-test",
+        },
+        undefined,
+        [
+          http.get("*/api/admin/product-lines", () =>
+            HttpResponse.json([
+              { code: "pl-other", name: "其他产品线", is_active: true },
+              { code: "pl-test", name: "发票标准版", is_active: true },
+            ]),
+          ),
+          http.get("*/api/hub-issues/catalog/modules", () =>
+            HttpResponse.json([{ code: "m-test", name: "开票模块", is_active: true }]),
+          ),
+        ],
+      );
+
+      const enrichBtn = await screen.findByRole("button", { name: "无方案，去完善" });
+      fireEvent.click(enrichBtn);
+
+      const drawer = await screen.findByRole("dialog");
+      expect(drawer).toBeInTheDocument();
+
+      // 验证适用产品线自动带入 "发票标准版"（而非默认首项 "其他产品线"）
+      const plBtn = within(drawer).getByRole("button", { name: "知识库产品线" });
+      expect(plBtn).toHaveTextContent("发票标准版");
+
+      // 验证适用问题模块自动带入当前任务的问题模块
+      const modBtn = within(drawer).getByRole("button", { name: "知识库问题模块" });
+      expect(modBtn).toHaveTextContent(/开票模块|m-test/);
     });
   });
 });
