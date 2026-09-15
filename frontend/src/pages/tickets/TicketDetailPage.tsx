@@ -5,6 +5,7 @@
  * 部分需求（附件展示/处理说明编辑/处理附件上传/处理建议动作/子任务解决方案/操作记录/确认动作）
  * 后端暂无数据源 → 搭 UI 骨架 + 占位「待后端支持」，结构就位后续接后端只补数据。
  */
+import { API_BASE } from "@/api/base";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -3853,67 +3854,30 @@ function SubTicketList({
 
   const handleAiAnswer = async (
     key: string | number,
-    rowTitle: string,
-    st: { type?: string; product_line_code?: string; module?: string; solution?: string },
+    _rowTitle: string,
+    _st: { type?: string; product_line_code?: string; module?: string; solution?: string },
   ) => {
-    const missing: string[] = [];
-    if (!st.type?.trim()) missing.push("任务类型");
-    if (!st.product_line_code?.trim()) missing.push("产品分类");
-    if (!st.module?.trim()) missing.push("问题模块");
-
-    if (missing.length > 0) {
-      const msg = `请先补充${missing.join("、")}缺失字段后再进行AI作答`;
-      if (onToast) {
-        onToast(msg, "warning");
-      } else {
-        setConfirmToast(msg);
-        setTimeout(() => setConfirmToast(null), 3500);
-      }
+    if (aiStatusMap[key] === "loading") return;
+    if (typeof key !== "number" && key !== "self") {
+      onToast?.("请先保存新增子任务，再进行 AI 作答", "warning");
       return;
     }
-
     setAiStatusMap((prev) => ({ ...prev, [key]: "loading" as const }));
-    // 点击AI 作答后，任务状态从【待确认】变成【处理中】
-    updateRow(key, { status: "processing" });
-
     try {
-      if (typeof key === "number") {
-        await patchByPath(
-          "/api/hub-issues/{hub_issue_id}/subtask",
-          { hub_issue_id: key },
-          {
-            type: st.type,
-            product_line_code: st.product_line_code,
-            module: st.module,
-          },
-        );
-        const res: any = await postByPath(
-          "/api/hub-issues/{hub_issue_id}/generate-ai-answer" as any,
-          { hub_issue_id: key },
-          {} as any,
-        );
-        if (res?.reply_content) {
-          const newSol = res.reply_content;
-          updateRow(key, { solution: newSol, confirmed: true, status: "processing" });
-        } else {
-          updateRow(key, { confirmed: true, status: "processing" });
-        }
-        void qc.invalidateQueries({ queryKey: ["ticket-subtasks", ticketId] });
-        void qc.invalidateQueries({ queryKey: ["ticket-detail", ticketId] });
-        void qc.invalidateQueries({ queryKey: ["hub-issues"] });
-      } else {
-        handleConfirmRow(key, rowTitle, st);
-        updateRow(key, { status: "processing" });
-        await new Promise((r) => setTimeout(r, 600));
-      }
-      if (onToast) onToast("AI作答已完成", "success");
+      const path = typeof key === "number"
+        ? "/api/hub-issues/{hub_issue_id}/generate-ai-answer"
+        : "/api/tickets/{ticket_id}/generate-ai-answer";
+      const params = typeof key === "number" ? { hub_issue_id: key } : { ticket_id: ticketId };
+      const res: any = await postByPath(path as any, params as any, {} as any);
+      if (!res?.reply_content) throw new Error("AI 未生成答复，请稍后重试");
+      updateRow(key, { solution: res.reply_content });
+      void qc.invalidateQueries({ queryKey: ["ticket-subtasks", ticketId] });
+      void qc.invalidateQueries({ queryKey: ["ticket-detail", ticketId] });
+      onToast?.("AI 草稿已生成，请核对后提交", "success");
     } catch (err: any) {
-      console.warn("AI作答接口异常或无结果", err);
-      updateRow(key, { status: "processing" });
-      if (onToast) onToast(hubErrMsg(err) || "AI作答返回未生成默认方案，请人工完善", "warning");
+      onToast?.(hubErrMsg(err) || "AI 作答失败，请稍后重试", "warning");
     } finally {
-      // 不管是否有结果返回解决方案，在收到接口返回后，按钮都变成【人工完善】
-      setAiStatusMap((prev) => ({ ...prev, [key]: "done" as const }));
+      setAiStatusMap((prev) => ({ ...prev, [key]: "idle" as const }));
     }
   };
 
@@ -4306,6 +4270,7 @@ function SubTicketList({
                             AI作答中...
                           </span>
                         ) : currentAiStatus === "done" ? (
+                          <>
                           <button
                             type="button"
                             aria-label="人工完善"
@@ -4324,6 +4289,12 @@ function SubTicketList({
                           >
                             人工完善
                           </button>
+                          <button type="button" aria-label="AI作答" disabled={!canEdit}
+                            onClick={() => handleAiAnswer(rowKey, rowTitle, st)}
+                            className="font-medium text-[#6085e7] hover:underline cursor-pointer disabled:opacity-50">
+                            AI作答
+                          </button>
+                          </>
                         ) : (
                           <button
                             type="button"
@@ -4646,6 +4617,7 @@ function SubTicketList({
                             AI作答中...
                           </span>
                         ) : currentAiStatus === "done" ? (
+                          <>
                           <button
                             type="button"
                             aria-label="人工完善"
@@ -4664,6 +4636,12 @@ function SubTicketList({
                           >
                             人工完善
                           </button>
+                          <button type="button" aria-label="AI作答" disabled={!canEditThisRow}
+                            onClick={() => handleAiAnswer(rowKey, rowTitle, st)}
+                            className="font-medium text-[#6085e7] hover:underline cursor-pointer disabled:opacity-50">
+                            AI作答
+                          </button>
+                          </>
                         ) : (
                           <button
                             type="button"
@@ -4946,6 +4924,7 @@ function SubTicketList({
                             AI作答中...
                           </span>
                         ) : currentAiStatus === "done" ? (
+                          <>
                           <button
                             type="button"
                             aria-label="人工完善"
@@ -4964,6 +4943,12 @@ function SubTicketList({
                           >
                             人工完善
                           </button>
+                          <button type="button" aria-label="AI作答" disabled={!canEdit}
+                            onClick={() => handleAiAnswer(draftKey, rowTitle, st)}
+                            className="font-medium text-[#6085e7] hover:underline cursor-pointer disabled:opacity-50">
+                            AI作答
+                          </button>
+                          </>
                         ) : (
                           <button
                             type="button"
@@ -5452,7 +5437,7 @@ function AddSubTaskModal({
 
 // 后端代理端点需 Bearer 鉴权，浏览器原生 <img src>/<a href> 请求带不了 token（→ 401 裂图）。
 // 故对 proxied 附件用带鉴权的 fetch 拉字节，转 blob: URL 供 <img>/下载使用。
-const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
+
 
 function useAuthedBlob(url: string, enabled: boolean): { blobUrl: string | null; error: boolean } {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);

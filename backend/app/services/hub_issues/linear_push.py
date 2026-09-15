@@ -178,13 +178,14 @@ def _build_description(db: Session, hub: HubIssue) -> str:
     return "\n\n".join(sections).strip()
 
 
-def _sync_tickets_dev_stage(db: Session, hub: HubIssue) -> None:
+def _sync_tickets_dev_stage(db: Session, hub: HubIssue, *, record_transfer: bool = True) -> None:
     """推送 Linear 成功后，同步将关联工单的处理环节流转为「研发处理」。"""
-    StatusHistoryRepository(db).record(
-        entity_type="hub_issue", entity_id=hub.id,
-        from_status=hub.status, to_status="dev_transferred",
-        changed_by="system:dev_transfer", reason="转研发成功",
-    )
+    if record_transfer:
+        StatusHistoryRepository(db).record(
+            entity_type="hub_issue", entity_id=hub.id,
+            from_status=hub.status, to_status="dev_transferred",
+            changed_by="system:dev_transfer", reason="转研发成功",
+        )
     tickets = (
         db.query(Ticket)
         .filter(
@@ -290,6 +291,11 @@ def push_hub_issue_to_linear(
                 hub_issue_id=hub_issue_id,
                 linear_identifier=hub.linear_identifier,
             )
+            # 已经推送过：将可能被误重置为 draft/created 的状态纠偏回 processing 并对齐环节
+            if hub.status in ("draft", "created"):
+                hub.status = "processing"
+                _sync_tickets_dev_stage(db, hub, record_transfer=False)
+                db.commit()
             return None
         # creator 毕业时已 hub-dedup 合并 → 不重复查/推
         if hub.superseded_by_hub_issue_id is not None:

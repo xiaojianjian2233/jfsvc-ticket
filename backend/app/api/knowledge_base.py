@@ -125,25 +125,29 @@ def create_knowledge_item(
     """创建知识库条目：默认状态为 pending_review (待审核)，编号按规则生成。"""
     repo = KnowledgeBaseRepository(db)
 
-    # 确定创建人：若从工单详情页发起且指定了工单处理人姓名，优先使用；
-    # 若传入了 ticket_id 则尝试反查工单处理人；否则回落当前操作人
+    # 确定创建人：若从工单发起，取该工单的处理人（handler_user_id）；
+    # 若工单无处理人或未关联工单，则取当前登录操作人；绝不取责任田责任人（assigned_user_id）
     effective_creator = (body.created_by or "").strip()
     creator_user_id: int | None = user.user_id
 
     if body.ticket_id is not None:
         t = db.get(Ticket, body.ticket_id)
-        if t is not None and not effective_creator:
+        if t is not None:
             from app.models import User
 
-            handler_id = t.handler_user_id or t.assigned_user_id
+            handler_id = t.handler_user_id
             if handler_id:
                 hu = db.get(User, handler_id)
                 if hu and hu.name:
                     effective_creator = hu.name
                     creator_user_id = hu.id
+            else:
+                effective_creator = user.name or "系统用户"
+                creator_user_id = user.user_id
 
     if not effective_creator:
         effective_creator = user.name or "系统用户"
+        creator_user_id = user.user_id
 
     item = repo.create(
         title=body.title,

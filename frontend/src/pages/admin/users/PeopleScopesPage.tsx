@@ -11,6 +11,7 @@ import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, getByPath, postByPath, deleteByPath, ApiError } from "@/api/client";
+import { API_BASE } from "@/api/base";
 import type { paths } from "@/api/types";
 import { AdminTabs } from "../AdminTabs";
 import { FeishuSyncDialog } from "./FeishuSyncDialog";
@@ -860,9 +861,8 @@ function ScopesCard({
 
 /** PATCH helper — api client lacks a typed patch; raw fetch with auth. */
 async function fetchPatch(path: string, body: unknown): Promise<unknown> {
-  const base = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
   const token = localStorage.getItem("auth_token");
-  const resp = await fetch(`${base}${path}`, {
+  const resp = await fetch(`${API_BASE}${path}`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",

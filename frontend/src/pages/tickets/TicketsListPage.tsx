@@ -855,17 +855,8 @@ export function TicketsListPage() {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   }, []);
 
-  const isGreenVip = (serviceLevel?: string | null) => {
-    if (!serviceLevel) return false;
-    return (
-      serviceLevel.includes("绿色战略") ||
-      serviceLevel.includes("战略客户") ||
-      serviceLevel.includes("绿色通道")
-    );
-  };
-
   const greenVipCount = useMemo(
-    () => rawItems.filter((t) => isGreenVip(t.service_level)).length,
+    () => rawItems.filter((t) => t.service_level && t.service_level.includes("绿色战略")).length,
     [rawItems],
   );
 
@@ -897,7 +888,7 @@ export function TicketsListPage() {
     }
 
     if (quickTag === "green_vip") {
-      list = list.filter((t) => isGreenVip(t.service_level));
+      list = list.filter((t) => t.service_level && t.service_level.includes("绿色战略"));
     } else if (quickTag === "today") {
       list = list.filter((t) => t.created_at && t.created_at.slice(0, 10) === todayStr);
     } else if (quickTag === "overdue") {

@@ -286,7 +286,9 @@ def list_tickets(
     source_ticket_q: str | None = Query(None),  # 来源工单号/本系统编号子串搜索（全表）
     op_status: str | None = Query(None),  # 处理状态筛选（所挂 hub_issue 的 op_status）
     op_statuses: list[str] | None = Query(None),  # 处理状态多选筛选
-    process_stages: list[str] | None = Query(None),  # 处理环节多选筛选（服务处理 / 研发处理 / 完成）
+    process_stages: list[str] | None = Query(
+        None
+    ),  # 处理环节多选筛选（服务处理 / 研发处理 / 完成）
     received_from: date | None = Query(None),  # 提单时间起
     received_to: date | None = Query(None),  # 提单时间止
     created_from: date | None = Query(None),  # 创建时间起
@@ -502,6 +504,29 @@ def get_ticket(
     return build_ticket_detail(db, ticket)
 
 
+
+class AiDraftResponse(BaseModel):
+    answered: bool
+    reply_content: str
+
+
+@router.post("/{ticket_id}/generate-ai-answer", response_model=AiDraftResponse)
+def generate_ticket_ai_answer(
+    ticket_id: int,
+    auth_user: AuthedUser = Depends(require_user),
+    db: Session = Depends(get_session),
+) -> AiDraftResponse:
+    ticket = TicketRepository(db).get(ticket_id)
+    if ticket is None or (auth_user.role not in ("admin", "supervisor")
+                          and ticket.handler_user_id != auth_user.user_id):
+        raise HTTPException(status_code=404, detail="ticket not found")
+    from app.services.agents.answer_draft import generate_answer_draft
+    answer = generate_answer_draft(db, ticket_id=ticket_id)
+    if not answer:
+        raise HTTPException(status_code=503, detail="AI 正在作答或暂未返回结果，请稍后重试")
+    return AiDraftResponse(answered=True, reply_content=answer)
+
+
 def build_ticket_detail(db: Session, ticket: Ticket) -> TicketDetail:
     """把一条 Ticket ORM 对象组装成完整 TicketDetail（含 hub 衍生字段/客户/
     提单人/附件/出站回写失败详情）。get_ticket 和 webhooks.py 的外部工单
@@ -509,6 +534,8 @@ def build_ticket_detail(db: Session, ticket: Ticket) -> TicketDetail:
     判断——调用方各自负责。"""
     ticket_id = ticket.id
     detail = TicketDetail.model_validate(ticket)
+    if not detail.cached_reply_content:
+        detail.cached_reply_content = (ticket.source_payload or {}).get("_ai_answer_draft")
     if ticket.assigned_user_id is not None:
         u = db.get(User, ticket.assigned_user_id)
         detail.assigned_user_name = u.name if u else None

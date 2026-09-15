@@ -146,6 +146,11 @@ def ensure_hub_issue_for_ticket(
         assigned_user_id=ticket.assigned_user_id,
         occurrence_count=1,
     )
+    initial_draft = (ticket.source_payload or {}).get("_ai_answer_draft")
+    if isinstance(initial_draft, str) and initial_draft.strip() and ticket.status != "closed":
+        hub.reply_content = initial_draft
+        hub.reply_is_draft = True
+        hub.reply_authored_by = "agent:ai_cs:draft"
     db.add(hub)
     db.flush()  # need hub.id for the link
 

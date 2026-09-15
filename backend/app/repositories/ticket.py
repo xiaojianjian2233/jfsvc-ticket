@@ -321,9 +321,6 @@ class TicketRepository:
                 Ticket.received_at < cutoff,
                 Ticket.customer_replied_at.is_(None),
                 Ticket.status.in_(active_statuses),
-                func.coalesce(
-                    Ticket.source_payload["_historical_import"]["archive_only"].as_boolean(), False
-                ).is_(False),
             )
             .order_by(Ticket.received_at)
         )

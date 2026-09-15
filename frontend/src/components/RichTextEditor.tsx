@@ -14,7 +14,7 @@ export function RichTextEditor({
   onChange,
   placeholder = "详细录入内容，支持加粗、插入超链接、插入图片等...",
   maxLength = 2000,
-  minHeight = 320,
+  minHeight = 160,
   disabled = false,
 }: RichTextEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);

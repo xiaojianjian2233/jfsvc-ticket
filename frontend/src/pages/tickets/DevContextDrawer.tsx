@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { postByPath } from "@/api/client";
+import { API_BASE } from "@/api/base";
 import { extractDevSolutionParts } from "./replyNoteUtils";
 
 export interface TaskAttachment {
@@ -550,8 +551,7 @@ function DrawerAttachmentThumb({
     let revoked: string | null = null;
     let cancelled = false;
     const token = localStorage.getItem("auth_token");
-    const apiBase = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
-    fetch(`${apiBase}${url}`, {
+    fetch(`${API_BASE}${url}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     })
       .then((r) => {

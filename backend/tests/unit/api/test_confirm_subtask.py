@@ -154,7 +154,7 @@ def test_confirm_operation_explicit_ai_answer_bypasses_automatic_switch(
     subtask_world.commit()
 
     with patch(
-        "app.services.agents.operation_answer.auto_answer_operation", return_value=False
+        "app.services.agents.answer_draft.generate_answer_draft", return_value=None
     ) as mock_answer:
         response = app_client.post(
             f"/api/hub-issues/{hub.id}/confirm-subtask",
@@ -163,7 +163,7 @@ def test_confirm_operation_explicit_ai_answer_bypasses_automatic_switch(
         )
 
     assert response.status_code == 200
-    mock_answer.assert_called_once_with(subtask_world, hub.id, force=True)
+    mock_answer.assert_called_once_with(subtask_world, hub_id=hub.id)
 
 
 def test_generate_ai_answer_accepts_bug_without_changing_routing_state(
@@ -181,7 +181,7 @@ def test_generate_ai_answer_accepts_bug_without_changing_routing_state(
     subtask_world.commit()
 
     with patch(
-        "app.api.hub_issues.auto_answer_operation", return_value=True
+        "app.services.agents.answer_draft.generate_answer_draft", return_value="AI草稿"
     ) as mock_answer:
         response = app_client.post(
             f"/api/hub-issues/{hub.id}/generate-ai-answer",
@@ -190,7 +190,7 @@ def test_generate_ai_answer_accepts_bug_without_changing_routing_state(
         )
 
     assert response.status_code == 200
-    mock_answer.assert_called_once_with(subtask_world, hub.id, force=True, draft_only=True)
+    mock_answer.assert_called_once_with(subtask_world, hub_id=hub.id)
     subtask_world.refresh(hub)
     assert hub.type == "Bug_fix"
     assert hub.status == "pending_review"

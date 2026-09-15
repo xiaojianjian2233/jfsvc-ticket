@@ -848,7 +848,7 @@ class ReAnswerResponse(BaseModel):
 class GenerateAiAnswerResponse(BaseModel):
     hub_issue_id: int
     answered: bool
-    reply_content: str | None
+    reply_content: str
 
 
 @router.post("/{hub_issue_id}/generate-ai-answer", response_model=GenerateAiAnswerResponse)
@@ -857,20 +857,15 @@ def generate_ai_answer_endpoint(
     user: AuthedUser = Depends(require_user),
     db: Session = Depends(get_session),
 ) -> GenerateAiAnswerResponse:
-    """User-triggered AI answer draft for every task type, without changing routing state."""
     _authorize_hub_handler(db, hub_issue_id, user)
     hub = db.get(HubIssue, hub_issue_id)
     if hub is None or hub.deleted_at is not None:
         raise HTTPException(status_code=404, detail="hub_issue not found")
-    answered = auto_answer_operation(db, hub_issue_id, force=True, draft_only=True)
-    db.refresh(hub)
-    if not answered:
-        raise HTTPException(status_code=502, detail="AI 未生成答复，请稍后重试")
-    return GenerateAiAnswerResponse(
-        hub_issue_id=hub.id,
-        answered=True,
-        reply_content=hub.reply_content,
-    )
+    from app.services.agents.answer_draft import generate_answer_draft
+    answer = generate_answer_draft(db, hub_id=hub_issue_id)
+    if not answer:
+        raise HTTPException(status_code=503, detail="AI 正在作答或暂未返回结果，请稍后重试")
+    return GenerateAiAnswerResponse(hub_issue_id=hub.id, answered=True, reply_content=answer)
 
 
 @router.post("/{hub_issue_id}/re-answer", response_model=ReAnswerResponse)
@@ -1283,13 +1278,9 @@ def confirm_subtask_endpoint(
         generated_answer = None
         existing_solution = (hub.reply_content or "").strip()
         try:
-            from app.services.agents.operation_answer import auto_answer_operation
+            from app.services.agents.answer_draft import generate_answer_draft
 
-            # 用户主动点击“AI作答”属于显式请求，不受后台自动答复总开关影响。
-            success = auto_answer_operation(db, hub.id, force=True)
-            if success:
-                db.refresh(hub)
-                generated_answer = hub.reply_content
+            generated_answer = generate_answer_draft(db, hub_id=hub.id)
         except Exception as e:
             logger.warning("subtask_ai_answer_failed", hub_issue_id=hub_issue_id, error=str(e))
             if not existing_solution:
@@ -1364,7 +1355,11 @@ def confirm_subtask_endpoint(
         push_res = push_hub_issue_to_linear(hub.id, db, assignee_override_user_id=assignee_id)
 
         settings = get_settings()
-        if settings.linear_push_enabled and push_res is None:
+        if (
+            settings.linear_push_enabled
+            and push_res is None
+            and not (hub.linear_uuid or hub.linear_identifier)
+        ):
             from app.models import StatusHistory
 
             last_pending = (

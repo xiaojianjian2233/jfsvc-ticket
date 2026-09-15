@@ -14,16 +14,16 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // 代理到远程 UAT 后端，本地无需启动 backend
+      // 代理到远程 SIT 后端，本地无需启动 backend
       "/api": {
-        target: "http://dl.piaozone.com:18025",
+        target: "http://43.139.250.182",
         changeOrigin: true,
-        rewrite: (path: string) => "/ticket-hub-uat" + path,
+        rewrite: (path: string) => "/hub-issue" + path,
       },
       "/health": {
-        target: "http://dl.piaozone.com:18025",
+        target: "http://43.139.250.182",
         changeOrigin: true,
-        rewrite: (path: string) => "/ticket-hub-uat" + path,
+        rewrite: (path: string) => "/hub-issue" + path,
       },
     },
   },

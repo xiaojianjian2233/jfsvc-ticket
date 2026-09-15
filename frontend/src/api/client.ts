@@ -9,8 +9,7 @@
 // CI gate `make check-types` fails the PR if openapi.json or types.ts drift.
 
 import type { paths } from "./types";
-
-const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? "";
+import { API_BASE, appPath } from "./base";
 
 export class ApiError extends Error {
   constructor(
@@ -58,7 +57,7 @@ async function request<T>(
     if (resp.status === 401) {
       localStorage.removeItem("auth_token");
       localStorage.removeItem("auth_user");
-      window.location.href = "/login";
+      window.location.href = appPath("/login");
       throw new ApiError(401, "session expired");
     }
     // 只读一次 body（读两次会抛 "body stream already read"）：先取文本，再尝试解析 JSON

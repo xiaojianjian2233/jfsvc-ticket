@@ -9,7 +9,7 @@ All endpoints require role='admin'.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -107,7 +107,11 @@ def list_sla_levels(
     db: Session = Depends(get_session),
 ) -> list[SlaLevelDetailOut]:
     """List all SLA level configurations sorted by sort_order and id."""
-    rows = db.execute(select(SlaLevel).order_by(SlaLevel.sort_order.asc(), SlaLevel.id.asc())).scalars().all()
+    rows = (
+        db.execute(select(SlaLevel).order_by(SlaLevel.sort_order.asc(), SlaLevel.id.asc()))
+        .scalars()
+        .all()
+    )
     return [_to_out(r) for r in rows]
 
 
@@ -119,7 +123,7 @@ def create_sla_level(
 ) -> SlaLevelDetailOut:
     """Create a new SLA level configuration. Automatically generates SEVERLEVEL#### primary key."""
     new_id = _generate_sla_level_id(db)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     user_name = admin.name or f"User-{admin.user_id}"
 
     level = SlaLevel(
@@ -153,9 +157,11 @@ def update_sla_level(
     """Update an existing SLA level configuration."""
     level = db.get(SlaLevel, level_id)
     if not level:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"SLA level {level_id} not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"SLA level {level_id} not found"
+        )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     user_name = admin.name or f"User-{admin.user_id}"
 
     level.name = body.name.strip()

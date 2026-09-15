@@ -1278,7 +1278,9 @@ class SlaLevel(Base):
     issue_types: Mapped[str] = mapped_column(String(128), default="不限", nullable=False)
     sla_hours: Mapped[float] = mapped_column(Numeric(10, 2), default=40.0, nullable=False)
     source_system: Mapped[str] = mapped_column(String(64), default="KSM", nullable=False)
-    source_system_field: Mapped[str] = mapped_column(String(64), default="serviceLevel", nullable=False)
+    source_system_field: Mapped[str] = mapped_column(
+        String(64), default="serviceLevel", nullable=False
+    )
     source_system_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     updated_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(

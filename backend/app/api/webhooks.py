@@ -43,7 +43,6 @@ from app.services.agents.classify import classify_ticket
 from app.services.agents.escalation_classify import classify_escalation_ticket
 from app.services.agents.split import execute_split_for_ticket as execute_split_for_ticket
 from app.services.agents.triage import run_ticket_triage
-from app.services.agents.vision_extract import extract_ticket_attachments
 from app.services.hub_issues.creator import create_hub_issue_for_ticket_auto
 from app.services.ingest.escalation_ingester import EscalationIngester
 from app.services.ingest.escalation_ingester import IngestError as EscalationIngestError
@@ -73,11 +72,7 @@ def _route_by_type(
         return  # 投诉停 ticket 层，进工作台高亮人工队列
     if not (settings.hub_issue_auto_enabled and confidence >= bar):
         return
-    result = create_hub_issue_for_ticket_auto(ticket_id)
-    if result is not None and result.created:
-        from app.services.agents.operation_answer_task import generate_initial_ai_answer_task
-
-        generate_initial_ai_answer_task.delay(result.hub_issue_id)
+    create_hub_issue_for_ticket_auto(ticket_id)
     # Operation 自动答复不在入库主链路同步跑——replay 走 LLM 可能长达 2-3 分钟，会长时间
     # 占用 worker。改由 Celery beat 任务 drain_operation_auto_reply 异步处理（每 2min 扫描
     # 已毕业未答复的 Operation hub），兼作偶发失败的补偿重试。
@@ -194,9 +189,10 @@ def run_post_ingest_agents(ticket_id: int) -> None:
       若判定包含多个子问题，直接自动落库为关联的 Hub 子任务。
     单一 BG task；各步失败自吞不阻塞。
     """
+    from app.services.agents.answer_draft import generate_initial_ticket_answer
+
+    generate_initial_ticket_answer(ticket_id)
     settings = get_settings()
-    if settings.vision_enabled:
-        extract_ticket_attachments(ticket_id)
 
     tri = run_ticket_triage(ticket_id)
     if tri is None:
@@ -220,9 +216,10 @@ def run_escalation_agents(ticket_id: int) -> None:
     escalation 工单已聚焦（AI 客服筛过一轮），不做混合拆分。分流终局与主链一致：
     Complaint 停 ticket；其余在 ESCALATION_AUTO_CONFIDENCE 过门槛时毕业。
     """
+    from app.services.agents.answer_draft import generate_initial_ticket_answer
+
+    generate_initial_ticket_answer(ticket_id)
     settings = get_settings()
-    if settings.vision_enabled:
-        extract_ticket_attachments(ticket_id)
     cls = classify_escalation_ticket(ticket_id)
     if cls is None:
         return
