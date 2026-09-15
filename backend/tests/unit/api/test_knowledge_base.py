@@ -102,8 +102,45 @@ def test_create_knowledge_item_binds_ticket_handler(
     assert r.status_code == 201
     data = r.json()
     assert data["created_by"] == "张工"  # 自动解析绑定工单处理人
+    assert data["created_by_user_id"] == 2
     assert data["ticket_id"] == 10
     assert data["status"] == "pending_review"
+
+
+def test_create_knowledge_item_falls_back_to_current_user_when_no_handler(
+    app_client: TestClient, kb_world: Session
+) -> None:
+    """工单无处理人（即使有责任田责任人 assigned_user_id），创建人必须回落当前登录人，绝不取责任人。"""
+    t_no_handler = Ticket(
+        id=11,
+        short_code="TKT-KB-11",
+        source_code="ksm",
+        source_ticket_id="ksm-kb-11",
+        type="Raw",
+        status="received",
+        title="无处理人工单",
+        assigned_user_id=2,  # 责任田责任人为张工 (User 2)
+        handler_user_id=None,  # 处理人为空
+    )
+    kb_world.add(t_no_handler)
+    kb_world.commit()
+
+    payload = {
+        "title": "无处理人工单产生的知识点",
+        "content": "登录操作人补充的内容...",
+        "type": "FAQ",
+        "product_line_code": "invoice_cloud",
+        "product_line_name": "数电发票云",
+        "module_code": "auth",
+        "module_name": "登录认证",
+        "ticket_id": 11,
+    }
+    r = app_client.post("/api/knowledge-base", json=payload, headers=_bearer(1, name="alice"))
+    assert r.status_code == 201
+    data = r.json()
+    assert data["created_by"] == "alice"  # 回落为当前登录人，绝不取张工
+    assert data["created_by_user_id"] == 1
+    assert data["ticket_id"] == 11
 
 
 def test_list_knowledge_items_filtering(app_client: TestClient, kb_world: Session) -> None:

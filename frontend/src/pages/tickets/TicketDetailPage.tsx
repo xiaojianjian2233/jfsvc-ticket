@@ -1443,6 +1443,7 @@ export function TicketDetailPage() {
                       ticketId={d.id}
                       ticketContent={d.body || d.title || ""}
                       devOwners={devOwners}
+                      ticketHandlerName={d.handler_user_name}
                       childIds={d.children_ticket_ids ?? []}
                       drafts={subDrafts}
                       taskAttachmentsMap={taskAttachmentsMap}
@@ -2104,7 +2105,7 @@ export function TicketDetailPage() {
         defaultProductLine={syncedSubAttrs?.productLine || d?.product_line_code || ""}
         defaultModule={syncedSubAttrs?.module || d?.module || ""}
         actionType="submit_only"
-        ticketHandlerName={d?.handler_user_name ?? d?.assigned_user_name ?? undefined}
+        ticketHandlerName={d?.handler_user_name ?? undefined}
         ticketId={d?.id}
         onSubmitSuccess={() => {
           showTopToast("知识库已新增", "success");
@@ -3005,6 +3006,7 @@ function SubTicketList({
   ticketId,
   ticketContent,
   devOwners,
+  ticketHandlerName,
   childIds = [],
   drafts,
   self,
@@ -3026,6 +3028,7 @@ function SubTicketList({
   ticketId?: number;
   ticketContent?: string;
   devOwners?: string;
+  ticketHandlerName?: string | null;
   childIds: number[];
   drafts: { title: string; type: string; product_line?: string; module?: string }[];
   taskAttachmentsMap?: Record<string | number, TaskAttachment[]>;
@@ -5034,7 +5037,7 @@ function SubTicketList({
           defaultModule={kbDrawerState.module}
           defaultContent={kbDrawerState.solution}
           actionType="answer_only"
-          ticketHandlerName={self.assigned_user_name ?? undefined}
+          ticketHandlerName={ticketHandlerName ?? undefined}
           ticketId={ticketId}
           onAnswerAndSubmit={(content) => {
             const targetKey = kbDrawerState.key;

@@ -33,6 +33,7 @@ from app.config import get_settings
 from app.core.logging import get_logger
 from app.models import HubIssue, HubIssueLinearIssue, SyncOutbox, Ticket, User
 from app.repositories.status_history import StatusHistoryRepository
+from app.services.hub_issues.linear_push import _resolve_title_prefix
 
 logger = get_logger(__name__)
 
@@ -134,12 +135,13 @@ def execute_owner_split(
     if client is None:
         client = LinearClient(LinearConfig.from_settings(settings))
     created: list[SubIssueOut] = []
+    title_prefix = _resolve_title_prefix(db, hub)
     try:
         for i, (s, assignee_linear_id, team_id) in enumerate(resolved, start=1):
             try:
                 issue = client.create_issue(
                     CreateIssueRequest(
-                        title=f"[{hub.short_code}·{i}/{len(resolved)}] {s.title}",
+                        title=f"[{title_prefix}·{i}/{len(resolved)}] {s.title}",
                         team_id=team_id,
                         description=(
                             f"owner-split 子任务 {i}/{len(resolved)} · "

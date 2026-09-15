@@ -98,9 +98,58 @@ def test_push_writes_back_linear_fields(world: Session) -> None:
     assert hub.linear_status_synced_at is not None
 
     req = fake.requests[0]
-    assert req.title == f"[{hub.short_code}] 开票失败"  # type: ignore[attr-defined]
+    assert req.title == "[lp-default] 开票失败"  # type: ignore[attr-defined]
     assert req.priority == 2  # high  # type: ignore[attr-defined]
     assert req.team_id == "team-1"  # type: ignore[attr-defined]
+
+
+def test_push_title_uses_source_ticket_number(world: Session) -> None:
+    t = Ticket(
+        short_code="TKT-TITLE-1",
+        source_code="ksm",
+        source_ticket_id="id-12345",
+        source_ticket_number="R20260813-1791",
+        type="Raw",
+        status="received",
+        title="测试工单",
+    )
+    world.add(t)
+    world.commit()
+    hub = _make_hub(world, 101, title="希望支持自动开票", ticket_id=t.id)
+    fake = _FakeLinearClient()
+    push_hub_issue_to_linear(hub.id, world, client=fake)  # type: ignore[arg-type]
+    req = fake.requests[0]
+    assert req.title == "[R20260813-1791] 希望支持自动开票"  # type: ignore[attr-defined]
+
+
+def test_push_title_falls_back_to_hub_short_code_when_no_source(world: Session) -> None:
+    parent = Ticket(
+        short_code="TKT-PARENT-1",
+        source_code="ksm",
+        source_ticket_id="p-1",
+        type="Parent",
+        status="split",
+        title="主工单",
+    )
+    world.add(parent)
+    world.commit()
+
+    child = Ticket(
+        short_code="TKT-CHILD-1",
+        type="Child",
+        internal_split_id="TKT-PARENT-1-C1",
+        parent_ticket_id=parent.id,
+        status="received",
+        title="拆分出来的子工单",
+    )
+    world.add(child)
+    world.commit()
+
+    hub = _make_hub(world, 102, title="子任务研发", ticket_id=child.id)
+    fake = _FakeLinearClient()
+    push_hub_issue_to_linear(hub.id, world, client=fake)  # type: ignore[arg-type]
+    req = fake.requests[0]
+    assert req.title == f"[{hub.short_code}] 子任务研发"  # type: ignore[attr-defined]
 
 
 def test_push_description_includes_source_tickets(world: Session) -> None:

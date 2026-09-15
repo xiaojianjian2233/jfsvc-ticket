@@ -1,0 +1,419 @@
+# AGENTS.md
+
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+
+## 项目概述
+
+ticket-hub 是跨源工单枢纽，聚合 KSM / 智齿 / zammad / Linear 的工单，通过 Agent 自动分类、路由、去重，主管事后修正。当前处于 D3 阶段（Agent 全家桶），大幅领先计划进度。
+
+## 仓库结构
+
+Monorepo，三个独立子栈：
+
+- `backend/` — FastAPI + SQLAlchemy + Alembic + Celery（Python 3.11+）
+- `frontend/` — Vite + React 18 + TypeScript + Tailwind + TanStack Query
+- `cli/` — Typer CLI（OpenAPI-driven）
+- `scripts/` — 对账、评测、迁移、压测脚本（Python）
+- `docs/adr/` — 架构决策记录（已采纳：0001/0002/0005/0012）
+- `docs/spec/` — data_model / api / routing 三份规格草案
+
+## 常用命令
+
+### Backend（在 `backend/` 目录下）
+
+```bash
+make install          # 创建 .venv 并安装所有依赖（含 dev）
+make lint             # ruff check + ruff format --check + mypy
+make unit             # 单测，覆盖率门槛 ≥70%
+make pii-cov          # PII 模块单测，覆盖率门槛 ≥95%
+make integration      # 集成测试（需要 Docker）
+make eval-routing     # D1 路由回放评测（需要 routing_v1.jsonl）
+make cov              # 生成 HTML 覆盖率报告（htmlcov/index.html）
+make clean            # 删除 .venv、缓存、覆盖率文件
+
+# 运行单个测试文件
+.venv/bin/pytest tests/unit/core/pii/test_sanitizer.py -v
+
+# 启动开发服务器
+.venv/bin/uvicorn app.main:app --reload --port 8080
+```
+
+### Frontend（在 `frontend/` 目录下）
+
+```bash
+npm install
+npm run dev           # 开发服务器 http://localhost:5173
+npm run build         # tsc + vite build
+npm run type-check    # tsc --noEmit
+npm run test          # vitest run
+npm run test:watch    # vitest watch 模式
+npm run lint          # eslint
+npm run gen:api       # 从 openapi.json 生成 types.ts
+npm run gen:api:live  # 从运行中的后端（:8080）生成 types.ts
+```
+
+### 根目录（全栈）
+
+```bash
+make test             # backend lint+unit+pii-cov + frontend type-check+test
+make gen-types        # 重新生成 frontend/src/api/openapi.json + types.ts
+make check-types      # CI 门槛：检查 openapi.json 和 types.ts 是否与后端同步
+make eval-routing     # D1 路由回放
+```
+
+### 本地依赖
+
+```bash
+docker compose up -d pg redis minio   # PG16+pgvector / Redis7 / MinIO
+cd backend && .venv/bin/alembic upgrade head   # 应用数据库迁移
+```
+
+## 架构要点
+
+### 数据流
+
+```
+外部 webhook (KSM/智齿/zammad)
+  → POST /webhook/{source}
+  → Ingester（services/ingest/）解析 raw payload
+  → 写入 tickets 表（type='Raw'）→ Router 路由分配
+  → BackgroundTask run_post_ingest_agents（ADR-0016 主链）:
+      vision_extract → triage（分类+混合判定合一，单 LLM 调用）
+      → 混合单：split_auto 开→自动拆子单（继承 sub_type）各自分流；
+                关→停摆进主管「拆单提案」队列
+      → 非混合：按类型分流——Complaint 停 ticket 层（人工关闭/转型毕业）；
+                其余 4 型 conf ≥ 门槛且开关开 → 自动毕业 hub_issue
+```
+
+### 核心模型关系
+
+- `tickets`（Raw/Parent/Child 三类型单表）→ 关联 `hub_issues`（4 出口类型：Operation/Bug_fix/Demand/Internal_task）
+- `customers` ← `customer_identities`（多源身份图谱，erp_uid/mobile/email 解析）
+- `assignment_scopes_module`（产品线+模块 → 用户）+ `assignment_scopes_feature`（跨产品线兜底）
+- `agent_decisions`（所有 Agent 决策审计表，supervisor 可 revert）
+- PK 全部用 INT autoincrement（非 UUID，见 ADR-0002）
+- JSON 字段用 `JSON` 类型（PG JSONB / SQLite 兼容）
+
+### Backend 分层
+
+```
+app/api/          路由层（FastAPI routers）
+app/services/     业务逻辑
+  agents/         LLM Agent（classify、后续 conflict_detect、dedup）
+  identity/       客户身份解析
+  ingest/         各源 webhook 解析器
+  routing/        工单路由
+  sla/            SLA 监控 + 升级链
+  supervisor/     主管修正
+  metrics/        仪表盘指标（Celery 物化）
+app/repositories/ 数据访问层
+app/core/
+  pii/            PII 脱敏/还原（strict mypy，≥95% 覆盖率硬门槛）
+  llm_router/     LLM Provider 抽象（当前仅 GLM，D3-B）
+  trace/          trace_id 中间件
+  logging/        structlog + trace_id
+app/models.py     所有 ORM 模型（单文件，按阶段分区注释）
+app/db.py         engine + session（StaticPool for SQLite in tests）
+```
+
+### Frontend 类型同步
+
+前端 API 类型从后端 OpenAPI schema 自动生成：`frontend/src/api/types.ts`。修改后端 API 后必须运行 `make gen-types` 并提交，否则 CI `make check-types` 会失败。
+
+### 测试分层
+
+- `tests/unit/` — 默认运行，SQLite in-memory（StaticPool），不需要 Docker
+- `tests/integration/` — 需要 Docker（testcontainers），标记 `@pytest.mark.integration`
+- `tests/e2e/` — 需要真实 UAT 凭证，标记 `@pytest.mark.e2e`
+- `tests/eval/` — 需要 LLM Provider key，标记 `@pytest.mark.eval`
+
+默认 `pytest` 只跑 unit（`pyproject.toml` 中 `-m "not integration and not e2e and not eval"`）。
+
+### LLM Router
+
+`app/core/llm_router/router.py` 抽象多 Provider，当前只实现 GLM（`providers/glm.py`）。新增 Provider 约 80 行，实现 `BaseLLMProvider` 接口。接入 OpenAI/Anthropic 等外部 LLM 前必须先补 PII 脱敏（`app/core/pii/` 的 AES-GCM encryptor 目前是 Protocol 占位）。
+
+## 前端 Auth Guard
+
+`frontend/src/main.tsx` 中 `RequireAuth` 组件保护所有非登录路由，未登录或 token 过期自动跳转 `/login`（解析 JWT `exp` 字段判断）。auth token 存储在 `localStorage.auth_token`，飞书 SSO 回调后由 `consumeSsoFragment()` 写入。
+
+`frontend/src/api/client.ts` 中所有 API 请求收到 401 响应时，自动清除 localStorage 并跳转 `/login`。
+
+JWT TTL 为 7 天（`backend/app/config.py` 中 `jwt_ttl_seconds = 60 * 60 * 24 * 7`）。
+
+## 服务器部署
+
+详见 `Codex.local.md`（不提交 git）。生产服务器 IP、nginx 配置、SSH 等均见 `Codex.local.md`。
+
+- shaobin 原版：端口 9093，路径 `/ticket-hub/`，DB `ticket_hub`
+- panda_li v2：端口 9094，路径 `/ticket-hub-v2/`，DB `ticket_hub_v2`，Python 3.12
+
+前端 build 需指定环境变量：
+```bash
+VITE_PUBLIC_BASE=/ticket-hub-v2/ VITE_API_BASE=/ticket-hub-v2 npm run build
+```
+
+## 当前技术债（2026-06-12 更新）
+
+完整清单见 **`docs/progress/2026-06-12-plan.md` §四**（含冻结项说明）。要点：
+
+- PII encryptor 未实现 —— **降级**：D4 第③段全走国内管理大模型同边界，仅接海外 LLM 才补（不再是第③段硬门槛）
+- dedup 评测 —— **改判**：`expected_dedup` 字段 60 条全 null（实际未标注），生产无真实重复对；待积累真实数据再建配对评测集，不编造
+- ~~ADR 0013/0014/0015 待补记~~ ✅ 已补（2026-06-12，见 `docs/adr/`）
+- 16 条 `needs_review` 评测标签：❄️ 冻结 — 分类边界规则将来走人工配置 skill，不再改标签
+- ~~`HANDOFF.md` 过时~~ ✅ 已重写为指针（2026-06-12）
+
+## 工作计划
+
+**以 `docs/progress/2026-06-12-plan.md` 为准**（2026-06-12 重排）。摘要：第 1 段 Linear 状态回同步 + 主管运营 UI（pending 队列/dedup 卡片/重推按钮）→ 第 2 段 cascade 双向同步（reply_sync + status_cascade + hub-issues 分视图）→ 第 3 段 How-To RAG + Vision 多模态（前置 PII encryptor）→ D5/D6 原内容时间前移。
+
+## 飞书工号同步说明（2026-05-12）
+
+- 飞书 `/authen/v1/user_info`（SSO 登录接口）**不返回 `employee_no`**，这是飞书接口本身限制
+- 工号只能通过「从飞书同步」（`/contact/v3/users/find_by_department`）批量补全
+- 需要在飞书开放平台开通 `contact:user.employee_number:read` 权限
+- `feishu_sso.py` 的 `upsert_user` 更新分支已修复，统一同步 name/email/mobile/employee_no 四个字段
+
+## 用户角色说明（2026-05-12）
+
+系统有五个角色（2026-07-07 ADR-0016 P5 加第 5 个），前端统一显示中文名：
+
+| 英文值 | 中文名 | 职责 |
+|--------|--------|------|
+| `member` | 普通成员 | 可查看工单和仪表板，无管理权限 |
+| `assignee` | 处理人 | 可查看工单，被分配处理工单 |
+| `knowledge_op` | 知识运营 | 反思诊断工作台 + 对客 AI 客服 skill / 知识库维护；够不到主管修正权与内部编排 skill |
+| `supervisor` | 主管 | 可使用主管工作台、修正 Agent 决策、重新关联工单（天然涵盖知识运营能力） |
+| `admin` | 管理员 | 拥有全部权限，含用户管理、分工配置、目录管理、内部编排 skill |
+
+权限校验在 `backend/app/api/deps/auth.py`：`require_admin()`、`require_supervisor()`、`require_knowledge_op()`（knowledge_op|supervisor|admin，只用于反思工作台端点组）、`require_user()`。迁移 0020 扩 `ck_users_role`。前端导航按角色过滤（Layout.tsx：反思诊断 → knowledge_op+，管理 → supervisor+）。
+
+## 飞书同步对话框（2026-05-12）
+
+- 对话框打开后自动分批并发（每批 5 个）预加载所有部门成员，左侧树顶部显示进度条
+- 树节点支持 checkbox 勾选，递归选中子部门所有可同步成员，支持三态（未选/半选/全选）
+- 未加载完的节点 checkbox 禁用，加载失败的节点持续禁用不阻塞其他节点
+
+## 工单入库自动 upsert 产品线/模块（2026-05-12）
+
+- 工单入库时，若 `product_line_code` 或 `module` 不在 `product_lines`/`modules` 表，自动创建（`catalog_upsert.py`）
+- 使用 `INSERT ... ON CONFLICT DO NOTHING`，并发安全，不需要手动维护种子数据
+- 新创建的产品线/模块无处理人，路由落 `default_pool`
+- 三个 Ingester（KSM/Zhichi/Zammad）均已接入，在 dedup 检查之后、Ticket 构造之前调用
+
+## 主管工作台配置警告（2026-05-12）
+
+- `GET /api/supervisor/config-warnings` 返回系统配置问题列表（require_supervisor）
+- 检查项1：有 module 但 `assignment_scopes_module` 无处理人 → 提示去「管理后台 → 分工配置」
+- 检查项2：未配置 `DEFAULT_POOL_USER_ID` → 提示联系运维设置 `.env`
+- 前端主管工作台顶部显示黄色警告 Banner（可折叠）
+
+## 重新触发分配（2026-05-13）
+
+- `POST /api/supervisor/reroute`（require_supervisor）：对 1-50 条工单重新执行路由
+- 复用现有 `Router` 逻辑，写 `status_history` 审计（changed_by="system:reroute"）
+- 路由仍无匹配时返回 `no_match` 提示，不报错
+- 前端工单列表页新增：「仅未分配」筛选、checkbox 多选（仅主管/管理员）、底部浮动操作栏、结果弹窗
+
+## `sources` 表种子数据（2026-05-13 已自动化）
+
+`sources` 种子数据已内置到 `0001_d0_initial` 迁移中（`ON CONFLICT DO NOTHING`），`alembic upgrade head` 后自动写入，无需手动操作。
+
+## 兜底处理人配置（2026-05-13，入口更新 2026-05-14）
+
+- 兜底处理人现在可在主管工作台直接配置，无需修改 `.env` 或重启服务
+- 配置存储在 `system_settings` 表（`key='default_pool_user_id'`），立即生效
+- 读取优先级：数据库 > `.env` `DEFAULT_POOL_USER_ID` > NULL
+- API：`GET/PUT /api/admin/settings/default-pool-user`（require_supervisor）
+- 主管工作台 `no_default_pool` 警告 Banner 内联用户下拉选择器，保存后 Banner 消失
+- **分工配置页（`/admin/scopes`）新增「全局兜底」标签页**（2026-05-14）：固定入口查看/修改/清除兜底处理人，标签顺序：Module 分工 → Feature 兜底 → 全局兜底 → 变更审计
+- 前端组件：`frontend/src/pages/admin/scopes/DefaultPoolTab.tsx`
+- 数据库迁移：`0002_system_settings.py` + `0008_merge_system_settings.py`（合并迁移）
+- `GET /api/admin/users` 权限为 `require_supervisor`（非 require_admin），主管可获取用户列表用于下拉选择
+- 前端 `SupervisorPage.tsx` 中用户列表解析直接用数组（`users.data as UserOut[]`），不是 `{ users: [] }` 对象
+
+## 用户管理状态筛选与启用（2026-05-13）
+
+- 用户列表页新增状态筛选下拉（在岗 / 已停用 / 全部状态），默认显示"在岗"
+- `GET /api/admin/users` 新增 `include_inactive: bool = False` 参数，切到"已停用"或"全部"时前端传 `include_inactive=true`
+- 已停用用户行显示绿色"启用"按钮，调用 `POST /api/admin/users/{user_id}/revive` 恢复
+- `UserRepository` 新增 `revive()` 方法（清除 `deleted_at`，设 `is_active=True`）
+- 注意：前端路径参数替换必须用 `postByPath`，不能用 `api.post`（后者不替换 `{user_id}`）
+
+## 阶段进度
+
+D0✅ D1✅ D2✅ D3✅（A/B/C/D/E 全部完成，2026-06-12）D4🟢（第①段 Linear 状态回同步✅、第②段 cascade + KSM 出站回写 sender✅[代码完成未部署]、第③段 Vision/escalation✅；Phase 0 优化全家桶✅）D5~收尾⬜。当前分支：`main`。
+
+> **ADR-0016 流水线重构（`docs/adr/0016-agent-pipeline-restructure.md`）P0-P2e 完成并部署 SIT；P4 owner-split + P5 权限双层代码完成（2026-07-07）**：triage 合一 / Complaint 第 5 型 / split 前置 / dedup+conflict_detect 退役 / skill 三槽 / 投诉人工队列 / 评测升级 / owner-split 子任务进度通知 / knowledge_op 角色。剩余 P3（反思闭环补全，**等用户给飞书知识空间 space_id + 把应用加进空间**）。
+
+> **优化 v2 计划见 `docs/spec/d4-optimized-design-v2.md`**：Phase 0（PII 轻量/skill_prompts/hub-dedup/90天挂载[ADR-0016 已随 ticket-dedup 退役]/SLA工作日）全部完成部署；Phase 2（KSM 回写）代码完成待部署；**Phase 1（知识反哺闭环）阻塞于自研 AI 客服 replay+skills API**（方案 B，见 `ai-cs-api-contract.md`）。
+
+## ADR-0016 流水线重构（2026-07-06/07 P0-P2e 全部落地）
+
+- **triage agent**（`services/agents/triage.py` + `prompts/triage.md`）：classify + conflict_detect **合一**，单 LLM 调用输出 `{type, confidence, reason, is_mixed, sub_problems[]}`；sub_problem 带 `type`（子单继承，不再重分类）。写 `classify_type` 审计 +（混合时）`split_ticket` 审计（proposal.skill='triage'）
+- **第 5 类型 Complaint（投诉）**：`prompts/type_taxonomy.md` 是 5 类型唯一权威定义，triage/classify prompt 用 `{{TYPE_TAXONOMY}}` 占位符注入（`assemble_prompt`）。投诉**停 ticket 层绝不自动毕业**（creator 守卫拒绝无 type 覆盖的投诉毕业）；人工出路：`POST /api/supervisor/close-complaint` 关闭，或 create-hub-issue 带 type 转型毕业
+- **混合单闸门**：is_mixed 且 `SPLIT_AUTO_ENABLED` 关（默认）→ 停摆进主管拆单提案队列，**不毕业不分流**；开且 conf ≥ `SPLIT_AUTO_CONFIDENCE`(0.85) → 自动拆
+- **ticket 级 dedup 退役**（P2e 删除）：agents/dedup.py + prompts/dedup.md + 6 个 dedup_* 配置已删；`cosine_similarity` 迁 `core/llm_router/embeddings.py`；**hub_dedup 是唯一主查重**。`dedup_execute.py` 暂留消化历史 dedup_link 提案，清零后连同 supervisor dedup-proposals 三端点整删。`ticket_embeddings` 表（迁移 0009）留存历史数据未删
+- **conflict_detect 退役**（P2c 删除）：职责并入 triage；`CONFLICT_DETECT_ENABLED` 配置已删
+- **classify 保留**：作为子单兜底分类器（旧 conflict_detect 提案的 sub_issues 无 sub_type 时用）+ 评测对照
+- **skill 三槽版本**（P1，迁移 0018）：skill_prompts 加 draft/current/previous 槽；`admin_skills.py` PUT/DELETE draft、POST draft/validate（差异回放验证器 `draft_validator.py`，真实工单 current vs draft 对比）、POST draft/promote；skill 名去 `_v1` 后缀
+- **评测**（P2e）：`scripts/eval/run_eval.py --agent triage|classify`（默认 triage），报告 mixed_diagnostics；2026-07-06 实测 triage 0.909 confirmed-only 过 0.9 门槛（classify 对照 0.955，差距在低置信边界样本，可经 skill draft 回放迭代 prompt）
+- 单测注意：`tests/conftest.py` 显式清空 GLM/DASHSCOPE key，防止本地 `.env` 真实 key 让 BG task 发起真实 LLM 调用
+
+## D3-D split 执行器（2026-06-11，ADR-0016 P2c 更新）
+
+- `services/agents/split.py`：把 `split_ticket` 提案物化为 Child 工单，**全程无 LLM**（语义拆分 LLM 在 triage 已完成，此处纯机械物化 + 规则重路由）
+- Child 契约（`ck_tickets_type_fields`）：`source_code/source_ticket_id=NULL`、`internal_split_id='{parent.short_code}-C{n}'`（确定性+unique）、`parent_ticket_id` 必填；title/body 来自 LLM 的 sub_issue（**不切原文**，原文留在 Parent）；customer/product_line/module/reporter 继承
+- **子单类型继承**（P2c）：triage 提案的 sub_issue 带 `sub_type` → child 直接落 predicted_type（无 LLM）；旧提案无 sub_type → 兜底跑 classify。Child 不允许 Complaint
+- Parent 翻转：type Raw→Parent、status→'split'、`children_ticket_ids` 落 JSON；幂等卫语句 `parent.type=='Raw'`
+- 每个 child 重新走 Router（纯规则）各自分配 + 按类型分流；**绝不**再 triage（防递归拆分）
+- 触发：conf ≥ `SPLIT_AUTO_CONFIDENCE`(0.85) 且 `SPLIT_AUTO_ENABLED`（**默认 false，先灰度手动**）→ ingest 链自动；否则留给主管 `POST /api/supervisor/execute-split`
+- 回滚 `POST /api/supervisor/revert-split`：软删 children + Parent 还原 Raw + decision 翻 reverted；**任一 child status ≠ received 则拒绝**（有进展不可自动回滚）
+- 物化审计写回 `decision.proposal.materialized`（at/by/child_ids/parent_prev_status）
+- 注意：Router 的 `multi_match`（一个问题多团队认领）是归属歧义，**不是**拆分场景，split.py 只消费 `split_ticket`
+
+## 主管工作台拆单提案 UI（2026-06-12）
+
+- `GET /api/supervisor/split-proposals`：待处理提案队列（未物化、未 reverted、parent 仍 Raw；materialized 过滤在 Python 做，JSON 谓词不值得跨库写）
+- `POST /api/supervisor/dismiss-split`：主管忽略提案 → decision 翻 `reverted`（留审计）；已物化的拒绝（409，提示走 revert-split）
+- 前端 `SupervisorPage.tsx` 新增 `SplitProposalCard`：紫色卡片显示 short_code/置信度/理由/子单列表 + 「执行拆分」「忽略」按钮
+
+## owner-split 按责任人拆分（2026-07-07，ADR-0016 P4）
+
+- **场景**：一个 Demand/Bug_fix hub_issue 的工作分属多个责任人 → 主管在详情页手动拆成 N 个 Linear 子 issue（`parentId` 挂 hub 主 issue，Linear 原生父子）；LLM 预拆建议留 v2
+- `services/hub_issues/owner_split.py`：`execute_owner_split`（守卫：研发类 only、hub 须已推 Linear、≥2 子任务、v1 不支持追加/重拆、个人责任人 Linear 查无此人直接拒绝）+ `notify_sub_issue_done`（进度通知）
+- 跟踪表 `hub_issue_linear_issues`（迁移 0019）：linear_uuid/identifier/title/assignee_user_id/status(镜像 Linear 列名)/state_type/released_at/notified_at(防重)
+- **进度通知（永不等齐 + 进度框架）**：`linear_status_sync` 每 5min 轮询未完成子 issue，转 completed → released_at + 自动入 outbox——**x<n 走新 kind `progress_note`**（KSM `handleKsmOrder(is_deal=False)` 只回复不关单），**仅 x=n 最后一条走 `release_note` 关单** + 置 `hub.release_notified_at`（与 devcollab.notify_release 互斥防二次关单，谁先谁算）
+- 中途建失败：已建子 issue 行保留（Linear 侧已存在），报错带已建数；「已拆过」守卫挡住裸重试，人工去 Linear 补齐
+- 子 issue reopen 不回滚通知（通知已对客发出，撤回是人工事务）；自查/无源 hub 不发通知
+- 出站受 `ksm_writeback_enabled/dry_run` 灰度阀（同 Phase 2 剧本）；`ck_sync_outbox_kind` 扩 'progress_note'
+- 前端 `HubIssueDetailPage`：Bug_fix/Demand 详情页「子任务里程碑」区（x/n 进度 + 每行状态色）+「按责任人拆分」表单（动态行：标题+责任人下拉，2-20 行）
+- API：`POST /api/hub-issues/{id}/owner-split`（require_supervisor）；detail 响应带 `sub_issues[]`
+
+## ~~D3-E dedup Agent~~（2026-06-12，**ADR-0016 P2e 已退役删除**）
+
+- ticket 级 dedup（agents/dedup.py：embedding 入库 → 余弦召回 → LLM 判定）已删；**hub_dedup**（`services/hub_issues/hub_dedup.py`，建 Linear 前 hub 级语义查重）是唯一主查重
+- embedding 基础设施保留：`app/core/llm_router/embeddings.py`（DashScope `text-embedding-v4` / GLM `embedding-3`，OpenAI `/embeddings` 方言 + failover）+ `cosine_similarity`，hub_dedup 消费
+- `dedup_execute.py` + supervisor dedup-proposals 三端点暂留（消化历史 dedup_link 提案，无 LLM），存量清零后整删
+- ingest 链顺序见「架构要点 → 数据流」（triage 主导，ADR-0016）
+
+## D4 hub_issue 创建 + Linear push（2026-06-12）
+
+- `services/hub_issues/creator.py`：`ensure_hub_issue_for_ticket` 把已分类工单「毕业」成 hub_issue（短码 `HUB-{n:06d}`，status='created'，继承 title/body/产品线/module/处理人），写 `ticket_hub_issue_history`（user: 前缀 → human_confirmed=true）+ status_history；幂等（已链接直接返回 created=false）；split Parent 拒绝（children 各自毕业）
+- 自动路径：classify conf ≥ `HUB_ISSUE_AUTO_CONFIDENCE`(0.80) 且 `HUB_ISSUE_AUTO_ENABLED`（**默认 false**）→ ingest 链自动建；手动 `POST /api/supervisor/create-hub-issue`（无置信门槛，可 `type` 覆盖 predicted_type）
+- `services/hub_issues/linear_push.py`：Bug_fix/Demand 推 Linear（`LINEAR_PUSH_ENABLED` 默认 false + key/team 三门槛），回写 `linear_uuid/linear_identifier/linear_status_synced_at`；幂等（linear_uuid 非空跳过）；失败吞错留 NULL 可重推；priority 映射 critical→1…lowest→4；description 附 source tickets 引用
+- 待开工：Linear 状态回同步（webhook /linear 或轮询）、Operation 回复流
+
+## AI 分类结果展示（2026-05-13）
+
+- `TicketSummary` 新增 `predicted_type`、`predicted_confidence`、`classified_at`、`assigned_user_name` 四个字段
+- `list_tickets` 接口批量查询 `assigned_user_name`（一次额外 IN 查询，不影响性能）
+- 工单列表页新增「AI 分类」列，显示彩色标签（Bug 修复=红、需求=蓝、运营=黄、内部任务=灰），未分类显示「未分类」
+- 工单列表页「分配」列改为显示用户名，找不到时降级显示 `#ID`
+- 工单详情页基本信息区新增「AI 分类」（标签+置信度百分比）和「分类时间」字段
+- `PredictedTypeBadge` 组件定义在 `TicketDetailPage.tsx`，列表页 import 复用
+
+## KSM 客户信息字段映射（2026-05-14）
+
+`ksm_payload.py` 中客户信息取自 KSM `subscribeCallback` 响应的顶层字段（非 `customerInfo`）：
+
+| 系统字段 | KSM 字段 | 说明 |
+|---------|---------|------|
+| `accountName`（姓名） | `feedbackUser` | 反馈人姓名 |
+| `email`（邮箱） | `feedbackEmail` | 反馈人邮箱 |
+| `mobile`（联系手机） | `feedbackPhone` | 反馈人手机 |
+| `tel`（联系电话） | `feedbackTel` | 反馈人电话 |
+| `account` / `erpUid` | `customerInfo.customerNumber` | 客户编号（仍取自 customerInfo）|
+
+## Linear Adapter（2026-05-15）
+
+- `adapters/linear/` 已实现，提供 `LinearClient.create_issue()` 方法
+- 使用 Linear GraphQL API（`POST https://api.linear.app/graphql`）
+- `CreateIssueRequest`：title / team_id / description / label_ids / assignee_id / priority
+- `CreatedIssue`：id（UUID）/ identifier（如 ENG-42）/ url / title
+- 配置项：`LINEAR_API_KEY` + `LINEAR_TEAM_ID`（写入 `backend/.env`，**待 hub_issue 自动创建完成后再配置部署**）
+- 触发时机：hub_issue 创建且 type ∈ Bug_fix / Demand 时异步推 Linear，回写 `linear_uuid` / `linear_identifier`（见 D4 hub_issue 段）
+- **鉴权坑（2026-06-12 生产首推暴露）**：Linear 个人 API key（`lin_api_` 前缀）的 `Authorization` 头要放**原始 key，不能带 `Bearer` 前缀**（带了报 HTTP 400）；OAuth token 才用 Bearer。`_headers()` 按前缀判断
+
+## Linear 按处理人 team 路由 + 用户同步（2026-06-12）
+
+- **目标**：Bug_fix/Demand issue 落到「被分配处理人所属的 Linear team」，而非固定一个 team
+- `User.linear_team_id`（迁移 0010）：被分配时 issue 进哪个 team，由邮箱同步填充
+- `LinearClient.list_users()`：分页拉活跃成员 + team 归属（**页大小 50**，250 会触发 Linear「Query too complex」400）
+- `services/linear/user_sync.py` `sync_linear_users()`：按 `@email` 不区分大小写匹配 ticket-hub 用户 → 填 `linear_user_id` + `linear_team_id`
+  - team 取值：单 team 直接用；多 team 优先默认 `LINEAR_TEAM_ID`，否则留空（→ 推送回落默认）；成员离开 Linear 清陈旧映射
+  - **组账号**（数电开票组…）无邮箱 → 不匹配 → 两字段留空 → 推送回落默认 team 且无 assignee（刻意的优雅降级）
+- `POST /api/admin/users/sync-from-linear`（require_admin）：触发同步，返回匹配报告
+- `linear_push.py` 按 `assignee.linear_team_id` 路由，回落 `settings.linear_team_id`
+- **生产现状（2026-06-12 已配置部署）**：`LINEAR_PUSH_ENABLED=true`，默认 team=CNPRD（中国区产品部，id 见 `Codex.local.md`）；首轮同步 21 个个人映射（INTPRD 9 / CNPRD 5 / ARALGO 5 / KNOPS 2），9 个组账号跳过；实测分配给某 ARALGO 成员的工单落到对应 team ✅
+- API key：Linear 个人 key「ticket-hub push (shaobin prod)」，权限 Read + Create issues
+- 单测：`test_linear_client.py`(13) / `test_linear_user_sync.py`(8) / `test_linear_push.py` 路由用例 / `test_admin_users.py` sync 端点
+
+## Linear 状态回同步（2026-06-12，D4 第①段）
+
+- `services/hub_issues/linear_status_sync.py`：Celery beat 5min 轮询已推送 hub_issue（最近 200 条），`LinearClient.get_issue_states()` 批量查（**50/批**防复杂度超限）
+- 双层回写：`linear_status` 始终镜像 Linear 列名（展示层）；hub 状态只做**保守级联** `started→in_progress`、`completed→released`(+actual_released_at)
+- `canceled` 只镜像不动状态（研发取消需主管判断）；**reopen 跟随**（released→in_progress，Linear 是研发态源头）；Linear 侧删除的 issue 只计数不动数据
+- 状态变更写 status_history（`agent:linear_status_sync`）；无变化不写（幂等）
+- beat 任务 `poll_linear_statuses_every_5min`（key 未配自动跳过）；生产已部署，实测 CNPRD-809 Backlog 正确镜像 ✅
+- 升级路径：量大或要求实时再加 `/webhook/linear`，回写层不用改
+
+## AI 客服 escalation 链（2026-06-12，D4 第③段 ③-2）
+
+- **核心交互**：客户对已有飞书 AI 客服的回答不满意 → AI 客服实时回调 `POST /webhook/cs-escalation` → 建 `ai_cs` 工单 + 截图 attachments → `run_escalation_agents` 链
+- `escalation_ingester.py`：`parse_escalation_payload` **隔离** AI 客服载荷格式（API 定稿后只改这一处，同 ksm_payload 套路）；黄金三元组（原问题/AI答复/不满反馈）存 `source_payload['ai_cs']`；幂等(session_id)
+- `escalation_classify.py` + `prompts/escalation_classify_v1.md`：**黄金三元组**二次分类。强信号——AI给步骤+「做了没用」→Bug_fix；AI「不支持」+「要支持」→Demand；AI答错+客户重述→Operation。**显著压低 Operation 概率**（AI 已操作解答失败过）
+- 链顺序：vision → escalation_classify → (auto hub_issue at `ESCALATION_AUTO_CONFIDENCE` 0.85，比普通 0.80 高，因直接推 Linear) → dedup → conflict_detect
+- 判回 Operation 走 hub 主管 reply_sync（复用第②段，零新代码）；agent_decisions 里 `agent='escalation_classify_v1'` / `source='ai_cs_escalation'` 与普通 classify 区分
+- 生产实测：「AI给认证步骤+客户说做了还是转圈超时」→ Bug_fix 0.94，理由精准 ✅
+- **待补**：AI 客服真实 API 路径（webhook 载荷确认 + adapters/ai_cs 反查/反哺，③-3）
+
+## Vision 多模态（2026-06-12，D4 第③段 ③-1）
+
+- **架构前提**：已有飞书侧 AI 客服解答 Operation，取消自建 How-To RAG；hub 补「多模态 + 答不上之后的事」。详细设计 `docs/spec/d4-stage3-design.md`
+- `app/core/llm_router/vision.py` VisionClient：DashScope **qwen-vl-max**（截图 OCR 要准）多模态，`image_url` 直传（DashScope 自己抓图）或 base64；结构化输出 `{ocr_text, ui_context, summary}`，容忍 ```json 围栏
+- `services/agents/vision_extract.py`：ingest 链在 **classify 之前**对 image 附件 OCR → 拼进 `ticket.body`（`[附件识别]` 段）。下游 classify/dedup/escalation 全受益（dedup embedding 含报错原文，召回质量↑）
+- `attachments` 表（迁移 0012）+ sources 种子 `ai_cs`；非 image/超 `VISION_MAX_IMAGES_PER_TICKET`(5)/无 source_url 跳过；失败标 failed 不阻塞链
+- **PII**：qwen-vl 同 DashScope 边界，无新增暴露 → **PII encryptor 不再是第③段前置**（仅接海外 LLM 才补）
+- 开关 `VISION_ENABLED`（默认 false）；`VISION_API_KEY` 留空回落 `DASHSCOPE_API_KEY`；生产已配 qwen-vl-max 实测打通（成本 ~¥0.011/张）
+- 文本分类仍用 deepseek-v4-flash（评测最优，不动）；storage_key(MinIO) 下载路径待 KSM 附件接入
+
+## cascade 双向同步（2026-06-12，D4 第②段）
+
+- **reply_sync（决策 15）**：`POST /api/hub-issues/{id}/reply`（require_supervisor，Operation-only）→ 回复版本化（`hub_issue_reply_history`）→ 级联全部关联工单 `cached_reply_content/version` → `sync_outbox` 入队（每个**有源**工单一行；Child 只缓存不入队）
+- **status_cascade（决策 14）**：`services/cascade/status_cascade.py` `apply_hub_status` 是 hub 状态变更的**唯一入口**（linear_status_sync 已改走它）。保守级联：仅 `in_progress`/`released` 扇出到工单（双方同名状态）；终态工单（done/closed/rejected/superseded）不动；released 补 `actual_released_at`
+- **sync_outbox（ADR-0007，迁移 0011）**：出站写队列。D4 生产者入队（kind='reply'/'status'，status='pending'），**D5 sender（KSM 反向/智齿）消费**——先积累是刻意解耦
+- 前端：`/hub-issues` 4 出口类型分视图（tab + 类型专属列），详情页 Operation 回复编辑器（保存并级联）
+- 生产实测：回复 v1 → 工单缓存 v1 + outbox(reply, ksm, pending) ✅
+
+## KSM 出站回写 sender（2026-06-26，D4 第②段，Phase 2）
+
+- **缺口澄清**：`adapters/ksm/KSMClient` 早有全套写方法（lock/handle/supply/return/get_order_detail）；Phase 2 只补**消费 sync_outbox 的 sender**，非移植 client
+- `services/ksm/writeback.py` `drain_ksm_outbox`：drain `target_source_code='ksm' & status='pending'`，按 kind 映射 KSM 操作：
+  - `reply` → lock → 重拉 node → `handleKsmOrder(is_deal=True)`（答复关单）
+  - `status` `in_progress` → `lockKsmOrder`（接管受理）；`released` → lock→handle 关单（hub.reply_content 或默认话术）
+  - `supply` → lock → 重拉 → `supplyKsmOrder`（补料）
+- **时序**：KSM 要求先接管(lock)且 handle 的 `currentNodeID` 是接管后的新节点 → lock → 经 NoticeStore(Redis 24h) 重拉 subscribeCallback 刷新 node/product/version/module → handle/supply；notice 过期则回落入库节点，由 KSM 报错暴露（**绝不静默成功**）
+- **字段来源**：`ticket.source_payload['_subscribe_callback']`（入库时存的 KSM raw）；bill_id 回落 `source_ticket_id`
+- **灰度**：`ksm_writeback_enabled`(默认关) + `ksm_writeback_dry_run`(默认开，只组装标 skipped)；失败 attempts++/last_error，超 `ksm_writeback_max_attempts`(5) 标 failed 转人工；仅 pending 被 drain，成功翻 sent 幂等；已接管错误容错继续
+- **handler 身份**：`KSM_HANDLER_NAME`/`KSM_HANDLER_NUMBER`（account/accountName/accountNumber）；未配则整轮跳过
+- 触发：Celery beat `drain_ksm_writeback` 每 2min + 主管 `POST /api/supervisor/drain-ksm-writeback`（同步看成败）
+- **补料入口**：`POST /api/hub-issues/{id}/request-supply`（require_supervisor）→ `cascade/supply_sync.request_supply` 每有源工单入队 supply outbox（迁移 0016 扩 `ck_sync_outbox_kind` 加 'supply'）
+- **注意**：回复/补料文本是**对客出站**方向，**不过 pii_lite 遮罩**（遮罩只用于入库/喂模型方向，遮了会损坏答复）；~~智齿回写本期未做~~ **已实现**（`services/zhichi/writeback.py` + beat `drain_zhichi_writeback_every_2min`，含 400258「工单已关闭」终态收尾；见 [[zhichi_writeback_400016_fix]]）——zhichi outbox 行有 sender 消费，不会堆积
+- **上线**（用户执行）：`git pull` + `alembic upgrade head`(0016) + 重启 3 个 systemd → `.env` 配 handler 身份 + 生产 `KSM_BASE_URL=ierp.kingdee.com` → 先 enabled+dry_run 观察 → 再翻 dry_run=false 真打。**尚未部署生产**
+
+## 主管运营 UI：dedup 提案 + pending 重推（2026-06-12，D4 第①段）
+
+- `services/agents/dedup_execute.py`：dedup_link 提案执行器（无 LLM，镜像 split 剧本）。**采纳 = 重复工单挂到原始工单的 hub_issue**（occurrence_count+1 / last_seen_at / ticket_hub_issue_history / decision.materialized）
+- 守卫：目标工单未毕业 hub_issue → 409 提示先 create-hub-issue（绝不自动毕业）；subject 已链接 → 409 提示走 relink
+- 端点（require_supervisor）：`GET /api/supervisor/dedup-proposals`、`POST execute-dedup`/`dismiss-dedup`、`GET pending-hub-issues`（带最新 pending 原因）、`POST repush-linear`（**同步执行**，主管要立即看到成败）
+- 前端 SupervisorPage：琥珀色「Linear 推送待人工」卡片（原因+重推）、青色「重复工单提案」卡片（采纳合并/忽略，目标未毕业禁用）；用户管理页「从 Linear 同步」按钮
+- 卡片色系约定：紫=拆单提案、青=重复提案、琥珀=pending 待人工、黄=配置警告
+
+## Linear 推送 pending 待人工（2026-06-12）
+
+- **个人处理人（有邮箱）在 Linear 查无此人** → 不推送，hub_issue `status='pending'` + status_history 记原因（含邮箱）；**组账号（无邮箱）不受影响**，仍优雅降级推默认 team
+- **Linear API 推送失败**（网络/鉴权/业务错）→ 同样置 pending + 错误原文
+- 重试仍失败不重复写 history（pending 幂等）；`linear_uuid` 始终留 NULL 可重推
+- **修复路径**：人加入 Linear 工作区 → `POST /api/admin/users/sync-from-linear` 补映射 → 重推成功自动 `pending→created`（留审计「pending 解除」）
+- 生产实测：分配给某内部用户（Linear 查无此人）→ 正确置 pending 不产生垃圾 issue ✅

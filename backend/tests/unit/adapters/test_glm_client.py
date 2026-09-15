@@ -143,7 +143,10 @@ def test_network_error() -> None:
     cfg = GLMConfig(
         api_key="x", base_url="http://localhost:1/no-server", default_model="glm-4.5-flash"
     )
-    with GLMClient(cfg, http_client=httpx.Client(timeout=1.0)) as c, pytest.raises(GLMNetworkError):
+    with (
+        GLMClient(cfg, http_client=httpx.Client(timeout=1.0, trust_env=False)) as c,
+        pytest.raises(GLMNetworkError),
+    ):
         c.chat(_req())
 
 

@@ -84,7 +84,19 @@ def _mark_pending(db: Session, hub: HubIssue, *, reason: str) -> None:
     logger.warning("linear_push_pending", hub_issue_id=hub.id, reason=reason)
 
 
-def _build_description(db: Session, hub: HubIssue) -> str:
+def _resolve_title_prefix(db: Session, hub: HubIssue, src: Ticket | None = None) -> str:
+    """解析 Linear issue 标题前缀：优先使用工单来源编号（如 KSM billNumber、智齿单号），
+    次优回落 source_ticket_id，无源单号时兜底回落内部短码 hub.short_code。"""
+    if src is None:
+        src = _primary_source_ticket(db, hub)
+    if src:
+        ticket_no = src.source_ticket_number or src.source_ticket_id
+        if ticket_no:
+            return ticket_no
+    return hub.short_code
+
+
+def _build_description(db: Session, hub: HubIssue, src: Ticket | None = None) -> str:
     """构建 Linear Issue 描述正文（Markdown 结构化格式）。
 
     包含：
@@ -111,7 +123,8 @@ def _build_description(db: Session, hub: HubIssue) -> str:
         f"- **任务短码**: {hub.short_code} ({_TICKET_TYPE_ZH.get(hub.type, hub.type)})"
     )
 
-    src = _primary_source_ticket(db, hub)
+    if src is None:
+        src = _primary_source_ticket(db, hub)
     if src:
         # 工单来源
         source_name = _SOURCE_ZH.get(src.source_code or "", src.source_code or "未知")
@@ -365,10 +378,13 @@ def push_hub_issue_to_linear(
         if assignee_user.linear_team_id:
             team_id = assignee_user.linear_team_id
 
+        src = _primary_source_ticket(db, hub)
+        title_prefix = _resolve_title_prefix(db, hub, src=src)
+
         req = CreateIssueRequest(
-            title=f"[{hub.short_code}] {hub.title}",
+            title=f"[{title_prefix}] {hub.title}",
             team_id=team_id,
-            description=_build_description(db, hub),
+            description=_build_description(db, hub, src=src),
             assignee_id=assignee_linear_id,
             priority=_PRIORITY_MAP.get(hub.priority or "", 0),
         )
