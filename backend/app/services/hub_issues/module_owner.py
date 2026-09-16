@@ -73,6 +73,21 @@ def peek_module_owner(
     return _resolve_user_by_name(db, names[idx])
 
 
+def list_module_owners(
+    db: Session, product_line_code: str | None, module: str | None
+) -> list[User]:
+    """查询该模块配置的所有有效研发责任人列表（按 dev_owners 出现顺序）。"""
+    mod_row, names = _lookup_module_and_names(db, product_line_code, module)
+    if mod_row is None or not names:
+        return []
+    owners: list[User] = []
+    for name in names:
+        u = _resolve_user_by_name(db, name)
+        if u is not None and u not in owners:
+            owners.append(u)
+    return owners
+
+
 def consume_module_owner(
     db: Session, product_line_code: str | None, module: str | None
 ) -> User | None:
@@ -90,3 +105,4 @@ def consume_module_owner(
     owner = _resolve_user_by_name(db, names[idx])
     mod_row.dev_owner_rotation_cursor = (idx + 1) % len(names)
     return owner
+

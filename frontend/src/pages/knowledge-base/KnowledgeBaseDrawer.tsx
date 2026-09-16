@@ -12,6 +12,7 @@ import {
   type CatalogModuleOut,
   KNOWLEDGE_STATUS_LABELS,
 } from "./knowledgeBaseStore";
+import { stripHtmlToCleanText } from "@/pages/tickets/replyNoteUtils";
 
 export interface KnowledgeBaseDrawerProps {
   open: boolean;
@@ -242,7 +243,12 @@ export function KnowledgeBaseDrawer({
       setFormError("请录入详细的知识内容");
       return;
     }
-    if (trimmedContent.length > 2000) {
+    const cleanContent = stripHtmlToCleanText(trimmedContent);
+    if (!cleanContent) {
+      setFormError("请录入详细的知识内容");
+      return;
+    }
+    if (cleanContent.length > 2000) {
       setFormError("知识内容最多录入 2000 字");
       return;
     }
@@ -259,7 +265,7 @@ export function KnowledgeBaseDrawer({
       module_code: moduleCode,
       module_name: selectedMod?.name ?? moduleCode,
       applicable_customer: applicableCustomer.trim() || "全部客户",
-      content: trimmedContent,
+      content: cleanContent,
       status: "pending_review",
       created_by: creator,
       ticket_id: ticketId,
@@ -283,14 +289,14 @@ export function KnowledgeBaseDrawer({
       module_code: moduleCode,
       module_name: selectedMod?.name ?? moduleCode,
       applicable_customer: applicableCustomer.trim() || "全部客户",
-      content: trimmedContent,
+      content: cleanContent,
       status: "pending_review",
       attachments,
       created_by: creator,
     });
 
     if (answerCurrentTicket && onAnswerAndSubmit) {
-      onAnswerAndSubmit(trimmedContent);
+      onAnswerAndSubmit(cleanContent);
     }
 
     onSubmitSuccess?.(newItem);
@@ -305,16 +311,20 @@ export function KnowledgeBaseDrawer({
       setFormError("请录入详细的知识/答复内容");
       return;
     }
-    if (trimmedContent.length > 2000) {
+    const cleanContent = stripHtmlToCleanText(trimmedContent);
+    if (!cleanContent) {
+      setFormError("请录入详细的知识/答复内容");
+      return;
+    }
+    if (cleanContent.length > 2000) {
       setFormError("内容最多录入 2000 字");
       return;
     }
     if (onAnswerAndSubmit) {
-      onAnswerAndSubmit(trimmedContent);
+      onAnswerAndSubmit(cleanContent);
     }
     onClose();
   };
-
   if (!open) return null;
 
   return (

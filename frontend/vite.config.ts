@@ -12,6 +12,7 @@ export default defineConfig({
     alias: { "@": path.resolve(__dirname, "./src") },
   },
   server: {
+    host: "0.0.0.0",
     port: 5173,
     proxy: {
       // 代理到远程 SIT 后端，本地无需启动 backend

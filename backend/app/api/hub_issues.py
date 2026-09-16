@@ -27,7 +27,7 @@ from app.services import knowledge_feedback as kf
 from app.services.agents.operation_answer import auto_answer_operation
 from app.services.cascade.reply_sync import ReplySyncError, author_reply
 from app.services.cascade.supply_sync import SupplySyncError, request_supply
-from app.services.hub_issues.module_owner import peek_module_owner
+from app.services.hub_issues.module_owner import list_module_owners, peek_module_owner
 from app.services.hub_issues.op_status import (
     OP_ANSWERED,
     OP_CLOSED,
@@ -291,11 +291,17 @@ class CatalogModuleOut(BaseModel):
     name: str
 
 
+class OwnerItem(BaseModel):
+    id: int
+    name: str
+
+
 class ModuleOwnerResponse(BaseModel):
     product_line_code: str | None = None
     module: str | None = None
     user_id: int | None = None
     user_name: str | None = None
+    owners: list[OwnerItem] = Field(default_factory=list)
 
 
 @router.get("/catalog/modules", response_model=list[CatalogModuleOut])
@@ -335,11 +341,14 @@ def get_catalog_module_owner(
 ) -> ModuleOwnerResponse:
     """根据产品分类与问题模块查询指定责任人（require_user）。"""
     owner = peek_module_owner(db, product_line_code, module)
+    all_owners = list_module_owners(db, product_line_code, module)
+    owners_list = [OwnerItem(id=u.id, name=u.name) for u in all_owners]
     return ModuleOwnerResponse(
         product_line_code=product_line_code,
         module=module,
-        user_id=owner.id if owner else None,
-        user_name=owner.name if owner else None,
+        user_id=owner.id if owner else (owners_list[0].id if owners_list else None),
+        user_name=owner.name if owner else (owners_list[0].name if owners_list else None),
+        owners=owners_list,
     )
 
 

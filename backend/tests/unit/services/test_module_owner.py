@@ -139,3 +139,18 @@ def test_split_dev_owner_names_separator_compat(db_session: Session) -> None:
     ]
     assert picks_comma == [u1.id, u2.id]
     assert picks_zh_comma == [u1.id, u2.id]
+
+
+def test_list_module_owners_returns_all_active_users(db_session: Session) -> None:
+    from app.services.hub_issues.module_owner import list_module_owners
+
+    u1 = _seed_user(db_session, "用户A")
+    u2 = _seed_user(db_session, "用户B")
+    _seed_user(db_session, "停用用户", active=False)
+    _seed_module(db_session, mod="多选模块", dev_owners="用户A、停用用户、用户B")
+    db_session.commit()
+
+    owners = list_module_owners(db_session, "发票云", "多选模块")
+    assert len(owners) == 2
+    assert [o.id for o in owners] == [u1.id, u2.id]
+

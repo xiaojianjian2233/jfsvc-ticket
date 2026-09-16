@@ -4,6 +4,8 @@ import {
   isFieldEmpty,
   isPlaceholderWord,
   parseReplyNoteSolutions,
+  stripHtmlToCleanText,
+  extractPureSolution,
 } from "./replyNoteUtils";
 
 describe("replyNoteUtils 校验与解析工具函数", () => {
@@ -107,6 +109,56 @@ describe("replyNoteUtils 校验与解析工具函数", () => {
       const res = parseReplyNoteSolutions(note, tasks);
       expect(res[101]).toBe("");
       expect(res[102]).toBe("任务二已有实质性排查结论");
+    });
+  });
+
+  describe("stripHtmlToCleanText 富文本及样式标签净化", () => {
+    it("剥离生产环境中出现的 span 及内联字体与背景色样式", () => {
+      const dirtyHtml =
+        '<span style="color: rgb(6, 6, 6); font-family: -apple-system, &quot;system-ui&quot;, 微软雅黑, &quot;Helvetica Neue&quot;, sans-serif; font-size: 14px; white-space: pre-wrap; background-color: rgb(229, 242, 255);">数电票开具异常排查方案：已核实税控端口正常，重启助手服务后已恢复正常开票。</span>';
+      const clean = stripHtmlToCleanText(dirtyHtml);
+      expect(clean).toBe(
+        "数电票开具异常排查方案：已核实税控端口正常，重启助手服务后已恢复正常开票。",
+      );
+      expect(clean).not.toContain("<span");
+      expect(clean).not.toContain("style=");
+      expect(clean).not.toContain("background-color");
+      expect(clean).not.toContain("rgb(");
+    });
+
+    it("正确将段落 <p>、<div>、<br> 与列表 <li> 转换为规范文本换行", () => {
+      const html1 = "<p>第一段排查过程</p><p>第二段处理结论</p>";
+      expect(stripHtmlToCleanText(html1)).toBe("第一段排查过程\n第二段处理结论");
+
+      const html2 = "<div>步骤一：进入配置</div><div>步骤二：点击保存</div>";
+      expect(stripHtmlToCleanText(html2)).toBe("步骤一：进入配置\n步骤二：点击保存");
+
+      const html3 = "行1内容<br>行2内容<br/>行3内容";
+      expect(stripHtmlToCleanText(html3)).toBe("行1内容\n行2内容\n行3内容");
+
+      const html4 = "<ul><li>步骤A</li><li>步骤B</li></ul>";
+      expect(stripHtmlToCleanText(html4)).toBe("• 步骤A\n• 步骤B");
+    });
+
+    it("正确还原常见 HTML 实体并规整空格", () => {
+      const html = "&nbsp;测试&lt;xml&gt;&amp;&quot;引号&quot;&nbsp;";
+      expect(stripHtmlToCleanText(html)).toBe('测试<xml>&"引号"');
+    });
+
+    it("纯文本输入直接原样返回，空值安全返回空串", () => {
+      expect(stripHtmlToCleanText("普通纯文本解决方案")).toBe("普通纯文本解决方案");
+      expect(stripHtmlToCleanText("")).toBe("");
+      expect(stripHtmlToCleanText("   ")).toBe("");
+      expect(stripHtmlToCleanText(null)).toBe("");
+      expect(stripHtmlToCleanText(undefined)).toBe("");
+    });
+  });
+
+  describe("extractPureSolution 剥离 HTML 外层标签", () => {
+    it("当解决方案包含【解决方案】前缀且带有 span 样式标签时，能还原纯净文本", () => {
+      const raw =
+        '【解决方案】<span style="color: rgb(0,0,0); font-size: 14px;">经沟通已解决客户开票问题</span>';
+      expect(extractPureSolution(raw)).toBe("经沟通已解决客户开票问题");
     });
   });
 });

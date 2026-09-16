@@ -159,8 +159,8 @@ export function SlaModal({ initialData, onClose, onSubmit }: SlaModalProps) {
         {/* 标题与正文分割线 */}
         <div className="border-b border-hub-border w-full" />
 
-        {/* 正文区：上下排列，左标签右输入框对齐，输入框宽度 300px */}
-        <div className="px-6 py-5 flex flex-col gap-4 text-[13px]">
+        {/* 正文区：上下排列，左标签右输入框对齐，key的间距增加5px(gap-5)，输入框高修改为30px(h-[30px])，宽度增加30px(w-[330px]) */}
+        <div className="px-6 py-5 flex flex-col gap-5 text-[13px]">
           {/* 1. 服务等级 */}
           <div className="flex items-center justify-between">
             <label className="text-hub-text font-medium flex items-center">
@@ -171,7 +171,7 @@ export function SlaModal({ initialData, onClose, onSubmit }: SlaModalProps) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="请输入服务等级名称"
-              className="w-[300px] h-9 px-3 border border-hub-border rounded-[6px] text-[13px] outline-none focus:border-[#6085e7] transition-colors"
+              className="w-[330px] h-[30px] px-3 border border-hub-border rounded-[6px] text-[13px] outline-none focus:border-[#6085e7] transition-colors"
             />
           </div>
 
@@ -180,10 +180,10 @@ export function SlaModal({ initialData, onClose, onSubmit }: SlaModalProps) {
             <label className="text-hub-text font-medium flex items-center">
               <span className="text-rose-500 mr-1">*</span>问题级别
             </label>
-            <div className="relative w-[300px]">
+            <div className="relative w-[330px]">
               <div
                 onClick={() => setLevelDropdownOpen(!levelDropdownOpen)}
-                className="w-full h-9 px-3 flex items-center justify-between border border-hub-border rounded-[6px] text-[13px] bg-white cursor-pointer hover:border-[#6085e7] transition-colors select-none"
+                className="w-full h-[30px] px-3 flex items-center justify-between border border-hub-border rounded-[6px] text-[13px] bg-white cursor-pointer hover:border-[#6085e7] transition-colors select-none"
               >
                 <span className="truncate">
                   {issueLevels.length > 0 ? issueLevels.join("、") : "请选择问题级别"}
@@ -192,7 +192,7 @@ export function SlaModal({ initialData, onClose, onSubmit }: SlaModalProps) {
               </div>
 
               {levelDropdownOpen && (
-                <div className="absolute top-10 left-0 w-full bg-white border border-hub-border rounded-[8px] shadow-lg z-20 py-2 flex flex-col gap-1">
+                <div className="absolute top-9 left-0 w-full bg-white border border-hub-border rounded-[8px] shadow-lg z-20 py-2 flex flex-col gap-1">
                   {ISSUE_LEVEL_OPTIONS.map((level) => {
                     const checked = issueLevels.includes(level);
                     return (
@@ -221,10 +221,10 @@ export function SlaModal({ initialData, onClose, onSubmit }: SlaModalProps) {
             <label className="text-hub-text font-medium flex items-center">
               <span className="text-rose-500 mr-1">*</span>问题类型
             </label>
-            <div className="relative w-[300px]">
+            <div className="relative w-[330px]">
               <div
                 onClick={() => setTypeDropdownOpen(!typeDropdownOpen)}
-                className="w-full h-9 px-3 flex items-center justify-between border border-hub-border rounded-[6px] text-[13px] bg-white cursor-pointer hover:border-[#6085e7] transition-colors select-none"
+                className="w-full h-[30px] px-3 flex items-center justify-between border border-hub-border rounded-[6px] text-[13px] bg-white cursor-pointer hover:border-[#6085e7] transition-colors select-none"
               >
                 <span className="truncate">
                   {issueTypes.length > 0 ? issueTypes.join("、") : "请选择问题类型"}
@@ -233,7 +233,7 @@ export function SlaModal({ initialData, onClose, onSubmit }: SlaModalProps) {
               </div>
 
               {typeDropdownOpen && (
-                <div className="absolute top-10 left-0 w-full bg-white border border-hub-border rounded-[8px] shadow-lg z-20 py-2 flex flex-col gap-1">
+                <div className="absolute top-9 left-0 w-full bg-white border border-hub-border rounded-[8px] shadow-lg z-20 py-2 flex flex-col gap-1">
                   {ISSUE_TYPE_OPTIONS.map((t) => {
                     const checked = issueTypes.includes(t);
                     return (
@@ -262,7 +262,7 @@ export function SlaModal({ initialData, onClose, onSubmit }: SlaModalProps) {
             <label className="text-hub-text font-medium flex items-center">
               <span className="text-rose-500 mr-1">*</span>标准处理时长（SLA)
             </label>
-            <div className="relative w-[300px]">
+            <div className="relative w-[330px]">
               <input
                 type="number"
                 step="any"
@@ -270,7 +270,7 @@ export function SlaModal({ initialData, onClose, onSubmit }: SlaModalProps) {
                 value={slaHours}
                 onChange={(e) => setSlaHours(e.target.value)}
                 placeholder="例如：40"
-                className="w-full h-9 pl-3 pr-8 border border-hub-border rounded-[6px] text-[13px] outline-none focus:border-[#6085e7] transition-colors"
+                className="w-full h-[30px] pl-3 pr-8 border border-hub-border rounded-[6px] text-[13px] outline-none focus:border-[#6085e7] transition-colors"
               />
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[13px] text-hub-textMuted select-none pointer-events-none">
                 h
@@ -288,7 +288,7 @@ export function SlaModal({ initialData, onClose, onSubmit }: SlaModalProps) {
               value={sourceSystem}
               onChange={(e) => setSourceSystem(e.target.value)}
               placeholder="例如：KSM 或 智齿"
-              className="w-[300px] h-9 px-3 border border-hub-border rounded-[6px] text-[13px] outline-none focus:border-[#6085e7] transition-colors"
+              className="w-[330px] h-[30px] px-3 border border-hub-border rounded-[6px] text-[13px] outline-none focus:border-[#6085e7] transition-colors"
             />
           </div>
 
@@ -302,7 +302,7 @@ export function SlaModal({ initialData, onClose, onSubmit }: SlaModalProps) {
               value={sourceSystemField}
               onChange={(e) => setSourceSystemField(e.target.value)}
               placeholder="例如：serviceLevel"
-              className="w-[300px] h-9 px-3 border border-hub-border rounded-[6px] text-[13px] outline-none focus:border-[#6085e7] transition-colors"
+              className="w-[330px] h-[30px] px-3 border border-hub-border rounded-[6px] text-[13px] outline-none focus:border-[#6085e7] transition-colors"
             />
           </div>
 
@@ -316,7 +316,7 @@ export function SlaModal({ initialData, onClose, onSubmit }: SlaModalProps) {
               value={sourceSystemCode}
               onChange={(e) => setSourceSystemCode(e.target.value)}
               placeholder="例如：22 或 0"
-              className="w-[300px] h-9 px-3 border border-hub-border rounded-[6px] text-[13px] outline-none focus:border-[#6085e7] transition-colors"
+              className="w-[330px] h-[30px] px-3 border border-hub-border rounded-[6px] text-[13px] outline-none focus:border-[#6085e7] transition-colors"
             />
           </div>
 

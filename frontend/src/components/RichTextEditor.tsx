@@ -44,6 +44,58 @@ export function RichTextEditor({
     }
   };
 
+  const handlePaste = (e: React.ClipboardEvent) => {
+    if (disabled || !editorRef.current) return;
+
+    // 检查是否有图片文件直接粘贴
+    if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+      const file = e.clipboardData.files[0];
+      if (file.type.startsWith("image/")) {
+        e.preventDefault();
+        if (file.size > 1 * 1024 * 1024) {
+          alert("单张图片大小不能超过 1MB");
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (typeof reader.result === "string") {
+            editorRef.current?.focus();
+            document.execCommand(
+              "insertHTML",
+              false,
+              `<img src="${reader.result}" alt="${file.name}" style="max-width: 100%; border-radius: 6px; margin: 4px 0;" /> `,
+            );
+            handleInput();
+          }
+        };
+        reader.readAsDataURL(file);
+        return;
+      }
+    }
+
+    // 纯文本粘贴，彻底阻止剪贴板携带的外部 <span>, <font>, inline style (如 background-color, font-family 等) 污染编辑器
+    e.preventDefault();
+    const text = e.clipboardData.getData("text/plain");
+    if (!text) return;
+
+    if (document.queryCommandSupported && document.queryCommandSupported("insertText")) {
+      document.execCommand("insertText", false, text);
+    } else {
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        range.deleteContents();
+        const textNode = document.createTextNode(text);
+        range.insertNode(textNode);
+        range.setStartAfter(textNode);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    }
+    handleInput();
+  };
+
   const exec = (command: string, value: string | undefined = undefined) => {
     if (disabled || !editorRef.current) return;
     editorRef.current.focus();
@@ -226,10 +278,11 @@ export function RichTextEditor({
           ref={editorRef}
           contentEditable={!disabled}
           onInput={handleInput}
+          onPaste={handlePaste}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           style={{ minHeight }}
-          className="outline-none text-[12.5px] text-slate-800 leading-relaxed break-words select-text [&_a]:text-[#2b5ed1] [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
+          className="outline-none text-[12.5px] text-slate-800 leading-relaxed break-words whitespace-pre-wrap select-text [&_a]:text-[#2b5ed1] [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
           role="textbox"
           aria-multiline="true"
           aria-label="富文本知识内容"

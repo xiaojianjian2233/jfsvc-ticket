@@ -228,6 +228,7 @@ import {
   renderFormattedReplyNote,
   isValidSolution,
   isFieldEmpty,
+  stripHtmlToCleanText,
 } from "./replyNoteUtils";
 
 export {
@@ -2838,7 +2839,7 @@ function SubTaskNoteModal({
   onConfirm: (content: string) => void;
   onClose: () => void;
 }) {
-  const [content, setContent] = useState(initialContent);
+  const [content, setContent] = useState(() => stripHtmlToCleanText(initialContent));
 
   return (
     <div
@@ -2906,7 +2907,7 @@ function SubTaskNoteModal({
                 type="button"
                 aria-label="保存"
                 onClick={() => {
-                  onConfirm(content);
+                  onConfirm(stripHtmlToCleanText(content));
                   onClose();
                 }}
                 className="px-4 py-1.5 text-[12px] font-semibold rounded-[7px] bg-[#6085e7] text-white hover:brightness-95 cursor-pointer shadow-xs"
@@ -3237,6 +3238,7 @@ function SubTicketList({
         confirmed?: boolean;
         assigned_user_id?: number | null;
         assigned_user_name?: string | null;
+        available_owners?: Array<{ id: number; name: string }>;
         status?: string;
       }
     >
@@ -3411,6 +3413,7 @@ function SubTicketList({
       confirmed: cur?.confirmed ?? altCur?.confirmed ?? false,
       assigned_user_id: cur?.assigned_user_id !== undefined ? cur.assigned_user_id : (altCur?.assigned_user_id !== undefined ? altCur.assigned_user_id : initial.assigned_user_id),
       assigned_user_name: cur?.assigned_user_name !== undefined ? cur.assigned_user_name : (altCur?.assigned_user_name !== undefined ? altCur.assigned_user_name : initial.assigned_user_name),
+      available_owners: cur?.available_owners ?? altCur?.available_owners ?? [],
       status: cur?.status ?? altCur?.status,
     };
   };
@@ -3444,6 +3447,7 @@ function SubTicketList({
       confirmed: boolean;
       assigned_user_id?: number | null;
       assigned_user_name?: string | null;
+      available_owners?: Array<{ id: number; name: string }>;
       status?: string;
     }>,
   ) => {
@@ -3473,7 +3477,7 @@ function SubTicketList({
     });
   };
 
-  // 根据产品分类与问题模块自动带出指定责任人
+  // 根据产品分类与问题模块自动带出指定责任人（如果有多位责任人，则保存 available_owners 供下拉切换）
   const fetchAndApplyModuleOwner = useCallback(
     async (rowKey: string | number, plc?: string, mod?: string) => {
       if (!plc || !mod) return;
@@ -3482,10 +3486,22 @@ function SubTicketList({
           product_line_code: plc,
           module: mod,
         });
+        const owners = Array.isArray(res?.owners) ? res.owners : [];
         if (res && res.user_id !== undefined && res.user_id !== null) {
           updateRow(rowKey, {
             assigned_user_id: res.user_id,
             assigned_user_name: res.user_name,
+            available_owners: owners,
+          });
+        } else if (owners.length > 0) {
+          updateRow(rowKey, {
+            assigned_user_id: owners[0].id,
+            assigned_user_name: owners[0].name,
+            available_owners: owners,
+          });
+        } else {
+          updateRow(rowKey, {
+            available_owners: [],
           });
         }
       } catch {
@@ -4045,10 +4061,11 @@ function SubTicketList({
                 productLineOptions.find((p) => p.code === st.product_line_code)?.name ||
                 st.product_line_code ||
                 "";
-              const truncSolution = st.solution
-                ? st.solution.length > 10
-                  ? `${st.solution.slice(0, 10)}...`
-                  : st.solution
+              const cleanSol = stripHtmlToCleanText(st.solution);
+              const truncSolution = cleanSol
+                ? cleanSol.length > 10
+                  ? `${cleanSol.slice(0, 10)}...`
+                  : cleanSol
                 : "";
               const currentAiStatus =
                 aiStatusMap[rowKey] ?? (st.confirmed || st.solution?.trim() ? "done" : "idle");
@@ -4147,7 +4164,28 @@ function SubTicketList({
                     </span>
                   </td>
                   <td className="px-2.5 py-1.5 whitespace-nowrap">
-                    {currentAssigneeName}
+                    {st.available_owners && st.available_owners.length > 1 && canEdit && !isRowLocked ? (
+                      <select
+                        value={st.assigned_user_id ?? ""}
+                        onChange={(e) => {
+                          const uid = e.target.value ? Number(e.target.value) : null;
+                          const matched = st.available_owners?.find((o) => o.id === uid);
+                          updateRow(rowKey, {
+                            assigned_user_id: uid,
+                            assigned_user_name: matched ? matched.name : null,
+                          });
+                        }}
+                        className="text-[11.5px] border border-hub-border rounded-[6px] px-1.5 py-1 bg-white outline-none focus:border-hub-teal h-[28px] cursor-pointer"
+                      >
+                        {st.available_owners.map((owner) => (
+                          <option key={owner.id} value={owner.id}>
+                            {owner.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      currentAssigneeName
+                    )}
                   </td>
                   <td className="px-2.5 py-1.5 whitespace-nowrap max-w-[140px]">
                     {isValidSolution(st.solution) ? (
@@ -4170,7 +4208,7 @@ function SubTicketList({
                             setNoteModal({
                               key: rowKey,
                               title: rowTitle,
-                              content: st.solution,
+                              content: cleanSol,
                               canEdit: canEdit,
                             });
                           }
@@ -4377,10 +4415,11 @@ function SubTicketList({
                 productLineOptions.find((p) => p.code === st.product_line_code)?.name ||
                 st.product_line_code ||
                 "";
-              const truncSolution = st.solution
-                ? st.solution.length > 10
-                  ? `${st.solution.slice(0, 10)}...`
-                  : st.solution
+              const cleanSol = stripHtmlToCleanText(st.solution);
+              const truncSolution = cleanSol
+                ? cleanSol.length > 10
+                  ? `${cleanSol.slice(0, 10)}...`
+                  : cleanSol
                 : "";
               const currentAiStatus =
                 aiStatusMap[rowKey] ?? (stk.status === "answered" || st.solution?.trim() ? "done" : "idle");
@@ -4487,7 +4526,28 @@ function SubTicketList({
                     })()}
                   </td>
                   <td className="px-2.5 py-1.5 whitespace-nowrap">
-                    {currentAssigneeName}
+                    {st.available_owners && st.available_owners.length > 1 && canEditThisRow && !isRowLocked ? (
+                      <select
+                        value={st.assigned_user_id ?? ""}
+                        onChange={(e) => {
+                          const uid = e.target.value ? Number(e.target.value) : null;
+                          const matched = st.available_owners?.find((o) => o.id === uid);
+                          updateRow(rowKey, {
+                            assigned_user_id: uid,
+                            assigned_user_name: matched ? matched.name : null,
+                          });
+                        }}
+                        className="text-[11.5px] border border-hub-border rounded-[6px] px-1.5 py-1 bg-white outline-none focus:border-hub-teal h-[28px] cursor-pointer"
+                      >
+                        {st.available_owners.map((owner) => (
+                          <option key={owner.id} value={owner.id}>
+                            {owner.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      currentAssigneeName
+                    )}
                   </td>
                   <td className="px-2.5 py-1.5 whitespace-nowrap max-w-[140px]">
                     {isValidSolution(st.solution) ? (
@@ -4510,7 +4570,7 @@ function SubTicketList({
                             setNoteModal({
                               key: rowKey,
                               title: rowTitle,
-                              content: st.solution,
+                              content: cleanSol,
                               canEdit: canEditThisRow,
                             });
                           }
@@ -4711,10 +4771,11 @@ function SubTicketList({
                 productLineOptions.find((p) => p.code === st.product_line_code)?.name ||
                 st.product_line_code ||
                 "";
-              const truncSolution = st.solution
-                ? st.solution.length > 10
-                  ? `${st.solution.slice(0, 10)}...`
-                  : st.solution
+              const cleanSol = stripHtmlToCleanText(st.solution);
+              const truncSolution = cleanSol
+                ? cleanSol.length > 10
+                  ? `${cleanSol.slice(0, 10)}...`
+                  : cleanSol
                 : "";
               const currentAiStatus =
                 aiStatusMap[draftKey] ?? (st.confirmed || st.solution?.trim() ? "done" : "idle");
@@ -4808,7 +4869,28 @@ function SubTicketList({
                     })()}
                   </td>
                   <td className="px-2.5 py-1.5 whitespace-nowrap">
-                    {currentAssigneeName}
+                    {st.available_owners && st.available_owners.length > 1 && canEdit && !isRowLocked ? (
+                      <select
+                        value={st.assigned_user_id ?? ""}
+                        onChange={(e) => {
+                          const uid = e.target.value ? Number(e.target.value) : null;
+                          const matched = st.available_owners?.find((o) => o.id === uid);
+                          updateRow(draftKey, {
+                            assigned_user_id: uid,
+                            assigned_user_name: matched ? matched.name : null,
+                          });
+                        }}
+                        className="text-[11.5px] border border-hub-border rounded-[6px] px-1.5 py-1 bg-white outline-none focus:border-hub-teal h-[28px] cursor-pointer"
+                      >
+                        {st.available_owners.map((owner) => (
+                          <option key={owner.id} value={owner.id}>
+                            {owner.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      currentAssigneeName
+                    )}
                   </td>
                   <td className="px-2.5 py-1.5 whitespace-nowrap max-w-[140px]">
                     {isValidSolution(st.solution) ? (
@@ -4831,7 +4913,7 @@ function SubTicketList({
                             setNoteModal({
                               key: draftKey,
                               title: rowTitle,
-                              content: st.solution,
+                              content: cleanSol,
                               canEdit: canEdit,
                             });
                           }
@@ -5056,13 +5138,14 @@ function SubTicketList({
           ticketHandlerName={ticketHandlerName ?? undefined}
           ticketId={ticketId}
           onAnswerAndSubmit={(content) => {
+            const cleanContent = stripHtmlToCleanText(content);
             const targetKey = kbDrawerState.key;
-            updateRow(targetKey, { solution: content });
+            updateRow(targetKey, { solution: cleanContent });
             if (typeof targetKey === "number") {
-              updateSubtaskMutation.mutate({ hubId: targetKey, body: { solution: content } });
+              updateSubtaskMutation.mutate({ hubId: targetKey, body: { solution: cleanContent } });
             }
-            onSyncNote?.(kbDrawerState.title, content);
-            const nextTasks = getAllTasks({ key: targetKey, solution: content });
+            onSyncNote?.(kbDrawerState.title, cleanContent);
+            const nextTasks = getAllTasks({ key: targetKey, solution: cleanContent });
             onSyncAllTasksNote?.(formatTasksReplyNote(nextTasks));
             if (onToast) {
               onToast("已更新任务解决方案并同步至工单处理说明", "success");

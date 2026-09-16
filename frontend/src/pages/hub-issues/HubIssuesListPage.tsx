@@ -13,6 +13,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, postByPath, type HubIssueSummary } from "@/api/client";
 import { OpStatusBadge, OP_STATUS_LABEL } from "@/components/OpStatusBadge";
 import { linearStatusToCN } from "@/api/processStage";
+import { DateTimeRangePicker } from "@/components/DateTimeRangePicker";
 import {
   Modal,
   ModalHeader,
@@ -956,21 +957,13 @@ function TimeRangeRow({
           />
         ))}
         {isCustom && (
-          <span className="inline-flex items-center gap-1.5 ml-1">
-            <input
-              type="date"
-              value={from}
-              onChange={(e) => onChange("自定义", e.target.value, to)}
-              className="text-[11.5px] border border-hub-border rounded px-2 py-1 bg-hub-panel"
+          <div className="w-[320px] ml-1">
+            <DateTimeRangePicker
+              fromValue={from}
+              toValue={to}
+              onChange={(f, t) => onChange("自定义", f, t)}
             />
-            <span className="text-hub-textFaint">~</span>
-            <input
-              type="date"
-              value={to}
-              onChange={(e) => onChange("自定义", from, e.target.value)}
-              className="text-[11.5px] border border-hub-border rounded px-2 py-1 bg-hub-panel"
-            />
-          </span>
+          </div>
         )}
       </div>
     </div>

@@ -19,12 +19,22 @@ function formatDateTime(val?: string | null): string {
 export function SlaConfigPage() {
   const qc = useQueryClient();
 
+  // 筛选条件状态
+  const [filterName, setFilterName] = useState("");
+  const [filterLevels, setFilterLevels] = useState<string[]>(["不限"]);
+  const [filterTypes, setFilterTypes] = useState<string[]>(["不限"]);
+
+  // 筛选下拉展开状态
+  const [levelDropdownOpen, setLevelDropdownOpen] = useState(false);
+  const [typeDropdownOpen, setTypeDropdownOpen] = useState(false);
+
   // 选中的记录 id 列表
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
-  // 弹窗状态
+  // 弹窗状态：editingItem 为 null 时新增；isCopy 为 true 时复制新增
   const [modalOpen, setModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<SlaLevelItem | null>(null);
+  const [isCopy, setIsCopy] = useState(false);
 
   // Toast 提示
   const [toastMessage, setToastMessage] = useState<{ text: string; type?: "success" | "warning" } | null>(null);
@@ -42,12 +52,33 @@ export function SlaConfigPage() {
     queryFn: () => adminSlaApi.list(),
   });
 
-  const list: SlaLevelItem[] = slaQuery.data ?? [];
+  const rawList: SlaLevelItem[] = slaQuery.data ?? [];
+
+  // 前端多维过滤
+  const list = rawList.filter((item) => {
+    // 1. 服务等级筛选
+    if (filterName.trim() && !item.name.toLowerCase().includes(filterName.trim().toLowerCase())) {
+      return false;
+    }
+    // 2. 问题级别筛选（默认“不限”）
+    if (!filterLevels.includes("不限") && filterLevels.length > 0) {
+      const itemLevels = (item.issue_levels || "").split("、").map((s) => s.trim());
+      const hasMatch = filterLevels.some((lvl) => itemLevels.includes(lvl));
+      if (!hasMatch) return false;
+    }
+    // 3. 问题类型筛选（默认“不限”）
+    if (!filterTypes.includes("不限") && filterTypes.length > 0) {
+      const itemTypes = (item.issue_types || "").split("、").map((s) => s.trim());
+      const hasMatch = filterTypes.some((t) => itemTypes.includes(t));
+      if (!hasMatch) return false;
+    }
+    return true;
+  });
 
   // 新增/修改保存 Mutation
   const saveMutation = useMutation({
     mutationFn: async (formData: SlaLevelFormData) => {
-      if (editingItem) {
+      if (editingItem && !isCopy) {
         await adminSlaApi.update(editingItem.id, formData);
       } else {
         await adminSlaApi.create(formData);
@@ -56,7 +87,7 @@ export function SlaConfigPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin", "sla-levels"] });
       setSelectedIds([]);
-      showToast(editingItem ? "修改成功" : "新增成功", "success");
+      showToast(editingItem && !isCopy ? "修改成功" : "新增成功", "success");
     },
   });
 
@@ -79,6 +110,27 @@ export function SlaConfigPage() {
   // 点击【新增】
   const handleAdd = () => {
     setEditingItem(null);
+    setIsCopy(false);
+    setModalOpen(true);
+  };
+
+  // 点击【复制新增】
+  const handleCopyAdd = () => {
+    if (selectedIds.length === 0) {
+      showToast("请先勾选需要复制的记录", "warning");
+      return;
+    }
+    if (selectedIds.length > 1) {
+      showToast("仅支持单选记录进行复制新增", "warning");
+      return;
+    }
+    const target = rawList.find((item) => item.id === selectedIds[0]);
+    if (!target) {
+      showToast("未找到选中的记录", "warning");
+      return;
+    }
+    setEditingItem(target);
+    setIsCopy(true);
     setModalOpen(true);
   };
 
@@ -92,13 +144,38 @@ export function SlaConfigPage() {
       showToast("仅支持单选记录进行修改", "warning");
       return;
     }
-    const target = list.find((item) => item.id === selectedIds[0]);
+    const target = rawList.find((item) => item.id === selectedIds[0]);
     if (!target) {
       showToast("未找到选中的记录", "warning");
       return;
     }
     setEditingItem(target);
+    setIsCopy(false);
     setModalOpen(true);
+  };
+
+  // 问题级别多选逻辑
+  const toggleFilterLevel = (lvl: string) => {
+    setFilterLevels((prev) => {
+      if (lvl === "不限") return ["不限"];
+      const withoutUnlimited = prev.filter((item) => item !== "不限");
+      const next = withoutUnlimited.includes(lvl)
+        ? withoutUnlimited.filter((item) => item !== lvl)
+        : [...withoutUnlimited, lvl];
+      return next.length === 0 ? ["不限"] : next;
+    });
+  };
+
+  // 问题类型多选逻辑
+  const toggleFilterType = (t: string) => {
+    setFilterTypes((prev) => {
+      if (t === "不限") return ["不限"];
+      const withoutUnlimited = prev.filter((item) => item !== "不限");
+      const next = withoutUnlimited.includes(t)
+        ? withoutUnlimited.filter((item) => item !== t)
+        : [...withoutUnlimited, t];
+      return next.length === 0 ? ["不限"] : next;
+    });
   };
 
   return (
@@ -130,7 +207,109 @@ export function SlaConfigPage() {
         </div>
       )}
 
-      {/* 操作按钮区域 */}
+      {/* 1. 筛选条件栏 */}
+      <div className="bg-white p-3.5 rounded-[10px] border border-hub-border mb-3.5 flex items-center gap-4 flex-wrap text-[12.5px]">
+        {/* 服务等级 */}
+        <div className="flex items-center gap-2">
+          <span className="text-hub-textSecondary font-medium">服务等级:</span>
+          <input
+            type="text"
+            value={filterName}
+            onChange={(e) => setFilterName(e.target.value)}
+            placeholder="手动录入筛选"
+            className="w-[160px] h-[30px] px-2.5 border border-hub-border rounded-[6px] outline-none focus:border-[#6085e7] transition-colors"
+          />
+        </div>
+
+        {/* 问题级别 */}
+        <div className="flex items-center gap-2 relative">
+          <span className="text-hub-textSecondary font-medium">问题级别:</span>
+          <div className="relative w-[160px]">
+            <div
+              onClick={() => {
+                setLevelDropdownOpen(!levelDropdownOpen);
+                setTypeDropdownOpen(false);
+              }}
+              className="w-full h-[30px] px-2.5 flex items-center justify-between border border-hub-border rounded-[6px] bg-white cursor-pointer hover:border-[#6085e7] transition-colors select-none"
+            >
+              <span className="truncate">{filterLevels.join("、")}</span>
+              <span className="text-hub-textMuted text-[10px]">▼</span>
+            </div>
+            {levelDropdownOpen && (
+              <div className="absolute top-9 left-0 w-full bg-white border border-hub-border rounded-[8px] shadow-lg z-30 py-1.5 flex flex-col gap-0.5">
+                {["不限", "P0", "P1", "P2", "P3"].map((lvl) => (
+                  <label
+                    key={lvl}
+                    className="flex items-center gap-2 px-3 py-1 hover:bg-slate-50 cursor-pointer"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={filterLevels.includes(lvl)}
+                      onChange={() => toggleFilterLevel(lvl)}
+                      className="w-3.5 h-3.5 rounded border-hub-border text-[#6085e7] focus:ring-0 cursor-pointer"
+                    />
+                    <span>{lvl}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 问题类型 */}
+        <div className="flex items-center gap-2 relative">
+          <span className="text-hub-textSecondary font-medium">问题类型:</span>
+          <div className="relative w-[160px]">
+            <div
+              onClick={() => {
+                setTypeDropdownOpen(!typeDropdownOpen);
+                setLevelDropdownOpen(false);
+              }}
+              className="w-full h-[30px] px-2.5 flex items-center justify-between border border-hub-border rounded-[6px] bg-white cursor-pointer hover:border-[#6085e7] transition-colors select-none"
+            >
+              <span className="truncate">{filterTypes.join("、")}</span>
+              <span className="text-hub-textMuted text-[10px]">▼</span>
+            </div>
+            {typeDropdownOpen && (
+              <div className="absolute top-9 left-0 w-full bg-white border border-hub-border rounded-[8px] shadow-lg z-30 py-1.5 flex flex-col gap-0.5">
+                {["不限", "应用类", "需求", "bug修复"].map((t) => (
+                  <label
+                    key={t}
+                    className="flex items-center gap-2 px-3 py-1 hover:bg-slate-50 cursor-pointer"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={filterTypes.includes(t)}
+                      onChange={() => toggleFilterType(t)}
+                      className="w-3.5 h-3.5 rounded border-hub-border text-[#6085e7] focus:ring-0 cursor-pointer"
+                    />
+                    <span>{t}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 重置按钮 */}
+        {(filterName || !filterLevels.includes("不限") || !filterTypes.includes("不限")) && (
+          <button
+            type="button"
+            onClick={() => {
+              setFilterName("");
+              setFilterLevels(["不限"]);
+              setFilterTypes(["不限"]);
+            }}
+            className="text-[#6085e7] hover:underline cursor-pointer text-[12px]"
+          >
+            重置筛选
+          </button>
+        )}
+      </div>
+
+      {/* 2. 操作按钮区域（增加【复制新增】按钮在【新增】后面） */}
       <div className="flex items-center justify-between mb-3.5">
         <div className="flex items-center gap-2.5">
           <button
@@ -139,6 +318,13 @@ export function SlaConfigPage() {
             className="px-4 py-1.5 rounded-[6px] bg-[#6085e7] text-white text-[13px] font-medium hover:bg-[#4f75dd] transition-colors cursor-pointer shadow-sm"
           >
             新增
+          </button>
+          <button
+            type="button"
+            onClick={handleCopyAdd}
+            className="px-4 py-1.5 rounded-[6px] bg-white border border-[#6085e7] text-[#6085e7] text-[13px] font-medium hover:bg-[#f0f4fd] transition-colors cursor-pointer shadow-sm"
+          >
+            复制新增
           </button>
           <button
             type="button"

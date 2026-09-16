@@ -167,49 +167,8 @@ function loadPrefs(): TablePrefs {
   }
 }
 
-function DateRangePicker({
-  label,
-  fromValue,
-  toValue,
-  onChange,
-}: {
-  label: string;
-  fromValue: string;
-  toValue: string;
-  onChange: (from: string, to: string) => void;
-}) {
-  const hasValue = Boolean(fromValue || toValue);
-  return (
-    <div className="h-[30px] w-full flex items-center px-2 border border-[#cbd5e1] rounded-[7px] bg-white focus-within:border-hub-teal text-xs gap-1 transition-colors">
-      <span className="text-hub-textMuted shrink-0 font-medium text-[11px] whitespace-nowrap">{label}</span>
-      <input
-        type="date"
-        value={fromValue}
-        onChange={(e) => onChange(e.target.value, toValue)}
-        title={`${label}起始日期`}
-        className="bg-transparent outline-none w-full text-[11px] text-hub-text min-w-0 cursor-pointer p-0"
-      />
-      <span className="text-hub-textFaint shrink-0 text-[10.5px] select-none">~</span>
-      <input
-        type="date"
-        value={toValue}
-        onChange={(e) => onChange(fromValue, e.target.value)}
-        title={`${label}截止日期`}
-        className="bg-transparent outline-none w-full text-[11px] text-hub-text min-w-0 cursor-pointer p-0"
-      />
-      {hasValue && (
-        <button
-          type="button"
-          onClick={() => onChange("", "")}
-          title={`清空${label}`}
-          className="text-hub-textMuted hover:text-hub-rose text-[12px] leading-none shrink-0 px-0.5"
-        >
-          ×
-        </button>
-      )}
-    </div>
-  );
-}
+import { DateTimeRangePicker } from "@/components/DateTimeRangePicker";
+
 
 function MultiCheckDropdown({
   placeholder,
@@ -2023,7 +1982,7 @@ export function TicketsListPage() {
             </div>
 
             {/* 9. 提单时间区间 */}
-            <DateRangePicker
+            <DateTimeRangePicker
               label="提单:"
               fromValue={receivedFrom}
               toValue={receivedTo}
@@ -2031,7 +1990,7 @@ export function TicketsListPage() {
             />
 
             {/* 10. 创建时间区间 */}
-            <DateRangePicker
+            <DateTimeRangePicker
               label="创建:"
               fromValue={createdFrom}
               toValue={createdTo}
@@ -2039,7 +1998,7 @@ export function TicketsListPage() {
             />
 
             {/* 11. 处理完成时间区间 */}
-            <DateRangePicker
+            <DateTimeRangePicker
               label="完成:"
               fromValue={resolvedFrom}
               toValue={resolvedTo}
@@ -2047,7 +2006,7 @@ export function TicketsListPage() {
             />
 
             {/* 12. 处理关闭时间区间 */}
-            <DateRangePicker
+            <DateTimeRangePicker
               label="关闭:"
               fromValue={closedFrom}
               toValue={closedTo}

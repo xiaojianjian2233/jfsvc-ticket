@@ -122,9 +122,96 @@ export function isPlaceholderWord(val?: string | null): boolean {
  * - 【沟通记录】\n【研发反馈】（两部分皆为空或占位符）
  * - 【解决方案】---, 【解决方案】
  */
+/**
+ * 将富文本内容转换为纯净文本（剥离 HTML 标签及内联样式，如 <span style="..."> 等，保留正常换行与段落）
+ */
+export function stripHtmlToCleanText(html: string | null | undefined): string {
+  if (!html) return "";
+  const raw = html.trim();
+  if (!raw) return "";
+
+  // 如果不包含 HTML 标签特征与实体，直接返回
+  if (!/<[a-z][\s\S]*>/i.test(raw) && !/&[a-z0-9#]+;/i.test(raw)) {
+    return raw;
+  }
+
+  // 1. 如果在浏览器或 jsdom 环境中，利用 DOM 解析
+  if (typeof document !== "undefined") {
+    try {
+      const container = document.createElement("div");
+      container.innerHTML = raw;
+
+      // 替换 <br> 为换行
+      const brs = container.querySelectorAll("br");
+      brs.forEach((br) => {
+        br.replaceWith("\n");
+      });
+
+      // 替换 <li> 为换行+列表符号
+      const lis = container.querySelectorAll("li");
+      lis.forEach((li) => {
+        const text = li.textContent || "";
+        li.textContent = `• ${text}\n`;
+      });
+
+      // 块级元素后面增加换行
+      const blocks = container.querySelectorAll("p, div, h1, h2, h3, h4, h5, h6, tr");
+      blocks.forEach((block) => {
+        block.insertAdjacentText("beforeend", "\n");
+      });
+
+      let text = container.textContent || container.innerText || "";
+      // 将特殊空格（如 &nbsp; 生成的 \u00a0）替换为普通空格
+      text = text.replace(/\u00a0/g, " ");
+      // 规整多余连续换行（最多保留2个连续换行）与首尾空白
+      text = text
+        .replace(/\r\n/g, "\n")
+        .replace(/\r/g, "\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+      return text;
+    } catch {
+      // fallback to regex below
+    }
+  }
+
+  // 2. 正则降级解析（在无 DOM 环境或异常时）
+  let text = raw
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "• ")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\u00a0/g, " ")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return text;
+}
+
+/**
+ * 判断解决方案内容是否为真实有效的值（过滤系统默认占位符与空模板）
+ * 任务解决方案系统默认的内容不是值，例如：
+ * - 空串、空格
+ * - ---, --, -, 无, 暂无, 转产研上下文, 录入说明
+ * - 【沟通记录】, 【沟通记录】---, 【沟通记录】无, 【沟通记录】转产研上下文
+ * - 【研发反馈】, 【研发反馈】---, 【研发反馈】无
+ * - 【沟通记录】\n【研发反馈】（两部分皆为空或占位符）
+ * - 【解决方案】---, 【解决方案】
+ */
 export function isValidSolution(sol?: string | null): boolean {
   if (!sol) return false;
-  const raw = sol.trim();
+  const clean = stripHtmlToCleanText(sol);
+  const raw = clean.trim();
   if (!raw || isPlaceholderWord(raw)) return false;
 
   // 研发类：如果包含【沟通记录】或【研发反馈】标签，拆解剥离后检查实际文字
@@ -147,7 +234,7 @@ export function isValidSolution(sol?: string | null): boolean {
 /** 递归剥离模板外层前缀，还原真实纯净解决方案文本，坚决杜绝多次嵌套拼接 */
 export function extractPureSolution(text: string | null | undefined): string {
   if (!text) return "";
-  let cur = text.trim();
+  let cur = stripHtmlToCleanText(text).trim();
   while (
     cur.includes("解决方案：") ||
     cur.includes("解决方案:") ||
@@ -160,7 +247,7 @@ export function extractPureSolution(text: string | null | undefined): string {
   ) {
     const match = cur.match(/【?解决方案】?[：:]?\s*([\s\S]*)$/);
     if (match && match[1] !== undefined) {
-      cur = match[1].trim();
+      cur = stripHtmlToCleanText(match[1]).trim();
     } else {
       break;
     }
@@ -362,7 +449,11 @@ export function renderFormattedReplyNote(content: string) {
   if (!content) {
     return <span className="text-hub-textFaint">暂无处理说明</span>;
   }
-  const lines = content.split("\n");
+  const cleanContent = stripHtmlToCleanText(content);
+  if (!cleanContent) {
+    return <span className="text-hub-textFaint">暂无处理说明</span>;
+  }
+  const lines = cleanContent.split("\n");
   return (
     <div className="space-y-1 text-[12.5px] leading-relaxed select-text font-sans">
       {lines.map((line, idx) => {

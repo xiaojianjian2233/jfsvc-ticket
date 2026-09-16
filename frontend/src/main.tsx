@@ -79,20 +79,23 @@ function isTokenExpired(token: string): boolean {
 }
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const token = localStorage.getItem("auth_token");
-  if (!token || isTokenExpired(token)) {
-    // ── DEV BYPASS: 使用 SIT 真实 Token，代理到远程后端 ──
-    if (import.meta.env.DEV) {
+  if (import.meta.env.DEV) {
+    const currentToken = localStorage.getItem("auth_token");
+    if (!currentToken || isTokenExpired(currentToken)) {
       localStorage.setItem(
         "auth_token",
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzNSIsIm5hbWUiOiJcdTY3NjhcdTYxNjdcdTgzODkiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3ODkwMzA0OTAsImV4cCI6MTc4OTYzNTI5MH0.QLT-Rs3URjC2MMJf0v-DNbCH6-qGB-6VFaXXR2rw56Y",
       );
       localStorage.setItem(
         "auth_user",
-        JSON.stringify({ id: 35, name: "杨慧莉", role: "admin", feishu_uid: "ou_bc3d1376d982e452056b469b4e73cad4" }),
+        JSON.stringify({ id: 3, name: "杨慧莉", role: "admin", feishu_uid: "ou_403664c7631e065b4ea31d67f07c2bed" }),
       );
-      return <>{children}</>;
     }
+    return <>{children}</>;
+  }
+
+  const token = localStorage.getItem("auth_token");
+  if (!token || isTokenExpired(token)) {
     localStorage.removeItem("auth_token");
     localStorage.removeItem("auth_user");
     return <Navigate to="/login" replace />;

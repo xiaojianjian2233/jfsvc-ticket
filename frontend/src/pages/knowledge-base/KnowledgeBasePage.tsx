@@ -15,6 +15,7 @@ import {
   type CatalogModuleOut,
 } from "./knowledgeBaseStore";
 import { KnowledgeBaseDrawer } from "./KnowledgeBaseDrawer";
+import { DateTimeRangePicker } from "@/components/DateTimeRangePicker";
 
 interface OptionItem {
   code: string;
@@ -210,7 +211,7 @@ function MultiSelectFilterBox({
 }
 
 /**
- * 时间筛选区间单元格：起止时间在同一个单元格中输入，包含清除按钮
+ * 时间筛选区间单元格：起止时间在同一个单元格中输入，包含清除按钮，支持时分
  */
 function DateRangeCell({
   label,
@@ -223,38 +224,18 @@ function DateRangeCell({
   endDate: string;
   onChange: (start: string, end: string) => void;
 }) {
-  const hasValue = Boolean(startDate || endDate);
   return (
     <div className="w-full">
       {label && <label className="block text-slate-600 mb-1 font-medium text-[12px]">{label}</label>}
-      <div className="h-[32px] w-full flex items-center px-2.5 border border-hub-border rounded-[7px] bg-white focus-within:border-hub-teal hover:border-slate-400 transition-colors gap-1 text-[12px]">
-        <input
-          type="date"
-          aria-label={label ? `${label}起始` : "起始日期"}
-          value={startDate}
-          onChange={(e) => onChange(e.target.value, endDate)}
-          className="bg-transparent outline-none w-full text-[11.5px] text-slate-700 min-w-0 cursor-pointer p-0 border-0"
-        />
-        <span className="text-slate-400 select-none text-[11px] shrink-0">~</span>
-        <input
-          type="date"
-          aria-label={label ? `${label}截止` : "截止日期"}
-          value={endDate}
-          onChange={(e) => onChange(startDate, e.target.value)}
-          className="bg-transparent outline-none w-full text-[11.5px] text-slate-700 min-w-0 cursor-pointer p-0 border-0"
-        />
-        {hasValue && (
-          <button
-            type="button"
-            onClick={() => onChange("", "")}
-            className="text-slate-400 hover:text-rose-600 text-[13px] leading-none shrink-0 p-0.5 cursor-pointer ml-1"
-            title="清空日期"
-            aria-label="清空日期"
-          >
-            ×
-          </button>
-        )}
-      </div>
+      <DateTimeRangePicker
+        fromValue={startDate}
+        toValue={endDate}
+        onChange={onChange}
+        className="!h-[32px]"
+        fromAriaLabel={label ? `${label}起始` : "起始日期"}
+        toAriaLabel={label ? `${label}截止` : "截止日期"}
+        clearAriaLabel="清空日期"
+      />
     </div>
   );
 }
