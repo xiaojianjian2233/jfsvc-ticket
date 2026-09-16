@@ -100,13 +100,52 @@ def test_ticket_endpoint_authorization_and_repeat(app_client, db_session):
         assert call.call_count == 2
 
 
-def test_initial_precedes_classification_even_when_classification_fails():
+def test_initial_uses_resolved_catalog_before_routing():
+    from app.api.webhooks import run_post_ingest_agents
+    from app.services.agents.triage import TriageResult
+
+    order = []
+    triage = TriageResult(
+        type="Bug_fix",
+        confidence=0.9,
+        reason="test",
+        is_mixed=False,
+        sub_problems=(),
+        cost_usd=0.0,
+        model="fake",
+        raw={},
+    )
+    with (
+        patch(
+            "app.services.agents.answer_draft.generate_initial_ticket_answer",
+            side_effect=lambda _: order.append("answer"),
+        ),
+        patch(
+            "app.api.webhooks.run_ticket_triage",
+            side_effect=lambda _: (order.append("classify"), triage)[1],
+        ),
+        patch("app.api.webhooks._resolve_module", side_effect=lambda _: order.append("catalog")),
+        patch(
+            "app.api.webhooks._route_by_type",
+            side_effect=lambda *args, **kwargs: order.append("route"),
+        ),
+    ):
+        run_post_ingest_agents(123)
+    assert order == ["classify", "catalog", "answer", "route"]
+
+
+def test_initial_still_runs_when_classification_fails():
     from app.api.webhooks import run_post_ingest_agents
 
     order = []
     with (
-        patch("app.services.agents.answer_draft.generate_initial_ticket_answer", side_effect=lambda _: order.append("answer")),
+        patch(
+            "app.services.agents.answer_draft.generate_initial_ticket_answer",
+            side_effect=lambda _: order.append("answer"),
+        ),
         patch("app.api.webhooks.run_ticket_triage", side_effect=lambda _: order.append("classify")),
+        patch("app.api.webhooks._resolve_module") as resolve,
     ):
         run_post_ingest_agents(123)
-    assert order == ["answer", "classify"]
+    assert order == ["classify", "answer"]
+    resolve.assert_not_called()

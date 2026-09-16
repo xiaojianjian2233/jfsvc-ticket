@@ -182,27 +182,31 @@ def _populate_subtasks_from_triage(ticket_id: int, sub_problems: Sequence[Any]) 
 
 
 def run_post_ingest_agents(ticket_id: int) -> None:
-    """入库后 LLM 链（子任务架构升级）：分诊 → 归类模块 → 分流毕业主任务 → 自动落库子任务.
+    """入库后 LLM 链：分诊 → 归类产品模块 → 首次答复 → 分流毕业/子任务.
 
     vision_extract(截图OCR) → triage(classify+conflict 合一：定型+是否混合) →
       module_resolve(AI 判产品线/模块，覆盖生效值为现有目录规范值) →
+      generate_initial_ticket_answer（使用归类后的产品线/模块生成草稿）→
       按类型分流毕业（Complaint 停 ticket 层；其余毕业主 hub_issue）→
       若判定包含多个子问题，直接自动落库为关联的 Hub 子任务。
     单一 BG task；各步失败自吞不阻塞。
     """
     from app.services.agents.answer_draft import generate_initial_ticket_answer
 
-    generate_initial_ticket_answer(ticket_id)
     settings = get_settings()
     if settings.vision_enabled:
         extract_ticket_attachments(ticket_id)
 
     tri = run_ticket_triage(ticket_id)
     if tri is None:
+        # 分诊失败不能让工单完全没有 AI 草稿；此时只能使用入库原始上下文。
+        generate_initial_ticket_answer(ticket_id)
         return
 
-    # 产品模块归类（覆盖生效 plc/module，供人工审核）。在分流前——毕业 hub 要继承规范值。
+    # 先写入规范产品线/模块，再生成首次答复。否则 KSM 未传 productLineCode 时，
+    # Agent 只会拿到原始模块并追问产品版本，后续归类结果也不会刷新旧草稿。
     _resolve_module(ticket_id)
+    generate_initial_ticket_answer(ticket_id)
 
     # 分流毕业主 Hub 任务
     _route_by_type(ticket_id, tri.type, tri.confidence, bar=settings.hub_issue_auto_confidence)
