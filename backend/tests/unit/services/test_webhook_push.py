@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from adapters.linear import LinearNetworkError
 from app.config import get_settings
 from app.models import (
+    Attachment,
     Customer,
     CustomerIdentity,
     HubIssue,
@@ -157,7 +158,42 @@ def test_build_fields_full_mapping(world: Session) -> None:
     assert fields["telephone"] == "020-12345678"
     assert fields["email"] == "zhangsan@corp.com"
     assert fields["feishuUrl"] == f"https://hub.example.com/ticket-hub/tickets/{ticket.id}"
+    assert fields["attachments"] == ""
     assert fields["operate"] == "BUG转产研修改工单状态及提单类型"
+
+
+def test_build_fields_includes_attachments(world: Session) -> None:
+    """工单存在附件时，fields['attachments'] 输出 Markdown 格式预览/下载链接列表。"""
+    hub = _make_hub(world, 9)
+    ticket = _make_ksm_ticket(world, hub, short_code="TKT-WH-9")
+    world.add_all(
+        [
+            Attachment(
+                ticket_id=ticket.id,
+                hub_issue_id=hub.id,
+                filename="错误截图.jpg",
+                kind="image",
+                size_bytes=1024 * 50,
+            ),
+            Attachment(
+                ticket_id=ticket.id,
+                filename="debug.log",
+                kind="other",
+                size_bytes=1024 * 100,
+            ),
+        ]
+    )
+    world.commit()
+
+    fields = build_webhook_fields(world, hub)
+    expected_1 = (
+        f"[错误截图.jpg](https://hub.example.com/ticket-hub/api/tickets/{ticket.id}/attachments/"
+    )
+    expected_2 = (
+        f"[debug.log](https://hub.example.com/ticket-hub/api/tickets/{ticket.id}/attachments/"
+    )
+    assert expected_1 in fields["attachments"]
+    assert expected_2 in fields["attachments"]
 
 
 def test_build_fields_handle_user_from_module_owner(world: Session) -> None:

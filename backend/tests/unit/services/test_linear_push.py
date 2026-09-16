@@ -11,7 +11,16 @@ from sqlalchemy.orm import Session
 
 from adapters.linear import CreatedIssue, LinearNetworkError
 from app.config import get_settings
-from app.models import HubIssue, Module, ProductLine, Source, StatusHistory, Ticket, User
+from app.models import (
+    Attachment,
+    HubIssue,
+    Module,
+    ProductLine,
+    Source,
+    StatusHistory,
+    Ticket,
+    User,
+)
 from app.services.hub_issues.linear_push import push_hub_issue_to_linear
 
 
@@ -561,3 +570,106 @@ def test_push_allows_repush_when_returned(world: Session) -> None:
         .first()
     )
     assert "Linear 重新推送成功" in (sh.reason or "")
+
+
+def test_build_description_includes_attachments(
+    world: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HUB_PUBLIC_BASE_URL", "https://hub.example.com/ticket-hub")
+    get_settings.cache_clear()
+    hub = _make_hub(world, 101, title="附件测试任务")
+    ticket = Ticket(
+        short_code="TKT-ATT-1",
+        source_code="ksm",
+        source_ticket_id="k-att-1",
+        type="Raw",
+        status="received",
+        title="附件测试工单",
+        hub_issue_id=hub.id,
+    )
+    world.add(ticket)
+    world.commit()
+    world.refresh(ticket)
+    world.add_all(
+        [
+            Attachment(
+                ticket_id=ticket.id,
+                hub_issue_id=hub.id,
+                filename="报错截图.png",
+                kind="image",
+                size_bytes=1024 * 250,
+            ),
+            Attachment(
+                ticket_id=ticket.id,
+                filename="系统日志.txt",
+                kind="other",
+                size_bytes=1024 * 1024 * 2,
+            ),
+        ]
+    )
+    world.commit()
+
+    from app.services.hub_issues.linear_push import _build_description
+
+    desc = _build_description(world, hub, src=ticket)
+    assert "### 📎 附件信息" in desc
+    assert (
+        f"[报错截图.png](https://hub.example.com/ticket-hub/api/tickets/{ticket.id}/attachments/"
+        in desc
+    )
+    assert "(250.0 KB)" in desc
+    assert (
+        f"[系统日志.txt](https://hub.example.com/ticket-hub/api/tickets/{ticket.id}/attachments/"
+        in desc
+    )
+    assert "(2.0 MB)" in desc
+
+
+def test_push_resolves_labels_by_type_source_module(world: Session) -> None:
+    """验证推送到 Linear 时自动解析的 labels：类型(Bug/Feature) + 渠道(外部/内部) + 模块(开票/收票/影像)。"""
+    from app.services.hub_issues.linear_push import (
+        LABEL_BUG_ID,
+        LABEL_COLLECT_ID,
+        LABEL_EXTERNAL_ID,
+        LABEL_FEATURE_ID,
+        LABEL_INTERNAL_ID,
+        LABEL_INVOICE_ID,
+    )
+
+    # 1) Bug_fix + KSM (外部) + 开票管理
+    t1 = Ticket(
+        short_code="TKT-L1",
+        source_code="ksm",
+        source_ticket_id="k-l1",
+        type="Raw",
+        status="received",
+        module="开票管理",
+    )
+    world.add(t1)
+    world.commit()
+    hub1 = _make_hub(world, 201, type="Bug_fix", module="开票管理", ticket_id=t1.id)
+    t1.hub_issue_id = hub1.id
+    world.commit()
+
+    fake = _FakeLinearClient()
+    push_hub_issue_to_linear(hub1.id, world, client=fake)  # type: ignore[arg-type]
+    assert fake.requests[0].label_ids == [LABEL_BUG_ID, LABEL_EXTERNAL_ID, LABEL_INVOICE_ID]  # type: ignore[attr-defined]
+
+    # 2) Demand + AI客服(内部) + 收票协同
+    t2 = Ticket(
+        short_code="TKT-L2",
+        source_code="ai_cs",
+        source_ticket_id="cs-l2",
+        type="Raw",
+        status="received",
+        module="收票协同",
+    )
+    world.add(t2)
+    world.commit()
+    hub2 = _make_hub(world, 202, type="Demand", module="收票协同", ticket_id=t2.id)
+    t2.hub_issue_id = hub2.id
+    world.commit()
+
+    fake2 = _FakeLinearClient()
+    push_hub_issue_to_linear(hub2.id, world, client=fake2)  # type: ignore[arg-type]
+    assert fake2.requests[0].label_ids == [LABEL_FEATURE_ID, LABEL_INTERNAL_ID, LABEL_COLLECT_ID]  # type: ignore[attr-defined]

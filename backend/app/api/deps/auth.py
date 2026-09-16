@@ -36,12 +36,15 @@ class AuthedUser:
 
 def _extract_token(request: Request) -> str:
     auth = request.headers.get("Authorization") or ""
-    if not auth.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="missing Authorization Bearer token",
-        )
-    return auth[len("Bearer ") :].strip()
+    if auth.startswith("Bearer "):
+        return auth[len("Bearer ") :].strip()
+    q_token = request.query_params.get("token")
+    if q_token:
+        return q_token.strip()
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="missing Authorization Bearer token",
+    )
 
 
 def require_user(request: Request) -> AuthedUser:
@@ -66,6 +69,14 @@ def require_user(request: Request) -> AuthedUser:
             status_code=status.HTTP_401_UNAUTHORIZED, detail="token sub not numeric"
         ) from e
     return AuthedUser(user_id=user_id, name=name, role=role)
+
+
+def optional_user(request: Request) -> AuthedUser | None:
+    """提取当前登录用户，如果请求未携带 token 或 token 无效则返回 None（非阻断式可选鉴权）。"""
+    try:
+        return require_user(request)
+    except HTTPException:
+        return None
 
 
 def require_supervisor(user: AuthedUser = Depends(require_user)) -> AuthedUser:

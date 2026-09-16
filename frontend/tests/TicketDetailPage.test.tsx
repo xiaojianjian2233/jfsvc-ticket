@@ -40,6 +40,7 @@ const baseTicket = {
   hub_issue_id: 10,
   created_at: "2026-05-06T10:00:00Z",
   received_at: "2026-05-06T10:00:00Z",
+  can_operate: true,
 };
 
 describe("TicketDetailPage", () => {
@@ -384,6 +385,48 @@ describe("TicketDetailPage", () => {
     expect(await screen.findByRole("heading", { name: "TKT-302" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "添加" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "删除" })).not.toBeInTheDocument();
+    localStorage.clear();
+  });
+
+  it("外部人员访问（can_operate=false）→ 显示详情与只读模式标签，隐藏所有操作按钮", async () => {
+    localStorage.setItem("auth_user", JSON.stringify({ role: "member", id: 99 }));
+    server.use(
+      http.get("*/api/tickets/303", () =>
+        HttpResponse.json({
+          id: 303,
+          short_code: "TKT-303",
+          source_code: "ksm",
+          source_ticket_id: "k-303",
+          type: "Raw",
+          status: "in_progress",
+          title: "外部只读工单",
+          module: null,
+          assigned_user_id: null,
+          handler_user_id: 1,
+          predicted_type: "Operation",
+          ...baseTicket,
+          can_operate: false,
+          hub_issue_id: 10,
+          op_status: "processing",
+        }),
+      ),
+      http.get("*/api/tickets/303/history", () =>
+        HttpResponse.json({ ticket_id: 303, items: [] }),
+      ),
+      http.get("*/api/hub-issues/10", () =>
+        HttpResponse.json({ id: 10, short_code: "HUB-10", type: "Operation", status: "created", op_status: "processing" }),
+      ),
+    );
+    renderPage(303);
+    expect(await screen.findByRole("heading", { name: "TKT-303" })).toBeInTheDocument();
+    expect(screen.getByText("只读模式")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "提交答复" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "转产研" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "退回 KSM" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "补充资料" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "拆单" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "转派" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "返回列表" })).toBeInTheDocument();
     localStorage.clear();
   });
 

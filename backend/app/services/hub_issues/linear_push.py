@@ -43,6 +43,7 @@ from app.services.hub_issues.module_owner import consume_module_owner
 from app.services.hub_issues.webhook_push import (
     _SOURCE_ZH,
     _TICKET_TYPE_ZH,
+    _build_attachments_section,
     _customer_name,
     _feishu_url,
     _primary_source_ticket,
@@ -55,6 +56,57 @@ logger = get_logger(__name__)
 
 # hub_issues.priority → Linear priority (0=None 1=Urgent 2=High 3=Medium 4=Low)
 _PRIORITY_MAP = {"critical": 1, "high": 2, "medium": 3, "low": 4, "lowest": 4}
+
+# Linear Issue Label UUID 常量（中国区产品部 CNPRD 与全局标签）
+LABEL_BUG_ID = "7a7599bb-9a78-42f4-85ad-efcb2dc5f255"  # Bug
+LABEL_FEATURE_ID = "c665f5cc-3b07-4eeb-af39-bfb92b257a91"  # Feature (需求)
+LABEL_EXTERNAL_ID = "87191fb6-de74-4360-80d5-d071b7f4d46f"  # 外部工单
+LABEL_INTERNAL_ID = "eb9ec029-c647-43a4-a5d0-79d868f27ed8"  # 内部工单
+LABEL_INVOICE_ID = "2e8ae1e1-d19d-455a-8381-afde25919fa2"  # 开票管理
+LABEL_COLLECT_ID = "d56ad96d-eb7c-43a0-b6ca-4e99d1b54d15"  # 收票管理
+LABEL_IMAGE_ID = "ec4adf85-8384-4f0c-b0bc-5545193839e8"  # 影像管理
+
+
+def _resolve_label_ids(hub: HubIssue, src: Ticket | None = None) -> list[str]:
+    """解析推送到 Linear 时自动附加的标签 UUID 列表。
+
+    规则：
+    1. 工单类型：
+       - Bug_fix -> Bug
+       - Demand  -> Feature
+    2. 来源渠道：
+       - ksm / zhichi / zammad -> 外部工单
+       - ai_cs / feishu_ai / 内部无源 -> 内部工单
+    3. 归属模块：
+       - 包含「开票」 -> 开票管理
+       - 包含「收票」 -> 收票管理
+       - 包含「影像」 -> 影像管理
+    """
+    labels: list[str] = []
+
+    # 1. 工单类型
+    if hub.type == "Bug_fix":
+        labels.append(LABEL_BUG_ID)
+    elif hub.type == "Demand":
+        labels.append(LABEL_FEATURE_ID)
+
+    # 2. 来源渠道
+    source_code = (src.source_code if src else None) or ""
+    if source_code in ("ksm", "zhichi", "zammad"):
+        labels.append(LABEL_EXTERNAL_ID)
+    else:
+        labels.append(LABEL_INTERNAL_ID)
+
+    # 3. 归属模块
+    module_text = f"{hub.module or ''} {(src.module if src else '') or ''}"
+    if "开票" in module_text:
+        labels.append(LABEL_INVOICE_ID)
+    elif "收票" in module_text:
+        labels.append(LABEL_COLLECT_ID)
+    elif "影像" in module_text:
+        labels.append(LABEL_IMAGE_ID)
+
+    return list(dict.fromkeys(labels))
 
 
 @dataclass(slots=True, frozen=True)
@@ -103,7 +155,8 @@ def _build_description(db: Session, hub: HubIssue, src: Ticket | None = None) ->
     1. 💡 指派说明（hub.reply_content）
     2. 📝 原始问题描述（hub.canonical_body）
     3. 📋 工单背景信息（短码、工单来源、客户名称、提单联系人、归属分类、系统链接）
-    4. 关联源工单引用底注
+    4. 📎 附件信息（工单关联的附件下载与预览链接列表）
+    5. 关联源工单引用底注
     """
     sections: list[str] = []
 
@@ -174,7 +227,12 @@ def _build_description(db: Session, hub: HubIssue, src: Ticket | None = None) ->
 
     sections.append("\n".join(meta_lines))
 
-    # 4. 底注引用
+    # 4. 📎 附件信息
+    att_section = _build_attachments_section(db, hub, src=src)
+    if att_section:
+        sections.append(att_section)
+
+    # 5. 底注引用
     sources = (
         db.query(Ticket)
         .filter(
@@ -195,9 +253,12 @@ def _sync_tickets_dev_stage(db: Session, hub: HubIssue, *, record_transfer: bool
     """推送 Linear 成功后，同步将关联工单的处理环节流转为「研发处理」。"""
     if record_transfer:
         StatusHistoryRepository(db).record(
-            entity_type="hub_issue", entity_id=hub.id,
-            from_status=hub.status, to_status="dev_transferred",
-            changed_by="system:dev_transfer", reason="转研发成功",
+            entity_type="hub_issue",
+            entity_id=hub.id,
+            from_status=hub.status,
+            to_status="dev_transferred",
+            changed_by="system:dev_transfer",
+            reason="转研发成功",
         )
     tickets = (
         db.query(Ticket)
@@ -380,6 +441,7 @@ def push_hub_issue_to_linear(
 
         src = _primary_source_ticket(db, hub)
         title_prefix = _resolve_title_prefix(db, hub, src=src)
+        label_ids = _resolve_label_ids(hub, src=src)
 
         req = CreateIssueRequest(
             title=f"[{title_prefix}] {hub.title}",
@@ -387,6 +449,7 @@ def push_hub_issue_to_linear(
             description=_build_description(db, hub, src=src),
             assignee_id=assignee_linear_id,
             priority=_PRIORITY_MAP.get(hub.priority or "", 0),
+            label_ids=label_ids,
         )
 
         owns_client = client is None

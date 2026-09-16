@@ -33,7 +33,7 @@ from app.config import get_settings
 from app.core.logging import get_logger
 from app.models import HubIssue, HubIssueLinearIssue, SyncOutbox, Ticket, User
 from app.repositories.status_history import StatusHistoryRepository
-from app.services.hub_issues.linear_push import _resolve_title_prefix
+from app.services.hub_issues.linear_push import _resolve_label_ids, _resolve_title_prefix
 
 logger = get_logger(__name__)
 
@@ -149,6 +149,7 @@ def execute_owner_split(
                         ),
                         assignee_id=assignee_linear_id,
                         parent_id=hub.linear_uuid,
+                        label_ids=_resolve_label_ids(hub),
                     )
                 )
             except (LinearAuthError, LinearBusinessError, LinearNetworkError) as e:

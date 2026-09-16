@@ -28,13 +28,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from adapters.linear import LinearWebhookClient, LinearWebhookConfig
 from app.api.ksm_nodes import parse_ksm_nodes
 from app.config import get_settings
 from app.core.logging import get_logger
-from app.models import Customer, CustomerIdentity, HubIssue, ProductLine, Ticket, User
+from app.models import Attachment, Customer, CustomerIdentity, HubIssue, ProductLine, Ticket, User
 from app.services.hub_issues.module_owner import peek_module_owner
 
 logger = get_logger(__name__)
@@ -154,6 +155,78 @@ def _feishu_url(ticket: Ticket | None) -> str:
     return f"{base}/tickets/{ticket.id}"
 
 
+def _collect_attachments(db: Session, hub: HubIssue, src: Ticket | None = None) -> list[Attachment]:
+    """收集关联工单与当前 hub_issue 的所有附件（去重保持 ID 顺序）。"""
+    ticket_ids: set[int] = set()
+    if hub.ticket_id is not None:
+        ticket_ids.add(hub.ticket_id)
+    if src is not None and src.id is not None:
+        ticket_ids.add(src.id)
+
+    linked = (
+        db.query(Ticket.id).filter(Ticket.hub_issue_id == hub.id, Ticket.deleted_at.is_(None)).all()
+    )
+    for (tid,) in linked:
+        ticket_ids.add(tid)
+
+    conds = [Attachment.hub_issue_id == hub.id]
+    if ticket_ids:
+        conds.append(Attachment.ticket_id.in_(ticket_ids))
+
+    rows = db.query(Attachment).filter(or_(*conds)).order_by(Attachment.id.asc()).all()
+    seen: set[int] = set()
+    res: list[Attachment] = []
+    for a in rows:
+        if a.id not in seen:
+            seen.add(a.id)
+            res.append(a)
+    return res
+
+
+def _attachment_url(a: Attachment) -> str:
+    settings = get_settings()
+    base = (settings.hub_public_base_url or "").rstrip("/")
+    path = f"/api/tickets/{a.ticket_id}/attachments/{a.id}/download"
+    return f"{base}{path}" if base else path
+
+
+def _fmt_size(size_bytes: int | None) -> str:
+    if not size_bytes:
+        return ""
+    if size_bytes < 1024:
+        return f" ({size_bytes} B)"
+    if size_bytes < 1024 * 1024:
+        return f" ({size_bytes / 1024:.1f} KB)"
+    return f" ({size_bytes / (1024 * 1024):.1f} MB)"
+
+
+def _build_attachments_section(db: Session, hub: HubIssue, src: Ticket | None = None) -> str:
+    """构建 Linear Issue 描述中的附件信息 Markdown 区块。"""
+    atts = _collect_attachments(db, hub, src=src)
+    if not atts:
+        return ""
+    lines = ["### 📎 附件信息"]
+    for a in atts:
+        fname = a.filename or f"附件_{a.id}"
+        url = _attachment_url(a)
+        size_str = _fmt_size(a.size_bytes)
+        lines.append(f"- [{fname}]({url}){size_str}")
+    return "\n".join(lines)
+
+
+def _attachments_text(db: Session, hub: HubIssue, src: Ticket | None = None) -> str:
+    """构建飞书 Webhook fields 的 attachments 字段文本。"""
+    atts = _collect_attachments(db, hub, src=src)
+    if not atts:
+        return ""
+    lines = []
+    for a in atts:
+        fname = a.filename or f"附件_{a.id}"
+        url = _attachment_url(a)
+        lines.append(f"[{fname}]({url})")
+    return "\n".join(lines)
+
+
 def _reporter_field(ticket: Ticket | None, key: str) -> str:
     if ticket is None or not isinstance(ticket.reporter, dict):
         return ""
@@ -221,6 +294,7 @@ def build_webhook_fields(
         "ticketHandler": ticket_handler_name,
         "handleSteps": _handle_steps_text(src),
         "feishuUrl": _feishu_url(src),
+        "attachments": _attachments_text(db, hub, src=src),
         "handleDescription": hub.reply_content or hub.root_cause_analysis or "",
         "operate": _TRANSFER_TEXT.get(hub.type, ""),
     }

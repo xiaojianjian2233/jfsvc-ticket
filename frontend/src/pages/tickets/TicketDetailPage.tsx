@@ -632,9 +632,20 @@ export function TicketDetailPage() {
     d?.status === "superseded" ||
     d?.status === "rejected";
 
+  // 外部人员只读权限控制：仅管理员/主管或本工单的处理人具备操作权限；
+  // 外部/研发人员访问时，后端返回 can_operate=false，前端进入只读视图，隐藏所有操作按钮。
+  const isPrivileged = isSupervisor();
+  const isHandler = d?.handler_user_id != null && currentUserId() === d.handler_user_id;
+  const hasOperatePermission =
+    (d as any)?.can_operate !== undefined
+      ? Boolean((d as any).can_operate)
+      : (isPrivileged || isHandler);
+
   // 用户明确需求：点击【提交答复】后工单状态变【处理完成】，工单界面的所有操作按钮都被禁用且不显示；
   // 工单状态【补充资料】【退回转单】【处理关闭】都是不可操作的状态，不可操作的状态都不显示。
+  // 外部人员无操作权限时同样视为不可操作，隐藏所有操作按钮，仅展示详情。
   const isNonOperable =
+    !hasOperatePermission ||
     Boolean(overrideStatus) ||
     isTicketTerminal ||
     effectiveOpStatus === "answered" ||
@@ -799,6 +810,11 @@ export function TicketDetailPage() {
                       }
                     />
                     <RemainingTag hours={d.remaining_hours} />
+                    {!hasOperatePermission && (
+                      <span className="inline-block px-2 py-0.5 rounded-full text-[10.5px] font-medium bg-slate-100 text-slate-500 border border-slate-200 whitespace-nowrap">
+                        只读模式
+                      </span>
+                    )}
                     {showReflectBtn && (
                       <button
                         type="button"
@@ -1588,7 +1604,9 @@ export function TicketDetailPage() {
                               }
                             }}
                             placeholder={
-                              editable
+                              !hasOperatePermission
+                                ? "无操作权限，只读模式"
+                                : editable
                                 ? "填写当前节点处理说明（支持输入说明，支持在下方添加或 Ctrl+V 粘贴附件）"
                                 : isDevTransferred
                                   ? "已转产研处理，只读"

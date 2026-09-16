@@ -63,6 +63,7 @@ function renderTicket(
     outbox_failed_kind: null,
     outbox_failed_error: null,
     outbox_failed_attempts: null,
+    can_operate: true,
   };
   const ticket = { ...baseTicket, ...ticketOverrides };
   const tId = Number(ticket.id ?? 10);

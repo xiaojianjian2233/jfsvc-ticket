@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps.auth import AuthedUser, require_user
+from app.api.deps.auth import AuthedUser, optional_user, require_user
 from app.api.history_labels import (
     collect_user_ids,
     humanize_actor,
@@ -195,6 +195,8 @@ class TicketDetail(TicketSummary):
     outbox_failed_kind: str | None = None  # reply/status/supply/release_note/progress_note/return
     outbox_failed_error: str | None = None  # last_error，截断展示
     outbox_failed_attempts: int | None = None
+    # 操作权限标志：admin/supervisor 或本工单处理人本人为 True，外部人员只读访问为 False
+    can_operate: bool = False
 
 
 class TicketListResponse(BaseModel):
@@ -495,14 +497,13 @@ def get_ticket(
     ticket = TicketRepository(db).get(ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="ticket not found")
-    # 行级可见性：非 admin/主管 只能看处理人=自己的工单（否则等同不存在）
-    if (
-        auth_user.role not in ("admin", "supervisor")
-        and ticket.handler_user_id != auth_user.user_id
-    ):
-        raise HTTPException(status_code=404, detail="ticket not found")
-    return build_ticket_detail(db, ticket)
-
+    # 行级可见性放开：允许已登录认证用户只读查看工单详情，以支持外部/产研人员从外部系统（如 Linear）直接访问
+    detail = build_ticket_detail(db, ticket)
+    handler_id = ticket.handler_user_id or ticket.assigned_user_id
+    detail.can_operate = auth_user.role in ("admin", "supervisor") or (
+        handler_id is not None and handler_id == auth_user.user_id
+    )
+    return detail
 
 
 class AiDraftResponse(BaseModel):
@@ -517,10 +518,13 @@ def generate_ticket_ai_answer(
     db: Session = Depends(get_session),
 ) -> AiDraftResponse:
     ticket = TicketRepository(db).get(ticket_id)
-    if ticket is None or (auth_user.role not in ("admin", "supervisor")
-                          and ticket.handler_user_id != auth_user.user_id):
+    if ticket is None or (
+        auth_user.role not in ("admin", "supervisor")
+        and ticket.handler_user_id != auth_user.user_id
+    ):
         raise HTTPException(status_code=404, detail="ticket not found")
     from app.services.agents.answer_draft import generate_answer_draft
+
     answer = generate_answer_draft(db, ticket_id=ticket_id)
     if not answer:
         raise HTTPException(status_code=503, detail="AI 正在作答或暂未返回结果，请稍后重试")
@@ -748,7 +752,7 @@ def download_attachment(
     ticket_id: int,
     attachment_id: int,
     size: str | None = Query(None),  # "thumb"=列表缩略图（图片缩到 ~240px），否则原图
-    _user: AuthedUser = Depends(require_user),
+    _user: AuthedUser | None = Depends(optional_user),
     db: Session = Depends(get_session),
 ) -> Response:
     """附件下载代理：优先从 MinIO 拉回（已存档），回落原始 source_url 重新下载。
@@ -831,6 +835,12 @@ def upload_attachment(
         hub = db.get(HubIssue, body.hub_issue_id)
         if hub is None or hub.deleted_at is not None:
             raise HTTPException(status_code=404, detail="hub_issue not found")
+
+    handler_id = ticket.handler_user_id or ticket.assigned_user_id
+    if _user.role not in ("admin", "supervisor") and handler_id != _user.user_id:
+        raise HTTPException(
+            status_code=403, detail="需要主管/管理员权限，或本工单的处理人才能上传附件"
+        )
 
     try:
         data = base64.b64decode(body.content_base64)
@@ -1002,13 +1012,7 @@ def get_ticket_history(
     ticket = TicketRepository(db).get(ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="ticket not found")
-    # 行级可见性：非 admin/主管 只能看处理人=自己的工单
-    if (
-        auth_user.role not in ("admin", "supervisor")
-        and ticket.handler_user_id != auth_user.user_id
-    ):
-        raise HTTPException(status_code=404, detail="ticket not found")
-
+    # 行级可见性放开：允许已登录认证用户查阅流转历史
     status_rows = StatusHistoryRepository(db).find_for_entity(
         entity_type="ticket", entity_id=ticket_id
     )
@@ -1199,6 +1203,11 @@ def create_ticket_subtask(
     ticket = TicketRepository(db).get(ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="ticket not found")
+    handler_id = ticket.handler_user_id or ticket.assigned_user_id
+    if user.role not in ("admin", "supervisor") and handler_id != user.user_id:
+        raise HTTPException(
+            status_code=403, detail="需要主管/管理员权限，或本工单的处理人才能创建子任务"
+        )
 
     plc = body.product_line_code or ticket.product_line_code
     mod = body.module or ticket.module

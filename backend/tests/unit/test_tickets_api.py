@@ -199,16 +199,20 @@ def test_filter_handler_user_ids(app_client: TestClient, world: Session) -> None
     assert {it["short_code"] for it in resp.json()["items"]} == {"TKT-1", "TKT-2"}
 
 
-def test_member_get_others_ticket_404(app_client: TestClient, world: Session) -> None:
-    # TKT-3(id102) handler=2；member user 5 看不到 → 404
+def test_member_get_others_ticket_readonly(app_client: TestClient, world: Session) -> None:
+    # TKT-3(id102) handler=2；外部/其他人员 user 5 (member) 可只读查看详情，can_operate=False
     resp = app_client.get("/api/tickets/102", headers=_bearer(5, role="member"))
-    assert resp.status_code == 404
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == 102
+    assert data["can_operate"] is False
 
 
 def test_member_get_own_ticket_ok(app_client: TestClient, world: Session) -> None:
     resp = app_client.get("/api/tickets/102", headers=_bearer(2, role="member"))
     assert resp.status_code == 200
     assert resp.json()["handler_user_id"] == 2
+    assert resp.json()["can_operate"] is True
 
 
 def test_list_tickets_hub_status_for_dev(app_client: TestClient, world: Session) -> None:
@@ -975,6 +979,17 @@ def test_download_unknown_attachment_404(app_client: TestClient, att_world: Sess
         app_client.get("/api/tickets/500/attachments/9999/download", headers=_bearer()).status_code
         == 404
     )
+
+
+def test_download_attachment_without_auth_header_allowed(
+    app_client: TestClient, att_world: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """外部人员从 Linear 等直接点击附件链接（无 Authorization Header）允许正常下载/预览。"""
+    big = _png(100, 100)
+    monkeypatch.setattr("app.api.tickets._fetch_source_bytes", lambda url, settings: big)
+    r = app_client.get("/api/tickets/500/attachments/900/download")
+    assert r.status_code == 200
+    assert r.content == big
 
 
 def test_ticket_reply_endpoint_success(app_client: TestClient, db_session: Session) -> None:

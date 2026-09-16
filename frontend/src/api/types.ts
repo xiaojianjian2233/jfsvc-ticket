@@ -1148,6 +1148,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/hub-issues/{hub_issue_id}/generate-ai-answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate Ai Answer Endpoint */
+        post: operations["generate_ai_answer_endpoint_api_hub_issues__hub_issue_id__generate_ai_answer_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/hub-issues/{hub_issue_id}/notify-release": {
         parameters: {
             query?: never;
@@ -2449,6 +2466,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tickets/{ticket_id}/generate-ai-answer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate Ticket Ai Answer */
+        post: operations["generate_ticket_ai_answer_api_tickets__ticket_id__generate_ai_answer_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tickets/{ticket_id}/history": {
         parameters: {
             query?: never;
@@ -2775,6 +2809,13 @@ export interface components {
             enabled: boolean;
             /** Managed Skills */
             managed_skills: string[];
+        };
+        /** AiDraftResponse */
+        AiDraftResponse: {
+            /** Answered */
+            answered: boolean;
+            /** Reply Content */
+            reply_content: string;
         };
         /** AnswerRequest */
         AnswerRequest: {
@@ -3240,7 +3281,6 @@ export interface components {
         };
         /** DailyByAssigneeOut */
         DailyByAssigneeOut: {
-            transferred_to_dev?: number;
             /** Completed */
             completed: number;
             /** Ksm Rejected */
@@ -3253,6 +3293,11 @@ export interface components {
             returned_to_ksm: number;
             /** Supplemented */
             supplemented: number;
+            /**
+             * Transferred To Dev
+             * @default 0
+             */
+            transferred_to_dev: number;
             /** User Id */
             user_id: number | null;
         };
@@ -3267,7 +3312,6 @@ export interface components {
         };
         /** DailyTotalsOut */
         DailyTotalsOut: {
-            transferred_to_dev?: number;
             /** Completed */
             completed: number;
             /** Ksm Rejected */
@@ -3278,6 +3322,11 @@ export interface components {
             returned_to_ksm: number;
             /** Supplemented */
             supplemented: number;
+            /**
+             * Transferred To Dev
+             * @default 0
+             */
+            transferred_to_dev: number;
         };
         /** DashboardOut */
         DashboardOut: {
@@ -3722,6 +3771,15 @@ export interface components {
             received: number;
             /** Resolved */
             resolved: number;
+        };
+        /** GenerateAiAnswerResponse */
+        GenerateAiAnswerResponse: {
+            /** Answered */
+            answered: boolean;
+            /** Hub Issue Id */
+            hub_issue_id: number;
+            /** Reply Content */
+            reply_content: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -4275,18 +4333,42 @@ export interface components {
         };
         /** KpiOut */
         KpiOut: {
-            pending_count?: number;
-            completed_count?: number;
-            pending_operation_count?: number;
-            pending_dev_count?: number;
-            overdue_count?: number;
-            rejected_count?: number;
             /** Avg Handle Hours */
             avg_handle_hours: number | null;
             /** By Type */
             by_type: {
                 [key: string]: number;
             };
+            /**
+             * Completed Count
+             * @default 0
+             */
+            completed_count: number;
+            /**
+             * Overdue Count
+             * @default 0
+             */
+            overdue_count: number;
+            /**
+             * Pending Count
+             * @default 0
+             */
+            pending_count: number;
+            /**
+             * Pending Dev Count
+             * @default 0
+             */
+            pending_dev_count: number;
+            /**
+             * Pending Operation Count
+             * @default 0
+             */
+            pending_operation_count: number;
+            /**
+             * Rejected Count
+             * @default 0
+             */
+            rejected_count: number;
             /** Sla Base */
             sla_base: number;
             /** Sla Rate */
@@ -5499,6 +5581,11 @@ export interface components {
             cached_reply_content: string | null;
             /** Cached Reply Version */
             cached_reply_version: number | null;
+            /**
+             * Can Operate
+             * @default false
+             */
+            can_operate: boolean;
             /**
              * Children Count
              * @default 1
@@ -8499,6 +8586,37 @@ export interface operations {
             };
         };
     };
+    generate_ai_answer_endpoint_api_hub_issues__hub_issue_id__generate_ai_answer_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                hub_issue_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerateAiAnswerResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     notify_release_endpoint_api_hub_issues__hub_issue_id__notify_release_post: {
         parameters: {
             query?: never;
@@ -10569,6 +10687,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_ticket_ai_answer_api_tickets__ticket_id__generate_ai_answer_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiDraftResponse"];
                 };
             };
             /** @description Validation Error */

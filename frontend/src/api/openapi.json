@@ -46,6 +46,24 @@
         "title": "AiCsStatusResponse",
         "type": "object"
       },
+      "AiDraftResponse": {
+        "properties": {
+          "answered": {
+            "title": "Answered",
+            "type": "boolean"
+          },
+          "reply_content": {
+            "title": "Reply Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "answered",
+          "reply_content"
+        ],
+        "title": "AiDraftResponse",
+        "type": "object"
+      },
       "AnswerRequest": {
         "properties": {
           "content": {
@@ -1392,10 +1410,34 @@
       },
       "DailyByAssigneeOut": {
         "properties": {
+          "completed": {
+            "title": "Completed",
+            "type": "integer"
+          },
+          "ksm_rejected": {
+            "title": "Ksm Rejected",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "received": {
+            "title": "Received",
+            "type": "integer"
+          },
+          "returned_to_ksm": {
+            "title": "Returned To Ksm",
+            "type": "integer"
+          },
+          "supplemented": {
+            "title": "Supplemented",
+            "type": "integer"
+          },
           "transferred_to_dev": {
-            "type": "integer",
+            "default": 0,
             "title": "Transferred To Dev",
-            "default": 0
+            "type": "integer"
           },
           "user_id": {
             "anyOf": [
@@ -1407,33 +1449,8 @@
               }
             ],
             "title": "User Id"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "received": {
-            "type": "integer",
-            "title": "Received"
-          },
-          "completed": {
-            "type": "integer",
-            "title": "Completed"
-          },
-          "returned_to_ksm": {
-            "type": "integer",
-            "title": "Returned To Ksm"
-          },
-          "ksm_rejected": {
-            "type": "integer",
-            "title": "Ksm Rejected"
-          },
-          "supplemented": {
-            "type": "integer",
-            "title": "Supplemented"
           }
         },
-        "type": "object",
         "required": [
           "user_id",
           "name",
@@ -1443,7 +1460,8 @@
           "ksm_rejected",
           "supplemented"
         ],
-        "title": "DailyByAssigneeOut"
+        "title": "DailyByAssigneeOut",
+        "type": "object"
       },
       "DailyDashboardOut": {
         "properties": {
@@ -1476,33 +1494,32 @@
       },
       "DailyTotalsOut": {
         "properties": {
-          "transferred_to_dev": {
-            "type": "integer",
-            "title": "Transferred To Dev",
-            "default": 0
-          },
-          "received": {
-            "type": "integer",
-            "title": "Received"
-          },
           "completed": {
-            "type": "integer",
-            "title": "Completed"
-          },
-          "returned_to_ksm": {
-            "type": "integer",
-            "title": "Returned To Ksm"
+            "title": "Completed",
+            "type": "integer"
           },
           "ksm_rejected": {
-            "type": "integer",
-            "title": "Ksm Rejected"
+            "title": "Ksm Rejected",
+            "type": "integer"
+          },
+          "received": {
+            "title": "Received",
+            "type": "integer"
+          },
+          "returned_to_ksm": {
+            "title": "Returned To Ksm",
+            "type": "integer"
           },
           "supplemented": {
-            "type": "integer",
-            "title": "Supplemented"
+            "title": "Supplemented",
+            "type": "integer"
+          },
+          "transferred_to_dev": {
+            "default": 0,
+            "title": "Transferred To Dev",
+            "type": "integer"
           }
         },
-        "type": "object",
         "required": [
           "received",
           "completed",
@@ -1510,7 +1527,8 @@
           "ksm_rejected",
           "supplemented"
         ],
-        "title": "DailyTotalsOut"
+        "title": "DailyTotalsOut",
+        "type": "object"
       },
       "DashboardOut": {
         "properties": {
@@ -2705,6 +2723,29 @@
           "resolved"
         ],
         "title": "FunnelOut",
+        "type": "object"
+      },
+      "GenerateAiAnswerResponse": {
+        "properties": {
+          "answered": {
+            "title": "Answered",
+            "type": "boolean"
+          },
+          "hub_issue_id": {
+            "title": "Hub Issue Id",
+            "type": "integer"
+          },
+          "reply_content": {
+            "title": "Reply Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hub_issue_id",
+          "answered",
+          "reply_content"
+        ],
+        "title": "GenerateAiAnswerResponse",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -4483,47 +4524,6 @@
       },
       "KpiOut": {
         "properties": {
-          "pending_count": {
-            "type": "integer",
-            "title": "Pending Count",
-            "default": 0
-          },
-          "completed_count": {
-            "type": "integer",
-            "title": "Completed Count",
-            "default": 0
-          },
-          "pending_operation_count": {
-            "type": "integer",
-            "title": "Pending Operation Count",
-            "default": 0
-          },
-          "pending_dev_count": {
-            "type": "integer",
-            "title": "Pending Dev Count",
-            "default": 0
-          },
-          "overdue_count": {
-            "type": "integer",
-            "title": "Overdue Count",
-            "default": 0
-          },
-          "rejected_count": {
-            "type": "integer",
-            "title": "Rejected Count",
-            "default": 0
-          },
-          "total": {
-            "type": "integer",
-            "title": "Total"
-          },
-          "by_type": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "type": "object",
-            "title": "By Type"
-          },
           "avg_handle_hours": {
             "anyOf": [
               {
@@ -4534,6 +4534,47 @@
               }
             ],
             "title": "Avg Handle Hours"
+          },
+          "by_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Type",
+            "type": "object"
+          },
+          "completed_count": {
+            "default": 0,
+            "title": "Completed Count",
+            "type": "integer"
+          },
+          "overdue_count": {
+            "default": 0,
+            "title": "Overdue Count",
+            "type": "integer"
+          },
+          "pending_count": {
+            "default": 0,
+            "title": "Pending Count",
+            "type": "integer"
+          },
+          "pending_dev_count": {
+            "default": 0,
+            "title": "Pending Dev Count",
+            "type": "integer"
+          },
+          "pending_operation_count": {
+            "default": 0,
+            "title": "Pending Operation Count",
+            "type": "integer"
+          },
+          "rejected_count": {
+            "default": 0,
+            "title": "Rejected Count",
+            "type": "integer"
+          },
+          "sla_base": {
+            "title": "Sla Base",
+            "type": "integer"
           },
           "sla_rate": {
             "anyOf": [
@@ -4546,13 +4587,9 @@
             ],
             "title": "Sla Rate"
           },
-          "sla_base": {
-            "type": "integer",
-            "title": "Sla Base"
-          },
-          "unassigned_count": {
-            "type": "integer",
-            "title": "Unassigned Count"
+          "total": {
+            "title": "Total",
+            "type": "integer"
           },
           "unassigned_avg_hours": {
             "anyOf": [
@@ -4564,9 +4601,12 @@
               }
             ],
             "title": "Unassigned Avg Hours"
+          },
+          "unassigned_count": {
+            "title": "Unassigned Count",
+            "type": "integer"
           }
         },
-        "type": "object",
         "required": [
           "total",
           "by_type",
@@ -4576,7 +4616,8 @@
           "unassigned_count",
           "unassigned_avg_hours"
         ],
-        "title": "KpiOut"
+        "title": "KpiOut",
+        "type": "object"
       },
       "KsmNode": {
         "description": "一个 KSM 处理节点（前端处理节点时间轴用）。",
@@ -8253,6 +8294,11 @@
               }
             ],
             "title": "Cached Reply Version"
+          },
+          "can_operate": {
+            "default": false,
+            "title": "Can Operate",
+            "type": "boolean"
           },
           "children_count": {
             "default": 1,
@@ -14378,6 +14424,48 @@
         ]
       }
     },
+    "/api/hub-issues/{hub_issue_id}/generate-ai-answer": {
+      "post": {
+        "operationId": "generate_ai_answer_endpoint_api_hub_issues__hub_issue_id__generate_ai_answer_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "hub_issue_id",
+            "required": true,
+            "schema": {
+              "title": "Hub Issue Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateAiAnswerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Ai Answer Endpoint",
+        "tags": [
+          "hub-issues"
+        ]
+      }
+    },
     "/api/hub-issues/{hub_issue_id}/notify-release": {
       "post": {
         "description": "发版通知：文案入 outbox（每个有源关联工单一行），回访状态置 pending。",
@@ -17724,6 +17812,48 @@
           }
         },
         "summary": "Download Attachment",
+        "tags": [
+          "tickets"
+        ]
+      }
+    },
+    "/api/tickets/{ticket_id}/generate-ai-answer": {
+      "post": {
+        "operationId": "generate_ticket_ai_answer_api_tickets__ticket_id__generate_ai_answer_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticket_id",
+            "required": true,
+            "schema": {
+              "title": "Ticket Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiDraftResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Ticket Ai Answer",
         "tags": [
           "tickets"
         ]
