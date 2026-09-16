@@ -10,7 +10,7 @@ All authenticated users can read (any role). D2 may add row-level visibility
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -291,14 +291,14 @@ def list_tickets(
     process_stages: list[str] | None = Query(
         None
     ),  # 处理环节多选筛选（服务处理 / 研发处理 / 完成）
-    received_from: date | None = Query(None),  # 提单时间起
-    received_to: date | None = Query(None),  # 提单时间止
-    created_from: date | None = Query(None),  # 创建时间起
-    created_to: date | None = Query(None),  # 创建时间止
-    resolved_from: date | None = Query(None),  # 处理完成时间起
-    resolved_to: date | None = Query(None),  # 处理完成时间止
-    closed_from: date | None = Query(None),  # 处理关闭时间起
-    closed_to: date | None = Query(None),  # 处理关闭时间止
+    received_from: datetime | None = Query(None),  # 提单时间起（精确到分钟）
+    received_to: datetime | None = Query(None),  # 提单时间止（精确到分钟）
+    created_from: datetime | None = Query(None),  # 创建时间起（精确到分钟）
+    created_to: datetime | None = Query(None),  # 创建时间止（精确到分钟）
+    resolved_from: datetime | None = Query(None),  # 处理完成时间起（精确到分钟）
+    resolved_to: datetime | None = Query(None),  # 处理完成时间止（精确到分钟）
+    closed_from: datetime | None = Query(None),  # 处理关闭时间起（精确到分钟）
+    closed_to: datetime | None = Query(None),  # 处理关闭时间止（精确到分钟）
     reporter_company: str | None = Query(None),  # 提单企业
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
@@ -306,9 +306,15 @@ def list_tickets(
     # 行级可见性：admin + supervisor 看全部；其余角色只看处理人=自己的工单
     is_privileged = user.role in ("admin", "supervisor")
 
-    def _bounds(df: date | None, dt: date | None) -> tuple[datetime | None, datetime | None]:
-        start = datetime.combine(df, time.min, tzinfo=UTC) if df else None
-        end = datetime.combine(dt, time.max, tzinfo=UTC) if dt else None
+    def _bounds(
+        df: datetime | None, dt: datetime | None
+    ) -> tuple[datetime | None, datetime | None]:
+        # datetime-local 不带时区；系统数据库统一按 UTC 存储，按 UTC 解释。
+        start = df.replace(tzinfo=UTC) if df and df.tzinfo is None else df
+        end = dt.replace(tzinfo=UTC) if dt and dt.tzinfo is None else dt
+        # 前端输入精确到分钟，结束分钟应包含完整的一分钟。
+        if end is not None and end.second == 0 and end.microsecond == 0:
+            end = end.replace(second=59, microsecond=999999)
         return start, end
 
     rf_start, rf_end = _bounds(received_from, received_to)
