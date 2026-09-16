@@ -144,8 +144,25 @@ def test_initial_still_runs_when_classification_fails():
             side_effect=lambda _: order.append("answer"),
         ),
         patch("app.api.webhooks.run_ticket_triage", side_effect=lambda _: order.append("classify")),
-        patch("app.api.webhooks._resolve_module") as resolve,
+        patch("app.api.webhooks._resolve_module", side_effect=lambda _: order.append("catalog")),
     ):
         run_post_ingest_agents(123)
-    assert order == ["classify", "answer"]
-    resolve.assert_not_called()
+    assert order == ["classify", "catalog", "answer"]
+
+
+def test_escalation_resolves_catalog_before_initial_answer():
+    from app.api.webhooks import run_escalation_agents
+
+    order = []
+    with (
+        patch("app.api.webhooks.classify_escalation_ticket", return_value=None),
+        patch("app.api.webhooks._resolve_module", side_effect=lambda _: order.append("catalog")),
+        patch(
+            "app.services.agents.answer_draft.generate_initial_ticket_answer",
+            side_effect=lambda _: order.append("answer"),
+        ),
+        patch("app.api.webhooks._route_by_type") as route,
+    ):
+        run_escalation_agents(123)
+    assert order == ["catalog", "answer"]
+    route.assert_not_called()

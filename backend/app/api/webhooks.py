@@ -198,15 +198,13 @@ def run_post_ingest_agents(ticket_id: int) -> None:
         extract_ticket_attachments(ticket_id)
 
     tri = run_ticket_triage(ticket_id)
-    if tri is None:
-        # 分诊失败不能让工单完全没有 AI 草稿；此时只能使用入库原始上下文。
-        generate_initial_ticket_answer(ticket_id)
-        return
-
     # 先写入规范产品线/模块，再生成首次答复。否则 KSM 未传 productLineCode 时，
     # Agent 只会拿到原始模块并追问产品版本，后续归类结果也不会刷新旧草稿。
     _resolve_module(ticket_id)
     generate_initial_ticket_answer(ticket_id)
+    if tri is None:
+        # 分诊失败仍独立完成产品模块归类和首次草稿，不继续自动分流。
+        return
 
     # 分流毕业主 Hub 任务
     _route_by_type(ticket_id, tri.type, tri.confidence, bar=settings.hub_issue_auto_confidence)
@@ -225,11 +223,12 @@ def run_escalation_agents(ticket_id: int) -> None:
     """
     from app.services.agents.answer_draft import generate_initial_ticket_answer
 
-    generate_initial_ticket_answer(ticket_id)
     settings = get_settings()
     if settings.vision_enabled:
         extract_ticket_attachments(ticket_id)
     cls = classify_escalation_ticket(ticket_id)
+    _resolve_module(ticket_id)
+    generate_initial_ticket_answer(ticket_id)
     if cls is None:
         return
     _route_by_type(ticket_id, cls.type, cls.confidence, bar=settings.escalation_auto_confidence)
