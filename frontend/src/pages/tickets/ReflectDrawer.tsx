@@ -23,7 +23,7 @@ export function ReflectDrawer({
   // 全量能力（skill 修订/replay/发布）仅 knowledge_op/supervisor/admin；诊断区
   // （DiagnosisColumn）对 reviewing 态处理人也开放——后端 escalation-context
   // 端点已按处理人身份把关，前端不重复判断，只要请求本身合法就渲染。
-  const canSeeFull = role === "knowledge_op" || role === "supervisor" || role === "admin";
+  const canSeeFull = role === "admin";
   const qc = useQueryClient();
 
   const status = useQuery({

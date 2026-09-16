@@ -679,18 +679,10 @@ export function TicketDetailPage() {
     d?.status === "done" ||
     d?.status === "closed" ||
     d?.status === "resolved";
-  // 反思诊断抽屉：knowledge_op/supervisor/admin 全量可见；此外 reviewing 态
-  // （AI 答复打分未过转人工审核）本工单处理人本人也能看——只诊断不改 skill
-  // （ReflectDrawer 内部按角色再拆一层，RemedyColumn 仍 knowledge_op-only）。
+  // 反思诊断暂时仅管理员可见、可操作。
   // queryKey 与 ReflectDrawer 内部同名查询共享缓存，不会重复打两次请求。
   const [reflectOpen, setReflectOpen] = useState(false);
-  const canSeeReflectFull =
-    currentRole() === "knowledge_op" || currentRole() === "supervisor" || currentRole() === "admin";
-  const canSeeReflectAsHandler =
-    (d?.status === "reviewing" || opStatus === "reviewing" || effectiveOpStatus === "reviewing") &&
-    d?.handler_user_id != null &&
-    currentUserId() === d.handler_user_id;
-  const canSeeReflect = canSeeReflectFull || canSeeReflectAsHandler;
+  const canSeeReflect = currentRole() === "admin";
   const escalationCtx = useQuery({
     queryKey: ["escalation-context", id],
     queryFn: () =>
@@ -1182,7 +1174,8 @@ export function TicketDetailPage() {
                   {/* 7. 完善知识库：不受工单状态限制，均可调用维护知识库面板 */}
                   <button
                     type="button"
-                    onClick={() => setKnowledgeDrawerOpen(true)}
+                    onClick={() => d.can_operate && setKnowledgeDrawerOpen(true)}
+                    disabled={!d.can_operate}
                     title="录入并维护知识库"
                     className="px-3.5 py-1.5 text-[12px] font-semibold rounded-[7px] bg-white text-slate-700 border border-hub-border hover:border-[#6085e7] cursor-pointer shadow-xs"
                   >

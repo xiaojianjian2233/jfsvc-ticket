@@ -83,18 +83,18 @@ def test_reply_requires_supervisor(app_client: TestClient, reply_world: Session)
     assert r.status_code == 403
 
 
-def test_reply_allowed_for_op_handler(app_client: TestClient, reply_world: Session) -> None:
-    """处理人（op_handler_user_id）即使是 member 也能答复自己手上的工单。"""
+def test_member_op_handler_is_read_only(app_client: TestClient, reply_world: Session) -> None:
+    """member 即使仍挂着历史处理人关系，也不能执行答复。"""
     hub = reply_world.get(HubIssue, 90)
     hub.op_handler_user_id = 42  # 指定处理人
     reply_world.commit()
-    # 处理人本人（member 角色）→ 放行
+    # member 只读 → 拒绝
     r = app_client.post(
         "/api/hub-issues/90/reply",
         json={"content": "处理人答复"},
         headers=_bearer(42, name="miao", role="member"),
     )
-    assert r.status_code == 200, r.text
+    assert r.status_code == 403, r.text
     # 另一个非处理人 member → 仍 403
     r2 = app_client.post(
         "/api/hub-issues/90/reply",
@@ -104,7 +104,7 @@ def test_reply_allowed_for_op_handler(app_client: TestClient, reply_world: Sessi
     assert r2.status_code == 403
 
 
-def test_reply_allowed_for_ticket_handler_when_hub_op_handler_null(
+def test_member_ticket_handler_is_read_only_when_hub_op_handler_null(
     app_client: TestClient, reply_world: Session
 ) -> None:
     """处理人身份只落在 ticket 层（handler_user_id），hub 层 op_handler_user_id 为空时，
@@ -118,13 +118,13 @@ def test_reply_allowed_for_ticket_handler_when_hub_op_handler_null(
     ticket = reply_world.get(Ticket, 300)
     ticket.handler_user_id = 42  # 处理人只落在 ticket 层
     reply_world.commit()
-    # 关联工单的处理人本人（member 角色）→ 放行
+    # 关联工单的历史处理人是 member，仍只能只读
     r = app_client.post(
         "/api/hub-issues/90/reply",
         json={"content": "工单处理人答复"},
         headers=_bearer(42, name="miao", role="member"),
     )
-    assert r.status_code == 200, r.text
+    assert r.status_code == 403, r.text
     # 与该工单无关的 member → 仍 403
     r2 = app_client.post(
         "/api/hub-issues/90/reply",

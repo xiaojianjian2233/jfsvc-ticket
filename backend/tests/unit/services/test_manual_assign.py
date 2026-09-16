@@ -87,18 +87,16 @@ def test_assign_records_status_history(db_session: Session) -> None:
     assert any(r.changed_by == "system:manual_assign" for r in rows)
 
 
-def test_assign_target_member_allowed(db_session: Session) -> None:
-    """处理人可以是 member 角色（真实处理人主体），不再按角色白名单拒绝。"""
+def test_assign_target_member_rejected(db_session: Session) -> None:
+    """member 是只读角色，不能被指定为处理人。"""
     op = _mk_user(db_session, name="op", role="supervisor")
     member = _mk_user(db_session, name="m", role="member")
     t = _mk_ticket(db_session, short_code="T-3")
 
-    res = ManualAssignService(db_session).assign(
-        AssignRequest(ticket_ids=[t.id], assigned_user_id=member.id, operator_user_id=op.id)
-    )
-    assert res.assigned_count == 1
-    db_session.flush()
-    assert db_session.get(Ticket, t.id).handler_user_id == member.id
+    with pytest.raises(TargetUserInvalidError):
+        ManualAssignService(db_session).assign(
+            AssignRequest(ticket_ids=[t.id], assigned_user_id=member.id, operator_user_id=op.id)
+        )
 
 
 def test_assign_target_inactive(db_session: Session) -> None:
@@ -141,7 +139,7 @@ def test_assign_updates_hub_and_draft_subtasks(db_session: Session) -> None:
     from app.models import HubIssue
 
     op = _mk_user(db_session, name="op_sup", role="supervisor")
-    target = _mk_user(db_session, name="new_handler", role="member")
+    target = _mk_user(db_session, name="new_handler", role="assignee")
     old_handler = _mk_user(db_session, name="old_handler", role="member")
 
     hub = HubIssue(
@@ -198,10 +196,10 @@ def test_assign_updates_hub_and_draft_subtasks(db_session: Session) -> None:
     assert pushed_sub.assigned_user_id == old_handler.id
 
 
-def test_assign_member_permissions(db_session: Session) -> None:
-    member_alice = _mk_user(db_session, name="alice", role="member")
-    member_bob = _mk_user(db_session, name="bob", role="member")
-    target = _mk_user(db_session, name="target_charlie", role="member")
+def test_assign_assignee_permissions(db_session: Session) -> None:
+    member_alice = _mk_user(db_session, name="alice", role="assignee")
+    member_bob = _mk_user(db_session, name="bob", role="assignee")
+    target = _mk_user(db_session, name="target_charlie", role="assignee")
 
     t_mine = _mk_ticket(db_session, short_code="T-8")
     t_mine.handler_user_id = member_alice.id

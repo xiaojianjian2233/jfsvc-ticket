@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps.auth import AuthedUser, optional_user, require_user
+from app.api.deps.auth import AuthedUser, optional_user, require_assignee, require_user
 from app.api.history_labels import (
     collect_user_ids,
     humanize_actor,
@@ -500,8 +500,9 @@ def get_ticket(
     # 行级可见性放开：允许已登录认证用户只读查看工单详情，以支持外部/产研人员从外部系统（如 Linear）直接访问
     detail = build_ticket_detail(db, ticket)
     handler_id = ticket.handler_user_id or ticket.assigned_user_id
-    detail.can_operate = auth_user.role in ("admin", "supervisor") or (
-        handler_id is not None and handler_id == auth_user.user_id
+    detail.can_operate = auth_user.role in ("assignee", "admin", "supervisor") and (
+        auth_user.role in ("admin", "supervisor")
+        or (handler_id is not None and handler_id == auth_user.user_id)
     )
     return detail
 
@@ -514,7 +515,7 @@ class AiDraftResponse(BaseModel):
 @router.post("/{ticket_id}/generate-ai-answer", response_model=AiDraftResponse)
 def generate_ticket_ai_answer(
     ticket_id: int,
-    auth_user: AuthedUser = Depends(require_user),
+    auth_user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> AiDraftResponse:
     ticket = TicketRepository(db).get(ticket_id)
@@ -643,7 +644,7 @@ class ReturnResponse(BaseModel):
 def return_ticket(
     ticket_id: int,
     body: ReturnBody,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> ReturnResponse:
     """退回 KSM（returnKsmOrder）——转错模块打回重新分派。处理人可执行。
@@ -701,7 +702,7 @@ class RetryOutboxResponse(BaseModel):
 @router.post("/{ticket_id}/retry-outbox", response_model=RetryOutboxResponse)
 def retry_outbox_endpoint(
     ticket_id: int,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> RetryOutboxResponse:
     """手工重试该工单最近一次失败的出站回写（不限 kind，覆盖 reply/status/
@@ -821,7 +822,7 @@ class UploadAttachmentBody(BaseModel):
 def upload_attachment(
     ticket_id: int,
     body: UploadAttachmentBody,
-    _user: AuthedUser = Depends(require_user),
+    _user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> AttachmentOut:
     """上传工单/子任务附件：Base64 解码流式写入 MinIO，在 attachments 表建行，返回 AttachmentOut。"""
@@ -1193,7 +1194,7 @@ def list_ticket_subtasks(
 def create_ticket_subtask(
     ticket_id: int,
     body: CreateSubTaskBody,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> SubTaskOut:
     """为当前工单新增一个 Hub 子任务。"""
@@ -1268,7 +1269,7 @@ def create_ticket_subtask(
 def ticket_reply_endpoint(
     ticket_id: int,
     body: TicketReplyBody,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> TicketReplyResponse:
     """向 KSM/智齿提交回复：
@@ -1463,7 +1464,7 @@ def ticket_reply_endpoint(
 def ticket_request_supply_endpoint(
     ticket_id: int,
     body: RequestSupplyBody,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> RequestSupplyResponse:
     """工单层面直接请求客户补充资料：自动确保关联 Hub 任务存在并向 KSM 触发出站写回。"""

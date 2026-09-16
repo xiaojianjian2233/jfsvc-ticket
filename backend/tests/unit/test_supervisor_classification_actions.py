@@ -547,7 +547,7 @@ def test_processing_operation_reclassify_by_own_handler(
     app_client: TestClient, op_world: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """处理人本人（member）也能转研发：授权对齐 PATCH /attributes 的口径。"""
-    op_world.add(User(id=9, feishu_uid="ou_m", name="mia", role="member"))
+    op_world.add(User(id=9, feishu_uid="ou_m", name="mia", role="assignee"))
     hub = op_world.get(HubIssue, 80)
     hub.op_handler_user_id = 9
     op_world.commit()
@@ -559,7 +559,7 @@ def test_processing_operation_reclassify_by_own_handler(
         r = app_client.post(
             "/api/supervisor/reclassify",
             json={"hub_issue_id": 80, "new_type": "Bug_fix", "reason": "跟客户确认是 bug"},
-            headers=_bearer(9, role="member"),
+            headers=_bearer(9, role="assignee"),
         )
     assert r.status_code == 200, r.text
     op_world.refresh(hub)

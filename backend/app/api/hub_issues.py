@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.deps.auth import AuthedUser, require_supervisor, require_user
+from app.api.deps.auth import AuthedUser, require_assignee, require_supervisor, require_user
 from app.config import get_settings
 from app.core.logging import get_logger
 from app.db import get_session
@@ -469,7 +469,7 @@ def _authorize_hub_handler(
 def author_reply_endpoint(
     hub_issue_id: int,
     body: AuthorReplyBody,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> AuthorReplyResponse:
     _authorize_hub_handler(db, hub_issue_id, user)
@@ -539,7 +539,7 @@ class RequestSupplyResponse(BaseModel):
 def request_supply_endpoint(
     hub_issue_id: int,
     body: RequestSupplyBody,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> RequestSupplyResponse:
     """Ask the customer for more info (补料). Enqueues a supply sync_outbox row
@@ -608,7 +608,7 @@ class FlagDiagnosisResponse(BaseModel):
 def flag_diagnosis_endpoint(
     hub_issue_id: int,
     body: FlagDiagnosisBody,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> FlagDiagnosisResponse:
     """处理人发现运营工单的 AI 自动答复有问题 → 送进反思诊断工作台（复用 ai_cs
@@ -702,7 +702,7 @@ class UpdateAttributesResponse(BaseModel):
 def update_hub_attributes(
     hub_issue_id: int,
     body: UpdateAttributesBody,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> UpdateAttributesResponse:
     """改 type/product_line_code/module。改 type 时按新类型规整下游状态（status/
@@ -863,7 +863,7 @@ class GenerateAiAnswerResponse(BaseModel):
 @router.post("/{hub_issue_id}/generate-ai-answer", response_model=GenerateAiAnswerResponse)
 def generate_ai_answer_endpoint(
     hub_issue_id: int,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> GenerateAiAnswerResponse:
     _authorize_hub_handler(db, hub_issue_id, user)
@@ -871,6 +871,7 @@ def generate_ai_answer_endpoint(
     if hub is None or hub.deleted_at is not None:
         raise HTTPException(status_code=404, detail="hub_issue not found")
     from app.services.agents.answer_draft import generate_answer_draft
+
     answer = generate_answer_draft(db, hub_id=hub_issue_id)
     if not answer:
         raise HTTPException(status_code=503, detail="AI 正在作答或暂未返回结果，请稍后重试")
@@ -880,7 +881,7 @@ def generate_ai_answer_endpoint(
 @router.post("/{hub_issue_id}/re-answer", response_model=ReAnswerResponse)
 def re_answer_endpoint(
     hub_issue_id: int,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> ReAnswerResponse:
     """主管/知识运营改完 KB 或 skill 后手动重答一次（同步，非 drain 异步）。
@@ -1153,7 +1154,7 @@ class ConfirmSubTaskResponse(BaseModel):
 def update_subtask_endpoint(
     hub_issue_id: int,
     body: UpdateSubTaskBody,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> ConfirmSubTaskResponse:
     """行内更新子任务的标题、类型、产品线、模块或解决方案。"""
@@ -1244,7 +1245,7 @@ def update_subtask_endpoint(
 @router.delete("/{hub_issue_id}/subtask")
 def delete_subtask_endpoint(
     hub_issue_id: int,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> dict[str, Any]:
     """删除子任务（草稿状态或未推 Linear 前可删除）。"""
@@ -1265,7 +1266,7 @@ def delete_subtask_endpoint(
 def confirm_subtask_endpoint(
     hub_issue_id: int,
     body: ConfirmSubTaskBody,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> ConfirmSubTaskResponse:
     """确认子任务：

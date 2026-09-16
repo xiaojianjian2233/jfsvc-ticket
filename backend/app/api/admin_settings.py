@@ -64,10 +64,18 @@ def put_default_pool_user(
 ) -> DefaultPoolUserOut:
     if body.user_id is not None:
         user = db.execute(
-            select(User).where(User.id == body.user_id, User.is_active.is_(True))
+            select(User).where(
+                User.id == body.user_id,
+                User.is_active.is_(True),
+                User.deleted_at.is_(None),
+                User.role.in_(("assignee", "supervisor", "admin")),
+            )
         ).scalar_one_or_none()
         if user is None:
-            raise HTTPException(status_code=422, detail="user not found or inactive")
+            raise HTTPException(
+                status_code=422,
+                detail="user not found, inactive or not eligible as assignee",
+            )
 
     row = db.execute(select(SystemSetting).where(SystemSetting.key == _KEY)).scalar_one_or_none()
 

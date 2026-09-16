@@ -28,6 +28,7 @@ from typing import Literal
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
+from app.models import User
 from app.repositories.assignment_scope import (
     AssignmentScopeRepository,
     UserPartnerRepository,
@@ -136,21 +137,28 @@ class Router:
 
         # Step 3: default_pool
         if self._default_pool_user_id is not None:
-            return RouteDecision(
-                ticket_id=req.ticket_id,
-                decision="default_pool",
-                assigned_user_ids=[self._default_pool_user_id],
-                matched_scope="none",
-                rationale="no module / feature scope hit; sent to default pool",
-                confidence=0.0,
-            )
+            pool_user = self._db.get(User, self._default_pool_user_id)
+            if (
+                pool_user is not None
+                and pool_user.is_active
+                and pool_user.deleted_at is None
+                and pool_user.role in ("assignee", "supervisor", "admin")
+            ):
+                return RouteDecision(
+                    ticket_id=req.ticket_id,
+                    decision="default_pool",
+                    assigned_user_ids=[self._default_pool_user_id],
+                    matched_scope="none",
+                    rationale="no module / feature scope hit; sent to default pool",
+                    confidence=0.0,
+                )
 
         return RouteDecision(
             ticket_id=req.ticket_id,
             decision="default_pool",
             assigned_user_ids=[],
             matched_scope="none",
-            rationale="no scope hit AND no default_pool configured",
+            rationale="no scope hit AND no eligible default_pool configured",
             confidence=0.0,
         )
 

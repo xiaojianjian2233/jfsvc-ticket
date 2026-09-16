@@ -105,4 +105,3 @@ def consume_module_owner(
     owner = _resolve_user_by_name(db, names[idx])
     mod_row.dev_owner_rotation_cursor = (idx + 1) % len(names)
     return owner
-

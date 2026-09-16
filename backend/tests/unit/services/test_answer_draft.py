@@ -90,9 +90,11 @@ def test_ticket_endpoint_authorization_and_repeat(app_client, db_session):
     path = f"/api/tickets/{ticket.id}/generate-ai-answer"
     assert app_client.post(path).status_code == 401
     token, _ = issue_jwt(sub="88", name="member", role="member")
-    assert app_client.post(path, headers={"Authorization": f"Bearer {token}"}).status_code == 404
+    assert app_client.post(path, headers={"Authorization": f"Bearer {token}"}).status_code == 403
     token, _ = issue_jwt(sub="1", name="admin", role="admin")
-    with patch("app.services.agents.answer_draft.generate_answer_draft", return_value="新草稿") as call:
+    with patch(
+        "app.services.agents.answer_draft.generate_answer_draft", return_value="新草稿"
+    ) as call:
         for _ in range(2):
             response = app_client.post(path, headers={"Authorization": f"Bearer {token}"})
             assert response.status_code == 200

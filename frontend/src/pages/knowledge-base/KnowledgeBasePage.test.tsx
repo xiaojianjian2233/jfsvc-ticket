@@ -37,7 +37,8 @@ afterEach(() => {
 });
 afterAll(() => server.close());
 
-function renderComponent() {
+function renderComponent(role = "assignee") {
+  localStorage.setItem("auth_user", JSON.stringify({ id: 1, role }));
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
@@ -47,6 +48,15 @@ function renderComponent() {
 }
 
 describe("KnowledgeBasePage 知识库模块", () => {
+  it("member 可查看知识库但没有新增、批量操作和可选行", async () => {
+    renderComponent("member");
+
+    expect(await screen.findByText("知识库")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /新增/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "批量审核" })).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "全选" })).toBeDisabled();
+  });
+
   it("列表正确渲染初始Mock数据及格式化字段（编号前缀FPYFAQ、截断内容、状态徽章与调用次数）", async () => {
     renderComponent();
 

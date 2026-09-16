@@ -9,6 +9,7 @@ from app.models import (
     AssignmentScopeFeature,
     AssignmentScopeHistory,
     AssignmentScopeModule,
+    User,
     UserPartner,
 )
 
@@ -20,15 +21,29 @@ class AssignmentScopeRepository:
         self._db = db
 
     def find_user_ids_by_module(self, product_line_code: str, module: str) -> list[int]:
-        stmt = select(AssignmentScopeModule.user_id).where(
-            AssignmentScopeModule.product_line_code == product_line_code,
-            AssignmentScopeModule.module == module,
+        stmt = (
+            select(AssignmentScopeModule.user_id)
+            .join(User, User.id == AssignmentScopeModule.user_id)
+            .where(
+                AssignmentScopeModule.product_line_code == product_line_code,
+                AssignmentScopeModule.module == module,
+                User.is_active.is_(True),
+                User.deleted_at.is_(None),
+                User.role.in_(("assignee", "supervisor", "admin")),
+            )
         )
         return list(self._db.execute(stmt).scalars().all())
 
     def find_user_ids_by_feature(self, feature: str) -> list[int]:
-        stmt = select(AssignmentScopeFeature.user_id).where(
-            AssignmentScopeFeature.feature == feature
+        stmt = (
+            select(AssignmentScopeFeature.user_id)
+            .join(User, User.id == AssignmentScopeFeature.user_id)
+            .where(
+                AssignmentScopeFeature.feature == feature,
+                User.is_active.is_(True),
+                User.deleted_at.is_(None),
+                User.role.in_(("assignee", "supervisor", "admin")),
+            )
         )
         return list(self._db.execute(stmt).scalars().all())
 

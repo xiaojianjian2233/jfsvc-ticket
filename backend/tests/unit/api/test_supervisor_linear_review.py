@@ -235,7 +235,7 @@ def test_confirm_linear_push_by_own_handler(app_client: TestClient, review_world
     assert r.status_code == 403
 
     # 处理人本人（关联 ticket.handler_user_id=3）→ 200
-    review_world.add(User(id=3, feishu_uid="ou_h", name="handler", role="member"))
+    review_world.add(User(id=3, feishu_uid="ou_h", name="handler", role="assignee"))
     review_world.add(
         Ticket(
             id=902,
@@ -254,7 +254,7 @@ def test_confirm_linear_push_by_own_handler(app_client: TestClient, review_world
         r = app_client.post(
             "/api/supervisor/confirm-linear-push",
             json={"hub_issue_id": 90},
-            headers=_bearer(3, name="handler", role="member"),
+            headers=_bearer(3, name="handler", role="assignee"),
         )
     assert r.status_code == 200, r.text
     push.assert_called_once_with(90, assignee_override_user_id=40)

@@ -84,7 +84,7 @@ def test_flag_diagnosis_requires_handler_or_supervisor(
     r = app_client.post(
         "/api/hub-issues/90/flag-diagnosis",
         json={"ticket_id": 300},
-        headers=_bearer(5, name="dave", role="member"),
+        headers=_bearer(5, name="dave", role="assignee"),
     )
     assert r.status_code == 200, r.text
 
@@ -154,7 +154,7 @@ def test_flag_diagnosis_happy_path_persists_golden_triple(
     r = app_client.post(
         "/api/hub-issues/90/flag-diagnosis",
         json={"ticket_id": 300, "note": "引用的知识条目已过期"},
-        headers=_bearer(5, name="dave", role="member"),
+        headers=_bearer(5, name="dave", role="assignee"),
     )
     assert r.status_code == 200, r.text
     body = r.json()

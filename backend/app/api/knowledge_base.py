@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.deps.auth import AuthedUser, require_user
+from app.api.deps.auth import AuthedUser, require_assignee, require_user
 from app.db import get_session
 from app.models import Ticket
 from app.repositories.knowledge_base import KnowledgeBaseRepository
@@ -119,7 +119,7 @@ def list_knowledge_items(
 @router.post("", response_model=KnowledgeItemOut, status_code=201)
 def create_knowledge_item(
     body: CreateKnowledgeItemBody,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> KnowledgeItemOut:
     """创建知识库条目：默认状态为 pending_review (待审核)，编号按规则生成。"""
@@ -185,7 +185,7 @@ def get_knowledge_item(
 def update_knowledge_item(
     item_id: str,
     body: UpdateKnowledgeItemBody,
-    _user: AuthedUser = Depends(require_user),
+    _user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> KnowledgeItemOut:
     """更新知识库条目。"""
@@ -212,7 +212,7 @@ def update_knowledge_item(
 @router.delete("/{item_id}", status_code=204)
 def delete_knowledge_item(
     item_id: str,
-    _user: AuthedUser = Depends(require_user),
+    _user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> Response:
     """软删除知识库条目。"""
@@ -227,7 +227,7 @@ def delete_knowledge_item(
 @router.post("/batch-review", response_model=dict[str, Any])
 def batch_review_knowledge(
     body: BatchReviewBody,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> dict[str, Any]:
     """批量审核通过或驳回。"""
@@ -245,7 +245,7 @@ def batch_review_knowledge(
 @router.post("/batch-offline", response_model=dict[str, Any])
 def batch_offline_knowledge(
     body: BatchStatusBody,
-    _user: AuthedUser = Depends(require_user),
+    _user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> dict[str, Any]:
     """批量下架知识条目。"""
@@ -258,7 +258,7 @@ def batch_offline_knowledge(
 @router.post("/batch-online", response_model=dict[str, Any])
 def batch_online_knowledge(
     body: BatchStatusBody,
-    _user: AuthedUser = Depends(require_user),
+    _user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> dict[str, Any]:
     """批量上架知识条目。"""

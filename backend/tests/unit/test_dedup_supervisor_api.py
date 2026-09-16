@@ -235,7 +235,7 @@ def test_repush_rejects_non_handler(app_client: TestClient, pending_world: Sessi
 
 def test_repush_allowed_for_own_handler(app_client: TestClient, pending_world: Session) -> None:
     """处理人本人（非主管）可自助重推——TKT-006458 事故修复：处理人不必找主管代操作。"""
-    pending_world.add(User(id=3, feishu_uid="ou_h", name="handler", role="member"))
+    pending_world.add(User(id=3, feishu_uid="ou_h", name="handler", role="assignee"))
     pending_world.add(
         Ticket(
             id=903,
@@ -253,7 +253,7 @@ def test_repush_allowed_for_own_handler(app_client: TestClient, pending_world: S
     resp = app_client.post(
         "/api/supervisor/repush-linear",
         json={"hub_issue_id": 80},
-        headers=_bearer(3, name="handler", role="member"),
+        headers=_bearer(3, name="handler", role="assignee"),
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["pushed"] is False  # LINEAR_PUSH_ENABLED=false in conftest

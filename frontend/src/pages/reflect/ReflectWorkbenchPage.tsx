@@ -32,8 +32,8 @@ function currentRole(): string {
 
 export function ReflectWorkbenchPage() {
   const role = currentRole();
-  // ADR-0016 P5：知识运营也可用反思工作台（后端 require_knowledge_op 同口径）
-  const isSupervisor = role === "knowledge_op" || role === "supervisor" || role === "admin";
+  // 反思诊断当前仅向管理员开放。
+  const isSupervisor = role === "admin";
   const [params, setParams] = useSearchParams();
   const selectedId = Number(params.get("ticket")) || null;
 

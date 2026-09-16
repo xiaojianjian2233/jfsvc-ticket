@@ -37,8 +37,22 @@ export const authedRoutes = (
   <>
     <Route path="/" element={<WorkbenchPage />} />
     <Route path="/supervisor" element={<Navigate to="/" replace />} />
-    <Route path="/reflect" element={<ReflectWorkbenchPage />} />
-    <Route path="/reflect-training" element={<ReflectTrainingPage />} />
+    <Route
+      path="/reflect"
+      element={
+        <RequireAdmin>
+          <ReflectWorkbenchPage />
+        </RequireAdmin>
+      }
+    />
+    <Route
+      path="/reflect-training"
+      element={
+        <RequireAdmin>
+          <ReflectTrainingPage />
+        </RequireAdmin>
+      }
+    />
     <Route path="/knowledge-base" element={<KnowledgeBasePage />} />
     <Route path="/reflect-training/knowledge-base" element={<KnowledgeBasePage />} />
     <Route path="/analytics" element={<AnalyticsPage />} />

@@ -88,14 +88,25 @@ def require_supervisor(user: AuthedUser = Depends(require_user)) -> AuthedUser:
     return user
 
 
-def require_knowledge_op(user: AuthedUser = Depends(require_user)) -> AuthedUser:
-    """知识运营能力（ADR-0016 P5 权限双层）：AI 客服对客 skill（反思工作台）
-    + 飞书 KB/FAQ。supervisor/admin 天然涵盖；knowledge_op 只有这一块——
-    够不到内部编排 skill（require_admin）与主管修正权（require_supervisor）。"""
-    if user.role not in ("knowledge_op", "supervisor", "admin"):
+def require_assignee(user: AuthedUser = Depends(require_user)) -> AuthedUser:
+    """工单/知识库写权限：处理人及以上角色。
+
+    member 是全局只读角色；knowledge_op 不隐式获得工单处理权。
+    """
+    if user.role not in ("assignee", "supervisor", "admin"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="knowledge_op, supervisor or admin role required",
+            detail="assignee, supervisor or admin role required",
+        )
+    return user
+
+
+def require_knowledge_op(user: AuthedUser = Depends(require_user)) -> AuthedUser:
+    """反思诊断/训练临时收紧为仅管理员可访问。"""
+    if user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="admin role required",
         )
     return user
 

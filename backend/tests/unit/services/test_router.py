@@ -220,3 +220,27 @@ def test_module_match_other_product_line_does_not_leak(routing_world: Session) -
     # module hit nothing in cloud-erp; no feature → default_pool
     assert decision.decision == "default_pool"
     assert decision.assigned_user_ids == [99]
+
+
+def test_member_in_scope_is_not_routed(routing_world: Session) -> None:
+    member = User(id=77, feishu_uid="ou_readonly", name="readonly", role="member")
+    routing_world.add(member)
+    routing_world.flush()
+    routing_world.add(
+        AssignmentScopeModule(user_id=member.id, product_line_code="cloud-erp", module="只读模块")
+    )
+    routing_world.commit()
+
+    decision = Router(routing_world, default_pool_user_id=99).route(_req(raw_module="只读模块"))
+    assert decision.decision == "default_pool"
+    assert decision.assigned_user_ids == [99]
+
+
+def test_member_default_pool_is_ignored(routing_world: Session) -> None:
+    member = User(id=78, feishu_uid="ou_pool_readonly", name="readonly-pool", role="member")
+    routing_world.add(member)
+    routing_world.commit()
+
+    decision = Router(routing_world, default_pool_user_id=member.id).route(_req())
+    assert decision.decision == "default_pool"
+    assert decision.assigned_user_ids == []

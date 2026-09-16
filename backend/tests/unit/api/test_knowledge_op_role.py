@@ -1,9 +1,4 @@
-"""知识运营角色测试（ADR-0016 P5 权限双层）.
-
-knowledge_op：反思工作台端点组放行；主管修正权（split/dedup/complaint 队列等）一律 403。
-内部编排 skill（/api/admin/skills）读接口放行（反思诊断训练页面用），写接口仍 403。
-supervisor/admin 不受影响。
-"""
+"""反思诊断与训练临时收紧为 admin-only。"""
 
 from __future__ import annotations
 
@@ -31,21 +26,28 @@ def world(db_session: Session) -> Session:
 # ---- 反思工作台端点组：knowledge_op 放行 -------------------------------------
 
 
-def test_kop_can_list_escalation_queue(app_client: TestClient, world: Session) -> None:
+def test_kop_blocked_from_escalation_queue(app_client: TestClient, world: Session) -> None:
     r = app_client.get("/api/supervisor/escalation-pending-diagnosis", headers=_bearer(3))
-    assert r.status_code == 200
+    assert r.status_code == 403
 
 
-def test_kop_can_read_ai_cs_status(app_client: TestClient, world: Session) -> None:
-    # 功能开关关闭也应 200（返回 enabled=false），权限层不拦
+def test_kop_blocked_from_ai_cs_status(app_client: TestClient, world: Session) -> None:
     r = app_client.get("/api/supervisor/ai-cs/status", headers=_bearer(3))
-    assert r.status_code == 200
+    assert r.status_code == 403
 
 
-def test_supervisor_still_allowed(app_client: TestClient, world: Session) -> None:
+def test_supervisor_blocked_from_reflect(app_client: TestClient, world: Session) -> None:
     r = app_client.get(
         "/api/supervisor/escalation-pending-diagnosis",
         headers=_bearer(2, name="carol", role="supervisor"),
+    )
+    assert r.status_code == 403
+
+
+def test_admin_allowed_into_reflect(app_client: TestClient, world: Session) -> None:
+    r = app_client.get(
+        "/api/supervisor/escalation-pending-diagnosis",
+        headers=_bearer(1, name="boss", role="admin"),
     )
     assert r.status_code == 200
 
@@ -71,11 +73,9 @@ def test_kop_blocked_from_supervisor_queues(
     assert r.status_code == 403, path
 
 
-def test_kop_can_read_internal_skills(app_client: TestClient, world: Session) -> None:
-    """内部编排 skill 的读接口放行给 knowledge_op（反思诊断训练页面用）；
-    写接口（draft/promote/rollback/import 等）仍 require_admin，知识运营够不到。"""
+def test_kop_blocked_from_internal_skills_read(app_client: TestClient, world: Session) -> None:
     r = app_client.get("/api/admin/skills", headers=_bearer(3))
-    assert r.status_code == 200
+    assert r.status_code == 403
 
 
 def test_kop_blocked_from_internal_skills_write(app_client: TestClient, world: Session) -> None:

@@ -22,7 +22,7 @@ type UserDetailOut =
   paths["/api/admin/users/{user_id}"]["get"]["responses"]["200"]["content"]["application/json"];
 
 const ROLE_DEFS: { key: string; desc: string }[] = [
-  { key: "member", desc: "仅查看与自己相关的工单，不可被 AI 路由分配" },
+  { key: "member", desc: "只读用户：可查看工单与知识库，不可路由、分派或执行操作" },
   { key: "assignee", desc: "可被 AI 路由分配为处理人，处理名下工单并回复客户" },
   { key: "knowledge_op", desc: "知识运营：反思诊断 + 对客 AI 客服 skill / 知识库维护（ADR-0016 权限双层）" },
   { key: "supervisor", desc: "可修正 AI 分类、执行拆单/合并、管理本组分工范围" },

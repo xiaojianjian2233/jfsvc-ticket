@@ -160,13 +160,13 @@ const navItems: {
     to: "/reflect",
     label: "反思诊断",
     icon: TargetIcon,
-    roles: ["knowledge_op", "supervisor", "admin"],
+    roles: ["admin"],
   },
   {
     to: "/reflect-training",
     label: "反思诊断训练",
     icon: TrainingIcon,
-    roles: ["knowledge_op", "supervisor", "admin"],
+    roles: ["admin"],
   },
   { to: "/knowledge-base", label: "知识库", icon: BookIcon },
   {

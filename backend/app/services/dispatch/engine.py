@@ -37,7 +37,12 @@ _NONE = DispatchResult(user_id=None, user_name=None, rule_id=None, tier=None, re
 
 def _valid_user_name(db: Session, user_id: int) -> str | None:
     u = db.get(User, user_id)
-    if u is None or u.deleted_at is not None or not u.is_active:
+    if (
+        u is None
+        or u.deleted_at is not None
+        or not u.is_active
+        or u.role not in {"assignee", "supervisor", "admin"}
+    ):
         return None
     return u.name
 

@@ -84,6 +84,41 @@ def test_create_knowledge_item_defaults_to_pending_review(
     assert data["total_calls"] == 0
 
 
+def test_member_can_read_but_cannot_create_knowledge(
+    app_client: TestClient, kb_world: Session
+) -> None:
+    headers = _bearer(9, name="只读成员", role="member")
+    assert app_client.get("/api/knowledge-base", headers=headers).status_code == 200
+    payload = {
+        "title": "只读成员不可新增",
+        "content": "只读内容",
+        "type": "FAQ",
+        "product_line_code": "invoice_cloud",
+        "product_line_name": "数电发票云",
+        "module_code": "auth",
+        "module_name": "登录认证",
+    }
+    assert app_client.post("/api/knowledge-base", json=payload, headers=headers).status_code == 403
+
+
+def test_assignee_can_create_knowledge(app_client: TestClient, kb_world: Session) -> None:
+    payload = {
+        "title": "处理人新增知识",
+        "content": "处理方案",
+        "type": "FAQ",
+        "product_line_code": "invoice_cloud",
+        "product_line_name": "数电发票云",
+        "module_code": "auth",
+        "module_name": "登录认证",
+    }
+    r = app_client.post(
+        "/api/knowledge-base",
+        json=payload,
+        headers=_bearer(2, name="张工", role="assignee"),
+    )
+    assert r.status_code == 201
+
+
 def test_create_knowledge_item_binds_ticket_handler(
     app_client: TestClient, kb_world: Session
 ) -> None:

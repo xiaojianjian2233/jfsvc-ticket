@@ -45,7 +45,14 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from adapters.ai_cs import AiCsBusinessError, AiCsError
-from app.api.deps.auth import AuthedUser, require_knowledge_op, require_supervisor, require_user
+from app.api.deps.auth import (
+    AuthedUser,
+    require_admin,
+    require_assignee,
+    require_knowledge_op,
+    require_supervisor,
+    require_user,
+)
 from app.api.history_labels import HUB_TYPE_ZH
 from app.api.hub_issues import _authorize_hub_handler
 from app.core.llm_router import LLMRouterError
@@ -418,7 +425,7 @@ def batch_supply_tickets(
 @router.post("/assign", response_model=AssignResponse)
 def assign_tickets(
     body: AssignBody,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> AssignResponse:
     # 权限下放：主管/管理员可转派任意工单；普通成员（member/assignee）仅可移交当前处理人为本人的工单
@@ -628,7 +635,7 @@ class CreateHubIssueResponse(BaseModel):
 def create_hub_issue_endpoint(
     body: CreateHubIssueBody,
     background_tasks: BackgroundTasks,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> CreateHubIssueResponse:
     """Graduate a ticket to a hub_issue (manual path, no confidence gate).
@@ -1153,7 +1160,7 @@ def close_complaint_endpoint(
 @router.post("/repush-linear", response_model=RepushLinearResponse)
 def repush_linear_endpoint(
     body: RepushLinearBody,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> RepushLinearResponse:
     """Retry a blocked Linear push (e.g. after the assignee joined Linear and
@@ -1761,7 +1768,7 @@ def _authorize_escalation_ticket(db: Session, ticket_id: int, user: AuthedUser) 
 @router.get("/tickets/{ticket_id}/escalation-context", response_model=EscalationContextResponse)
 def ai_cs_escalation_context_endpoint(
     ticket_id: int,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_admin),
     db: Session = Depends(get_session),
 ) -> EscalationContextResponse:
     """The golden triple (原问题/AI答复/不满) for an ai_cs escalation ticket, so
@@ -1794,7 +1801,7 @@ def ai_cs_escalation_context_endpoint(
 def save_diagnosis_endpoint(
     ticket_id: int,
     body: DiagnosisBody,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_admin),
     db: Session = Depends(get_session),
 ) -> DiagnosisResponse:
     """Persist the supervisor's cause verdict (skill/knowledge/retrieval) and
@@ -1823,7 +1830,7 @@ def save_diagnosis_endpoint(
 @router.post("/tickets/{ticket_id}/reflect", response_model=ReflectResponse)
 def run_reflect_endpoint(
     ticket_id: int,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_admin),
     db: Session = Depends(get_session),
 ) -> ReflectResponse:
     """Run the LLM reflect agent (3-step audit → inferred cause) over the
@@ -2069,7 +2076,7 @@ def _get_reclassifiable_hub(db: Session, hub_issue_id: int) -> HubIssue:
 def confirm_classification(
     body: ConfirmClassificationBody,
     background_tasks: BackgroundTasks,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> ClassificationActionResponse:
     """确认分类无误 → 按 hub.type 分流。权限放宽到处理人本人（_authorize_hub_handler）：
@@ -2165,7 +2172,7 @@ def confirm_classification(
 def reclassify(
     body: ReclassifyBody,
     background_tasks: BackgroundTasks,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> ClassificationActionResponse:
     """改判分类（主管/管理员，或本工单处理人本人）。改判本身即视为已确认分类，按新类型分流：
@@ -2384,7 +2391,7 @@ class ConfirmLinearPushBody(BaseModel):
 def confirm_linear_push(
     body: ConfirmLinearPushBody,
     background_tasks: BackgroundTasks,
-    user: AuthedUser = Depends(require_user),
+    user: AuthedUser = Depends(require_assignee),
     db: Session = Depends(get_session),
 ) -> ClassificationActionResponse:
     """主管/处理人确认推 Linear：手选 assignee 或回落模块负责人 → created + 推送。

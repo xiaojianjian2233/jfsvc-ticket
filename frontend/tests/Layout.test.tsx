@@ -38,10 +38,11 @@ describe("Layout", () => {
     expect(n.getByText("系统基础配置")).toBeInTheDocument();
   });
 
-  it("knowledge_op sees 反思诊断 but not 管理 (ADR-0016 P5)", () => {
+  it("knowledge_op 暂时看不到反思诊断和管理入口", () => {
     renderAs("knowledge_op");
     const n = nav();
-    expect(n.getByText("反思诊断")).toBeInTheDocument();
+    expect(n.queryByText("反思诊断")).not.toBeInTheDocument();
+    expect(n.queryByText("反思诊断训练")).not.toBeInTheDocument();
     expect(n.queryByText("系统基础配置")).not.toBeInTheDocument();
   });
 
@@ -88,7 +89,7 @@ describe("Layout", () => {
     expect(n.getByText("知识库")).toBeInTheDocument();
   });
 
-  it("反思诊断训练 菜单展示在侧边栏（主管与知识运营可见）", () => {
+  it("反思诊断训练菜单仅管理员可见", () => {
     renderAs("admin");
     const n = nav();
     expect(n.getByText("反思诊断训练")).toBeInTheDocument();

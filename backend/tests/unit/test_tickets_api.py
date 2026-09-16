@@ -212,7 +212,7 @@ def test_member_get_own_ticket_ok(app_client: TestClient, world: Session) -> Non
     resp = app_client.get("/api/tickets/102", headers=_bearer(2, role="member"))
     assert resp.status_code == 200
     assert resp.json()["handler_user_id"] == 2
-    assert resp.json()["can_operate"] is True
+    assert resp.json()["can_operate"] is False
 
 
 def test_list_tickets_hub_status_for_dev(app_client: TestClient, world: Session) -> None:

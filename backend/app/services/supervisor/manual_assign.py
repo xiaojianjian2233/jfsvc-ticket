@@ -60,12 +60,18 @@ class ManualAssignService:
     def assign(self, req: AssignRequest) -> AssignResult:
         user_repo = UserRepository(self._db)
         target = user_repo.get(req.assigned_user_id)
-        if target is None or not target.is_active:
-            raise TargetUserInvalidError(f"目标用户 {req.assigned_user_id} 不存在或已停用")
+        if (
+            target is None
+            or not target.is_active
+            or target.role not in ("assignee", "supervisor", "admin")
+        ):
+            raise TargetUserInvalidError(
+                f"目标用户 {req.assigned_user_id} 不存在、已停用或不是处理人角色"
+            )
         # 操作人姓名（写进 history reason，避免存裸 user_id）；查不到回落 id。
         operator = user_repo.get(req.operator_user_id)
         operator_name = operator.name if operator else f"user_id={req.operator_user_id}"
-        # 不限角色：真实处理人大量是 member（分派/转交均无角色限制），只要 active 即可作为处理人
+        # member 是只读角色，不允许成为工单处理人。
 
         ticket_repo = TicketRepository(self._db)
         history_repo = StatusHistoryRepository(self._db)

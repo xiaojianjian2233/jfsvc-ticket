@@ -24,7 +24,7 @@ from app.api.auth import issue_jwt
 from app.models import Source, StatusHistory, Ticket, User
 
 
-def _bearer(user_id: int, *, role: str = "supervisor") -> dict[str, str]:
+def _bearer(user_id: int, *, role: str = "admin") -> dict[str, str]:
     token, _ = issue_jwt(sub=str(user_id), name="carol", role=role)
     return {"Authorization": f"Bearer {token}"}
 
@@ -113,7 +113,7 @@ def _patch_client(monkeypatch: pytest.MonkeyPatch, fake: FakeAiCsClient) -> None
 
 @pytest.fixture
 def world(db_session: Session) -> Session:
-    db_session.add(User(id=2, feishu_uid="ou_carol", name="carol", role="supervisor"))
+    db_session.add(User(id=2, feishu_uid="ou_carol", name="carol", role="admin"))
     db_session.commit()
     return db_session
 
@@ -797,7 +797,7 @@ def test_escalation_context_for_reviewing_ticket(app_client: TestClient, world: 
     world.add(User(id=3, feishu_uid="ou_h", name="handler", role="member"))
     world.commit()
     _mk_reviewing_hub_ticket(world, 900, 90, handler_user_id=3)
-    token, _ = issue_jwt(sub="3", name="handler", role="member")
+    token, _ = issue_jwt(sub="3", name="handler", role="admin")
     r = app_client.get(
         "/api/supervisor/tickets/900/escalation-context",
         headers={"Authorization": f"Bearer {token}"},
@@ -853,7 +853,7 @@ def test_reflect_reviewing_ticket_autofills_draft(app_client: TestClient, world:
     monkey_target = rf.run_reflect
     rf.run_reflect = fake_run_reflect  # type: ignore[assignment]
     try:
-        token, _ = issue_jwt(sub="3", name="handler", role="member")
+        token, _ = issue_jwt(sub="3", name="handler", role="admin")
         r = app_client.post(
             "/api/supervisor/tickets/902/reflect",
             headers={"Authorization": f"Bearer {token}"},
@@ -896,7 +896,7 @@ def test_reflect_reviewing_no_revised_answer_no_writeback(
     monkey_target = rf.run_reflect
     rf.run_reflect = fake_run_reflect  # type: ignore[assignment]
     try:
-        token, _ = issue_jwt(sub="3", name="handler", role="member")
+        token, _ = issue_jwt(sub="3", name="handler", role="admin")
         r = app_client.post(
             "/api/supervisor/tickets/903/reflect",
             headers={"Authorization": f"Bearer {token}"},
@@ -941,7 +941,7 @@ def test_reflect_reviewing_ticket_not_reviewing_state_404s(
     world.add(User(id=3, feishu_uid="ou_h", name="handler", role="member"))
     world.commit()
     _mk_reviewing_hub_ticket(world, 906, 96, handler_user_id=3, op_status="answered")
-    token, _ = issue_jwt(sub="3", name="handler", role="member")
+    token, _ = issue_jwt(sub="3", name="handler", role="admin")
     r = app_client.get(
         "/api/supervisor/tickets/906/escalation-context",
         headers={"Authorization": f"Bearer {token}"},

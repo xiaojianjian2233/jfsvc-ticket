@@ -78,16 +78,16 @@ def test_assign_endpoint_success(app_client: TestClient, assign_world: Session) 
     assert ticket.handler_user_id == 3
 
 
-def test_assign_endpoint_member_allowed(app_client: TestClient, assign_world: Session) -> None:
-    """member 角色可作为处理人（转交目标不再限角色）。"""
+def test_assign_endpoint_member_target_rejected(
+    app_client: TestClient, assign_world: Session
+) -> None:
+    """member 是只读角色，不能作为转交目标。"""
     resp = app_client.post(
         "/api/supervisor/assign",
         json={"ticket_ids": [101], "assigned_user_id": 2},  # bob is 'member'
         headers=_bearer(1),
     )
-    assert resp.status_code == 200, resp.text
-    assign_world.expire_all()
-    assert assign_world.get(Ticket, 101).handler_user_id == 2
+    assert resp.status_code == 422, resp.text
 
 
 def test_assign_endpoint_requires_supervisor(app_client: TestClient, assign_world: Session) -> None:
@@ -100,10 +100,10 @@ def test_assign_endpoint_requires_supervisor(app_client: TestClient, assign_worl
     assert resp.status_code == 403
 
 
-def test_assign_endpoint_member_can_transfer_own_ticket(
+def test_assign_endpoint_member_cannot_transfer_own_ticket(
     app_client: TestClient, assign_world: Session
 ) -> None:
-    # Bob (id=2, member) 移交自己负责的工单 -> 允许并成功
+    # 历史数据即使仍把 member 记为处理人，也不允许执行移交。
     t = assign_world.get(Ticket, 102)
     assert t is not None
     t.handler_user_id = 2
@@ -114,8 +114,4 @@ def test_assign_endpoint_member_can_transfer_own_ticket(
         json={"ticket_ids": [102], "assigned_user_id": 3},
         headers=_bearer(2, role="member"),
     )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["assigned_count"] == 1
-    assign_world.expire_all()
-    assert assign_world.get(Ticket, 102).handler_user_id == 3
+    assert resp.status_code == 403

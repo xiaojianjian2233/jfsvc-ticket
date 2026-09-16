@@ -16,6 +16,7 @@ import {
 } from "./knowledgeBaseStore";
 import { KnowledgeBaseDrawer } from "./KnowledgeBaseDrawer";
 import { DateTimeRangePicker } from "@/components/DateTimeRangePicker";
+import { currentRole } from "@/api/auth";
 
 interface OptionItem {
   code: string;
@@ -248,6 +249,7 @@ const STATUS_OPTIONS: OptionItem[] = [
 ];
 
 export function KnowledgeBasePage() {
+  const canManage = ["assignee", "supervisor", "admin"].includes(currentRole());
   const [items, setItems] = useState<KnowledgeItem[]>(() => getKnowledgeItems());
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [viewingItem, setViewingItem] = useState<KnowledgeItem | null>(null);
@@ -613,7 +615,7 @@ export function KnowledgeBasePage() {
       </div>
 
       {/* 4.2 操作区按钮 */}
-      <div className="bg-white border border-hub-border rounded-[10px] p-3 shadow-sm flex items-center justify-between flex-wrap gap-2.5">
+      {canManage && <div className="bg-white border border-hub-border rounded-[10px] p-3 shadow-sm flex items-center justify-between flex-wrap gap-2.5">
         <div className="flex items-center gap-2.5 flex-wrap">
           <button
             type="button"
@@ -669,7 +671,7 @@ export function KnowledgeBasePage() {
             已勾选 <strong className="text-hub-teal font-mono">{selectedIds.length}</strong> 项
           </span>
         )}
-      </div>
+      </div>}
 
       {/* 4.3 列表数据展示区 */}
       <div className="bg-white border border-hub-border rounded-[10px] shadow-sm overflow-hidden">
@@ -690,6 +692,7 @@ export function KnowledgeBasePage() {
                     aria-label="全选"
                     checked={isAllSelected}
                     onChange={toggleSelectAll}
+                    disabled={!canManage}
                     className="rounded border-slate-300 cursor-pointer align-middle"
                   />
                 </th>
@@ -834,6 +837,7 @@ export function KnowledgeBasePage() {
                           aria-label={`选择-${item.id}`}
                           checked={isChecked}
                           onChange={() => toggleSelectRow(item.id)}
+                          disabled={!canManage}
                           className="rounded border-slate-300 cursor-pointer align-middle"
                         />
                       </td>
@@ -1170,7 +1174,7 @@ export function KnowledgeBasePage() {
 
       {/* 4.2 新增抽屉 */}
       <KnowledgeBaseDrawer
-        open={drawerOpen}
+        open={canManage && drawerOpen}
         onClose={() => setDrawerOpen(false)}
         onSubmitSuccess={(newItem) => {
           setItems(getKnowledgeItems());

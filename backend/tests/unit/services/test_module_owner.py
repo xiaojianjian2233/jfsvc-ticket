@@ -153,4 +153,3 @@ def test_list_module_owners_returns_all_active_users(db_session: Session) -> Non
     owners = list_module_owners(db_session, "发票云", "多选模块")
     assert len(owners) == 2
     assert [o.id for o in owners] == [u1.id, u2.id]
-

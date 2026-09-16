@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 from app.api.deps.auth import AuthedUser, require_admin
 from app.core.logging import get_logger
 from app.db import get_session
-from app.models import DispatchAssignee, DispatchConfig, DispatchLog, DispatchRule, SlaLevel
+from app.models import DispatchAssignee, DispatchConfig, DispatchLog, DispatchRule, SlaLevel, User
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -233,6 +233,14 @@ def add_assignee(
 ) -> AssigneeOut:
     if db.get(DispatchRule, rule_id) is None:
         raise HTTPException(status_code=404, detail="rule not found")
+    target = db.get(User, body.user_id)
+    if (
+        target is None
+        or target.deleted_at is not None
+        or not target.is_active
+        or target.role not in {"assignee", "supervisor", "admin"}
+    ):
+        raise HTTPException(status_code=422, detail="user is not an eligible assignee")
     a = DispatchAssignee(
         rule_id=rule_id,
         user_id=body.user_id,
