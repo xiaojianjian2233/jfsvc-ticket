@@ -17,6 +17,12 @@ Monorepo，三个独立子栈：
 - `docs/adr/` — 架构决策记录（已采纳：0001/0002/0005/0012）
 - `docs/spec/` — data_model / api / routing 三份规格草案
 
+## Git 提交与推送规范（核心记忆）
+
+- **默认推送目标**：后续日常代码提交与推送**默认只推送到 UAT 环境**（`uat`: `https://github.com/xiaojianjian2233/jfsvc-ticket.git`）。
+- **SIT 推送限制**：**严禁默认推送到 SIT 环境**（`sit`: `https://github.com/invagent/ticket-hub.git`）。**除非用户明确发出指令要求推送到 SIT，否则绝不推送至 SIT**。
+- **本地分支追踪**：本地 `main` 分支默认关联并跟踪 `uat/main`。
+
 ## 常用命令
 
 ### Backend（在 `backend/` 目录下）
