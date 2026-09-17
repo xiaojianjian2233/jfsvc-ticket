@@ -38,3 +38,9 @@ metadata:
 3. 用 `pg_reload_conf()` 热重载（psql 路径：`/usr/local/pgsql/bin/psql`）
 
 **Why**: pg_hba.conf `scram-sha-256` 要求 SSL，容器不走 SSL，必须改为 `md5` 或在 DSN 加 `sslmode=require`。
+
+## 工单列表快捷统计口径统一（2026-09-17）
+
+**问题**："绿色战略客户"、"今日新增工单"、"超时未关闭工单"三个快捷入口的数字此前取自前端当前页 50 条记录；超时统计还会把已完成工单算进去，且“今日”前后端时区不一致。
+
+**修复**：新增 `GET /api/tickets/quick-stats`，由后端按当前用户可见范围返回全量统计；“今日”固定按北京时间当天 00:00 至次日 00:00；超时统计与 `quick_filter=overdue` 共用 SLA 判定，排除所有终态工单。

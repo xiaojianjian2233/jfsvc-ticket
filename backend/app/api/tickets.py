@@ -207,6 +207,14 @@ class TicketListResponse(BaseModel):
     has_more: bool
 
 
+class TicketQuickStatsResponse(BaseModel):
+    """Top-level ticket-list shortcuts, always calculated across all visible rows."""
+
+    green_vip: int
+    today: int
+    overdue: int
+
+
 def _extract_contact_info(t: Ticket) -> tuple[str | None, str | None, str | None]:
     """客户联系人信息（姓名、手机、邮箱）多级解析回落。
 
@@ -270,6 +278,22 @@ def _source_ticket_number(t: Ticket) -> str | None:
     return t.source_ticket_number or t.source_ticket_id
 
 
+@router.get("/quick-stats", response_model=TicketQuickStatsResponse)
+def ticket_quick_stats(
+    user: AuthedUser = Depends(require_user),
+    db: Session = Depends(get_session),
+) -> TicketQuickStatsResponse:
+    """Counts for top quick filters, scoped only by the caller's row visibility."""
+    stats = TicketRepository(db).quick_stats(
+        visible_to_user_id=None if user.role in ("admin", "supervisor") else user.user_id
+    )
+    return TicketQuickStatsResponse(
+        green_vip=stats.green_vip,
+        today=stats.today,
+        overdue=stats.overdue,
+    )
+
+
 @router.get("", response_model=TicketListResponse)
 def list_tickets(
     user: AuthedUser = Depends(require_user),
@@ -292,6 +316,9 @@ def list_tickets(
         None
     ),  # 处理环节多选筛选（服务处理 / 研发处理 / 完成）
     quick_filter: str | None = Query(None),  # 快捷筛选：green_vip/today/unassigned
+    sort_by: Literal["received_at", "created_at", "resolved_at", "closed_at", "updated_at"]
+    | None = Query(None),
+    sort_order: Literal["asc", "desc"] | None = Query(None),
     received_from: datetime | None = Query(None),  # 提单时间起（精确到分钟）
     received_to: datetime | None = Query(None),  # 提单时间止（精确到分钟）
     created_from: datetime | None = Query(None),  # 创建时间起（精确到分钟）
@@ -341,6 +368,8 @@ def list_tickets(
         op_statuses=op_statuses,
         process_stages=process_stages,
         quick_filter=quick_filter,
+        sort_by=sort_by,
+        sort_order=sort_order,
         received_from=rf_start,
         received_to=rf_end,
         created_from=cf_start,

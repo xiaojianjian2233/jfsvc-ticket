@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.api.auth import issue_jwt
-from app.models import HubIssue, Source, Ticket, User
+from app.models import HubIssue, ProductLine, Source, Ticket, User
 
 
 def _bearer(user_id: int = 1, *, role: str = "admin") -> dict[str, str]:
@@ -142,6 +142,50 @@ def world(db_session: Session) -> Session:
 
 def test_list_tickets_requires_auth(app_client: TestClient, world: Session) -> None:
     assert app_client.get("/api/tickets").status_code == 401
+
+
+def test_quick_stats_and_overdue_filter_use_full_visible_set(
+    app_client: TestClient, world: Session
+) -> None:
+    now = datetime.now(UTC)
+    before = app_client.get("/api/tickets/quick-stats", headers=_bearer()).json()
+    world.add(ProductLine(code="quick-stats", name="快捷统计", sla_resolve_hours=1))
+    world.add_all(
+        [
+            Ticket(
+                short_code="TKT-QUICK-GREEN",
+                source_code="ksm",
+                source_ticket_id="quick-green",
+                type="Raw",
+                status="processing",
+                title="green",
+                service_level="绿色战略客户",
+                product_line_code="quick-stats",
+                received_at=now - timedelta(hours=2),
+                created_at=now,
+            ),
+            Ticket(
+                short_code="TKT-QUICK-CLOSED",
+                source_code="ksm",
+                source_ticket_id="quick-closed",
+                type="Raw",
+                status="resolved",
+                title="closed",
+                product_line_code="quick-stats",
+                received_at=now - timedelta(hours=2),
+                created_at=now,
+            ),
+        ]
+    )
+    world.commit()
+
+    stats = app_client.get("/api/tickets/quick-stats", headers=_bearer()).json()
+    assert stats["green_vip"] == before["green_vip"] + 1
+    assert stats["today"] == before["today"] + 2
+    assert stats["overdue"] == before["overdue"] + 1
+
+    listed = app_client.get("/api/tickets?quick_filter=overdue", headers=_bearer()).json()
+    assert [item["short_code"] for item in listed["items"]] == ["TKT-QUICK-GREEN"]
 
 
 def test_list_tickets_default(app_client: TestClient, world: Session) -> None:

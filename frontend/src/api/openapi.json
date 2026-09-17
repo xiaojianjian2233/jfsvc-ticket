@@ -5027,6 +5027,13 @@
             ],
             "title": "Module"
           },
+          "owners": {
+            "items": {
+              "$ref": "#/components/schemas/OwnerItem"
+            },
+            "title": "Owners",
+            "type": "array"
+          },
           "product_line_code": {
             "anyOf": [
               {
@@ -5214,6 +5221,24 @@
           "channel_count"
         ],
         "title": "NotifyReleaseResponse",
+        "type": "object"
+      },
+      "OwnerItem": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "OwnerItem",
         "type": "object"
       },
       "OwnerSplitBody": {
@@ -9066,6 +9091,30 @@
           "items"
         ],
         "title": "TicketLookupResponse",
+        "type": "object"
+      },
+      "TicketQuickStatsResponse": {
+        "description": "Top-level ticket-list shortcuts, always calculated across all visible rows.",
+        "properties": {
+          "green_vip": {
+            "title": "Green Vip",
+            "type": "integer"
+          },
+          "overdue": {
+            "title": "Overdue",
+            "type": "integer"
+          },
+          "today": {
+            "title": "Today",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "green_vip",
+          "today",
+          "overdue"
+        ],
+        "title": "TicketQuickStatsResponse",
         "type": "object"
       },
       "TicketReplyBody": {
@@ -17454,12 +17503,71 @@
           },
           {
             "in": "query",
+            "name": "quick_filter",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Quick Filter"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "received_at",
+                    "created_at",
+                    "resolved_at",
+                    "closed_at",
+                    "updated_at"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort By"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_order",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "asc",
+                    "desc"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort Order"
+            }
+          },
+          {
+            "in": "query",
             "name": "received_from",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "format": "date",
+                  "format": "date-time",
                   "type": "string"
                 },
                 {
@@ -17476,7 +17584,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "format": "date",
+                  "format": "date-time",
                   "type": "string"
                 },
                 {
@@ -17493,7 +17601,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "format": "date",
+                  "format": "date-time",
                   "type": "string"
                 },
                 {
@@ -17510,7 +17618,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "format": "date",
+                  "format": "date-time",
                   "type": "string"
                 },
                 {
@@ -17527,7 +17635,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "format": "date",
+                  "format": "date-time",
                   "type": "string"
                 },
                 {
@@ -17544,7 +17652,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "format": "date",
+                  "format": "date-time",
                   "type": "string"
                 },
                 {
@@ -17561,7 +17669,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "format": "date",
+                  "format": "date-time",
                   "type": "string"
                 },
                 {
@@ -17578,7 +17686,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "format": "date",
+                  "format": "date-time",
                   "type": "string"
                 },
                 {
@@ -17651,6 +17759,28 @@
           }
         },
         "summary": "List Tickets",
+        "tags": [
+          "tickets"
+        ]
+      }
+    },
+    "/api/tickets/quick-stats": {
+      "get": {
+        "description": "Counts for top quick filters, scoped only by the caller's row visibility.",
+        "operationId": "ticket_quick_stats_api_tickets_quick_stats_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketQuickStatsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ticket Quick Stats",
         "tags": [
           "tickets"
         ]

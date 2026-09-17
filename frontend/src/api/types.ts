@@ -2404,6 +2404,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tickets/quick-stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ticket Quick Stats
+         * @description Counts for top quick filters, scoped only by the caller's row visibility.
+         */
+        get: operations["ticket_quick_stats_api_tickets_quick_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tickets/{ticket_id}": {
         parameters: {
             query?: never;
@@ -4509,6 +4529,8 @@ export interface components {
         ModuleOwnerResponse: {
             /** Module */
             module?: string | null;
+            /** Owners */
+            owners?: components["schemas"]["OwnerItem"][];
             /** Product Line Code */
             product_line_code?: string | null;
             /** User Id */
@@ -4565,6 +4587,13 @@ export interface components {
             channel_count: number;
             /** Hub Issue Id */
             hub_issue_id: number;
+        };
+        /** OwnerItem */
+        OwnerItem: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
         };
         /** OwnerSplitBody */
         OwnerSplitBody: {
@@ -5753,6 +5782,18 @@ export interface components {
         TicketLookupResponse: {
             /** Items */
             items: components["schemas"]["TicketDetail"][];
+        };
+        /**
+         * TicketQuickStatsResponse
+         * @description Top-level ticket-list shortcuts, always calculated across all visible rows.
+         */
+        TicketQuickStatsResponse: {
+            /** Green Vip */
+            green_vip: number;
+            /** Overdue */
+            overdue: number;
+            /** Today */
+            today: number;
         };
         /** TicketReplyBody */
         TicketReplyBody: {
@@ -10562,6 +10603,9 @@ export interface operations {
                 op_status?: string | null;
                 op_statuses?: string[] | null;
                 process_stages?: string[] | null;
+                quick_filter?: string | null;
+                sort_by?: ("received_at" | "created_at" | "resolved_at" | "closed_at" | "updated_at") | null;
+                sort_order?: ("asc" | "desc") | null;
                 received_from?: string | null;
                 received_to?: string | null;
                 created_from?: string | null;
@@ -10596,6 +10640,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ticket_quick_stats_api_tickets_quick_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketQuickStatsResponse"];
                 };
             };
         };

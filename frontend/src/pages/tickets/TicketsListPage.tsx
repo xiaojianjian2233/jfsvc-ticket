@@ -663,6 +663,8 @@ export function TicketsListPage() {
     : effectiveDefaultOpStatuses;
 
   const overdueFilter = params.get("overdue_status") ?? "";
+  const sortBy = params.get("sort_by") ?? "";
+  const sortOrder = params.get("sort_order") ?? "";
   const [quickTag, setQuickTag] = useState<"green_vip" | "today" | "overdue" | "unassigned" | null>(null);
   const [headerFilters, setHeaderFilters] = useState<Record<string, HeaderFilterState>>({});
 
@@ -775,6 +777,9 @@ export function TicketsListPage() {
         resolvedTo,
         closedFrom,
         closedTo,
+        quickTag,
+        sortBy,
+        sortOrder,
       },
     ],
     queryFn: () =>
@@ -801,47 +806,21 @@ export function TicketsListPage() {
         resolved_to: resolvedTo || undefined,
         closed_from: closedFrom || undefined,
         closed_to: closedTo || undefined,
-        quick_filter: quickTag === "green_vip" || quickTag === "today" || quickTag === "unassigned" ? quickTag : undefined,
+        quick_filter: quickTag ?? undefined,
+        sort_by: sortBy || undefined,
+        sort_order: sortOrder || undefined,
         page,
         page_size: 50,
       }),
   });
 
+  const quickStats = useQuery({
+    queryKey: ["ticket-quick-stats"],
+    queryFn: () => api.get("/api/tickets/quick-stats"),
+    staleTime: 30_000,
+  });
+
   const rawItems = tickets.data?.items ?? [];
-
-  const todayStr = useMemo(() => {
-    const d = new Date();
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  }, []);
-
-  const isGreenVip = (serviceLevel?: string | null) => {
-    if (!serviceLevel) return false;
-    return (
-      serviceLevel.includes("绿色战略") ||
-      serviceLevel.includes("战略客户") ||
-      serviceLevel.includes("绿色通道")
-    );
-  };
-
-  const greenVipCount = useMemo(
-    () => rawItems.filter((t) => isGreenVip(t.service_level)).length,
-    [rawItems],
-  );
-
-  const todayAddedCount = useMemo(
-    () =>
-      rawItems.filter((t) => {
-        if (!t.created_at) return false;
-        return t.created_at.slice(0, 10) === todayStr;
-      }).length,
-    [rawItems, todayStr],
-  );
-
-  const overdueCount = useMemo(
-    () => rawItems.filter((t) => t.remaining_hours != null && t.remaining_hours < 0).length,
-    [rawItems],
-  );
 
   const unassignedCount = useMemo(
     () => rawItems.filter((t) => !t.handler_user_id).length,
@@ -854,16 +833,6 @@ export function TicketsListPage() {
       list = list.filter((t) => t.remaining_hours != null && t.remaining_hours < 0);
     } else if (overdueFilter === "not_overdue") {
       list = list.filter((t) => t.remaining_hours == null || t.remaining_hours >= 0);
-    }
-
-    if (quickTag === "green_vip") {
-      list = list.filter((t) => isGreenVip(t.service_level));
-    } else if (quickTag === "today") {
-      list = list.filter((t) => t.created_at && t.created_at.slice(0, 10) === todayStr);
-    } else if (quickTag === "overdue") {
-      list = list.filter((t) => t.remaining_hours != null && t.remaining_hours < 0);
-    } else if (quickTag === "unassigned") {
-      list = list.filter((t) => !t.handler_user_id);
     }
 
     // 处理环节筛选：支持多选（全部、服务处理、产研处理、完成）
@@ -888,7 +857,7 @@ export function TicketsListPage() {
     }
 
     return list;
-  }, [rawItems, overdueFilter, quickTag, todayStr, processStagesKey, headerFilters]);
+  }, [rawItems, overdueFilter, processStagesKey, headerFilters]);
 
   const hasPageOnlyFilter = overdueFilter !== "" || Object.values(headerFilters).some((f) => Boolean(f?.value?.trim()));
   const currentHandlersDisplay = useMemo(() => {
@@ -1032,6 +1001,31 @@ export function TicketsListPage() {
       closedFrom ||
       closedTo,
   );
+
+  const SORTABLE_COLUMNS: Record<string, string> = {
+    submit_time: "received_at",
+    created_at: "created_at",
+    resolved_at: "resolved_at",
+    closed_at: "closed_at",
+    updated_at: "updated_at",
+  };
+
+  const toggleSort = (columnId: string) => {
+    const next = new URLSearchParams(params);
+    const field = SORTABLE_COLUMNS[columnId];
+    if (!field) return;
+    if (sortBy !== field) {
+      next.set("sort_by", field);
+      next.set("sort_order", "desc");
+    } else if (sortOrder === "desc") {
+      next.set("sort_order", "asc");
+    } else {
+      next.delete("sort_by");
+      next.delete("sort_order");
+    }
+    next.set("page", "1");
+    setParams(next, { replace: true });
+  };
 
   // ---- 列定义 --------------------------------------------------------------
   const columns = useMemo<ColumnDef<TicketSummary>[]>(() => {
@@ -1783,7 +1777,7 @@ export function TicketsListPage() {
                   : "bg-white/90 text-[#15803d] border border-[#bbf7d0] shadow-xs"
               }`}
             >
-              {greenVipCount}
+              {quickStats.data?.green_vip ?? 0}
             </span>
           </button>
 
@@ -1809,7 +1803,7 @@ export function TicketsListPage() {
                   : "bg-white/90 text-[#1d4ed8] border border-[#bfdbfe] shadow-xs"
               }`}
             >
-              {todayAddedCount}
+              {quickStats.data?.today ?? 0}
             </span>
           </button>
 
@@ -1836,7 +1830,7 @@ export function TicketsListPage() {
                   : "bg-white/90 text-[#be123c] border border-[#fecdd3] shadow-xs"
               }`}
             >
-              {overdueCount}
+              {quickStats.data?.overdue ?? 0}
             </span>
           </button>
 
@@ -2156,9 +2150,26 @@ export function TicketsListPage() {
                           style={stickyStyle(header.column.id, header.getSize(), true)}
                         >
                           <div className="flex items-center justify-between gap-1 min-w-0 pr-1">
-                            <span className="truncate">
-                              {flexRender(header.column.columnDef.header, header.getContext())}
-                            </span>
+                            {SORTABLE_COLUMNS[header.column.id] ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleSort(header.column.id);
+                                }}
+                                title="点击排序：倒序、正序、取消排序"
+                                className="truncate inline-flex items-center gap-1 hover:text-hub-teal cursor-pointer"
+                              >
+                                {flexRender(header.column.columnDef.header, header.getContext())}
+                                <span className={sortBy === SORTABLE_COLUMNS[header.column.id] ? "text-hub-teal" : "text-slate-400"}>
+                                  {sortBy !== SORTABLE_COLUMNS[header.column.id] ? "↕" : sortOrder === "desc" ? "↓" : "↑"}
+                                </span>
+                              </button>
+                            ) : (
+                              <span className="truncate">
+                                {flexRender(header.column.columnDef.header, header.getContext())}
+                              </span>
+                            )}
                             {header.column.id !== "select" && (
                               <ColumnFilterDropdown
                                 columnId={header.column.id}

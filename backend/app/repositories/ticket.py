@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any, Generic, TypeVar
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import HubIssue, Ticket
+from app.models import HubIssue, ProductLine, Ticket
 
 T = TypeVar("T")
 
@@ -24,6 +24,24 @@ class Page(Generic[T]):
     @property
     def has_more(self) -> bool:
         return self.page * self.page_size < self.total
+
+
+@dataclass(slots=True, frozen=True)
+class TicketQuickStats:
+    green_vip: int = 0
+    today: int = 0
+    overdue: int = 0
+
+
+_BEIJING = timezone(timedelta(hours=8))
+_CLOSED_TICKET_STATUSES = {
+    "resolved",
+    "closed",
+    "done",
+    "rejected",
+    "superseded",
+    "transferred_return",
+}
 
 
 class TicketRepository:
@@ -56,6 +74,80 @@ class TicketRepository:
         """
         n: int | None = self._db.execute(select(func.count(Ticket.id))).scalar()
         return f"{prefix}-{(n or 0) + 1:06d}"
+
+    def quick_stats(self, *, visible_to_user_id: int | None = None) -> TicketQuickStats:
+        """Return global quick-filter counts for the current user's visible tickets.
+
+        SLA expiry depends on either a ticket-level override or its product line,
+        so it is deliberately evaluated in Python after one joined read.  This
+        keeps the rule identical on PostgreSQL and SQLite and avoids a fragile
+        database-specific interval expression.
+        """
+        stmt = (
+            select(Ticket, ProductLine.sla_resolve_hours)
+            .outerjoin(ProductLine, ProductLine.code == Ticket.product_line_code)
+            .where(Ticket.deleted_at.is_(None))
+        )
+        if visible_to_user_id is not None:
+            stmt = stmt.where(Ticket.handler_user_id == visible_to_user_id)
+        rows = self._db.execute(stmt).all()
+        now = datetime.now(UTC)
+        today = now.astimezone(_BEIJING).date()
+        green_vip = today_count = overdue = 0
+        for ticket, product_sla_hours in rows:
+            if self._is_green_vip(ticket.service_level):
+                green_vip += 1
+            if (
+                ticket.created_at is not None
+                and self._as_utc(ticket.created_at).astimezone(_BEIJING).date() == today
+            ):
+                today_count += 1
+            if self._is_overdue(ticket, product_sla_hours, now):
+                overdue += 1
+        return TicketQuickStats(green_vip=green_vip, today=today_count, overdue=overdue)
+
+    def _overdue_ticket_ids(self) -> list[int]:
+        rows = self._db.execute(
+            select(Ticket, ProductLine.sla_resolve_hours)
+            .outerjoin(ProductLine, ProductLine.code == Ticket.product_line_code)
+            .where(Ticket.deleted_at.is_(None))
+        ).all()
+        now = datetime.now(UTC)
+        return [
+            ticket.id
+            for ticket, product_sla_hours in rows
+            if self._is_overdue(ticket, product_sla_hours, now)
+        ]
+
+    @staticmethod
+    def _is_green_vip(service_level: str | None) -> bool:
+        return bool(
+            service_level
+            and (
+                "绿色" in service_level
+                or "战略客户" in service_level
+                or "绿色通道" in service_level
+            )
+        )
+
+    @staticmethod
+    def _as_utc(value: datetime) -> datetime:
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+    @classmethod
+    def _is_overdue(
+        cls, ticket: Ticket, product_sla_hours: int | float | None, now: datetime
+    ) -> bool:
+        if ticket.status in _CLOSED_TICKET_STATUSES or ticket.received_at is None:
+            return False
+        limit = (
+            ticket.sla_standard_hours
+            if ticket.sla_standard_hours is not None
+            else product_sla_hours
+        )
+        if limit is None:
+            return False
+        return cls._as_utc(ticket.received_at) + timedelta(hours=float(limit)) < now
 
     # ---- read API ------------------------------------------------------
 
@@ -112,6 +204,8 @@ class TicketRepository:
         op_statuses: list[str] | None = None,
         process_stages: list[str] | None = None,
         quick_filter: str | None = None,
+        sort_by: str | None = None,
+        sort_order: str | None = None,
         received_from: datetime | None = None,
         received_to: datetime | None = None,
         created_from: datetime | None = None,
@@ -200,12 +294,19 @@ class TicketRepository:
             base = base.where(cond)
             count_base = count_base.where(cond)
         elif quick_filter == "today":
-            today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+            now_beijing = datetime.now(_BEIJING)
+            today_start = now_beijing.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(
+                UTC
+            )
             tomorrow_start = today_start + timedelta(days=1)
             base = base.where(Ticket.created_at >= today_start, Ticket.created_at < tomorrow_start)
             count_base = count_base.where(
                 Ticket.created_at >= today_start, Ticket.created_at < tomorrow_start
             )
+        elif quick_filter == "overdue":
+            overdue_ids = self._overdue_ticket_ids()
+            base = base.where(Ticket.id.in_(overdue_ids))
+            count_base = count_base.where(Ticket.id.in_(overdue_ids))
         elif quick_filter == "unassigned":
             base = base.where(Ticket.handler_user_id.is_(None))
             count_base = count_base.where(Ticket.handler_user_id.is_(None))
@@ -287,11 +388,22 @@ class TicketRepository:
                 count_base = count_base.where(Ticket.process_stage.in_(mapped_stages))
 
         total = self._db.execute(count_base).scalar() or 0
-        rows_stmt = (
-            base.order_by(Ticket.received_at.desc(), Ticket.id.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
+        sort_columns = {
+            "received_at": Ticket.received_at,
+            "created_at": Ticket.created_at,
+            "resolved_at": Ticket.actual_resolved_at,
+            "closed_at": Ticket.actual_released_at,
+            "updated_at": Ticket.updated_at,
+        }
+        sort_column = sort_columns.get(sort_by or "")
+        ordering = (
+            (sort_column.asc(), Ticket.id.asc())
+            if sort_column is not None and sort_order == "asc"
+            else (sort_column.desc(), Ticket.id.desc())
+            if sort_column is not None
+            else (Ticket.received_at.desc(), Ticket.id.desc())
         )
+        rows_stmt = base.order_by(*ordering).offset((page - 1) * page_size).limit(page_size)
         items = list(self._db.execute(rows_stmt).scalars().all())
         return Page(items=items, total=total, page=page, page_size=page_size)
 

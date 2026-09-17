@@ -284,10 +284,17 @@ describe("TicketsListPage", () => {
     ];
 
     server.use(
-      http.get("*/api/tickets", () => {
+      http.get("*/api/tickets/quick-stats", () =>
+        HttpResponse.json({ green_vip: 2, today: 1, overdue: 1 }),
+      ),
+      http.get("*/api/tickets", ({ request }) => {
+        const filter = new URL(request.url).searchParams.get("quick_filter");
+        const items = filter === "green_vip"
+          ? rows.filter((row) => row.service_level?.includes("绿色") || row.service_level?.includes("战略客户"))
+          : rows;
         return HttpResponse.json({
-          items: rows,
-          total: rows.length,
+          items,
+          total: items.length,
           page: 1,
           page_size: 50,
           has_more: false,
@@ -316,9 +323,11 @@ describe("TicketsListPage", () => {
     act(() => {
       fireEvent.click(vipTag);
     });
-    expect(screen.getByText("TKT-101")).toBeInTheDocument();
-    expect(screen.getByText("TKT-103")).toBeInTheDocument();
-    expect(screen.queryByText("TKT-102")).toBeNull();
+    await waitFor(() => {
+      expect(screen.getByText("TKT-101")).toBeInTheDocument();
+      expect(screen.getByText("TKT-103")).toBeInTheDocument();
+      expect(screen.queryByText("TKT-102")).toBeNull();
+    });
 
     // 5. 工单号为高对比蓝色加粗链接 (RGB: 43, 94, 209 -> #2b5ed1)
     const tktLink = screen.getByText("TKT-101");
@@ -547,4 +556,3 @@ describe("TicketsListPage", () => {
     expect(screen.getByText("TKT-S3")).toBeInTheDocument();
   });
 });
-
