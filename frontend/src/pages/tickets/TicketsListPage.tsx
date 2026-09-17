@@ -926,6 +926,20 @@ export function TicketsListPage() {
     setSelectedIds(new Set());
   }
 
+  function toggleQuickTag(tag: "green_vip" | "today" | "overdue" | "unassigned") {
+    const nextTag = quickTag === tag ? null : tag;
+    setQuickTag(nextTag);
+    setHeaderFilters({});
+    setSelectedIds(new Set());
+
+    // 快捷标签是全量入口，不能叠加用户上一次保留的 URL 条件；否则徽标和列表
+    // 会是两套口径。空 op_statuses 显式表示不限制处理状态，避免默认进行中态回填。
+    const next = new URLSearchParams();
+    if (nextTag) next.set("op_statuses", "");
+    next.set("page", "1");
+    setParams(next, { replace: true });
+  }
+
   function resetAllFilters() {
     setParams(new URLSearchParams(), { replace: true });
     setSelectedIds(new Set());
@@ -1758,7 +1772,7 @@ export function TicketsListPage() {
           {/* 1. 绿色战略客户（翡翠绿微渐变风格） */}
           <button
             type="button"
-            onClick={() => setQuickTag((prev) => (prev === "green_vip" ? null : "green_vip"))}
+            onClick={() => toggleQuickTag("green_vip")}
             className={`group inline-flex items-center gap-2 px-3.5 h-[34px] text-xs rounded-[9px] border transition-all cursor-pointer select-none active:scale-[0.98] ${
               quickTag === "green_vip"
                 ? "bg-gradient-to-r from-[#059669] to-[#10b981] border-[#059669] text-white font-bold shadow-[0_4px_12px_rgba(5,150,105,0.32)] ring-2 ring-[#86efac]/70"
@@ -1784,7 +1798,7 @@ export function TicketsListPage() {
           {/* 2. 今日新增工单（科技蓝微渐变风格） */}
           <button
             type="button"
-            onClick={() => setQuickTag((prev) => (prev === "today" ? null : "today"))}
+            onClick={() => toggleQuickTag("today")}
             className={`group inline-flex items-center gap-2 px-3.5 h-[34px] text-xs rounded-[9px] border transition-all cursor-pointer select-none active:scale-[0.98] ${
               quickTag === "today"
                 ? "bg-gradient-to-r from-[#1d4ed8] to-[#2563eb] border-[#1d4ed8] text-white font-bold shadow-[0_4px_12px_rgba(37,99,235,0.32)] ring-2 ring-[#93c5fd]/70"
@@ -1810,7 +1824,7 @@ export function TicketsListPage() {
           {/* 3. 超时未关闭工单（警戒红微渐变风格） */}
           <button
             type="button"
-            onClick={() => setQuickTag((prev) => (prev === "overdue" ? null : "overdue"))}
+            onClick={() => toggleQuickTag("overdue")}
             className={`group inline-flex items-center gap-2 px-3.5 h-[34px] text-xs rounded-[9px] border transition-all cursor-pointer select-none active:scale-[0.98] ${
               quickTag === "overdue"
                 ? "bg-gradient-to-r from-[#dc2626] to-[#e11d48] border-[#dc2626] text-white font-bold shadow-[0_4px_12px_rgba(225,29,72,0.32)] ring-2 ring-[#fca5a5]/70"
@@ -1837,7 +1851,7 @@ export function TicketsListPage() {
           {/* 4. 未分配（暖金琥珀微渐变风格） */}
           <button
             type="button"
-            onClick={() => setQuickTag((prev) => (prev === "unassigned" ? null : "unassigned"))}
+            onClick={() => toggleQuickTag("unassigned")}
             className={`group inline-flex items-center gap-2 px-3.5 h-[34px] text-xs rounded-[9px] border transition-all cursor-pointer select-none active:scale-[0.98] ${
               quickTag === "unassigned"
                 ? "bg-gradient-to-r from-[#d97706] to-[#b45309] border-[#d97706] text-white font-bold shadow-[0_4px_12px_rgba(217,119,6,0.32)] ring-2 ring-[#fde68a]/70"
