@@ -801,6 +801,7 @@ export function TicketsListPage() {
         resolved_to: resolvedTo || undefined,
         closed_from: closedFrom || undefined,
         closed_to: closedTo || undefined,
+        quick_filter: quickTag === "green_vip" || quickTag === "today" || quickTag === "unassigned" ? quickTag : undefined,
         page,
         page_size: 50,
       }),
@@ -889,6 +890,7 @@ export function TicketsListPage() {
     return list;
   }, [rawItems, overdueFilter, quickTag, todayStr, processStagesKey, headerFilters]);
 
+  const hasPageOnlyFilter = overdueFilter !== "" || Object.values(headerFilters).some((f) => Boolean(f?.value?.trim()));
   const currentHandlersDisplay = useMemo(() => {
     const handlerNames = new Set<string>();
     for (const t of items) {
@@ -1752,7 +1754,7 @@ export function TicketsListPage() {
           <h1 className="m-0 text-[18px] font-bold text-slate-900 tracking-tight">全部工单</h1>
           {tickets.data && (
             <span className="text-[12px] text-hub-textFaint font-medium">
-              共 {tickets.data.total.toLocaleString()} 单
+              {hasPageOnlyFilter ? `当前页匹配 ${items.length} 单（服务端筛选共 ${tickets.data.total.toLocaleString()} 单）` : `共 ${tickets.data.total.toLocaleString()} 单`}
             </span>
           )}
         </div>
@@ -2243,8 +2245,10 @@ export function TicketsListPage() {
           <div className="flex-none flex items-center gap-2 px-3.5 py-2 bg-hub-panel flex-wrap border-t border-hub-borderLight">
             <div className="text-[11px] text-hub-textFaint">
               页 {tickets.data.page}/
-              {Math.max(1, Math.ceil(tickets.data.total / tickets.data.page_size))} · 共{" "}
-              {tickets.data.total} 条
+              {Math.max(1, Math.ceil(tickets.data.total / tickets.data.page_size))} · {" "}
+              {hasPageOnlyFilter
+                ? `当前页匹配 ${items.length} 条（服务端筛选共 ${tickets.data.total} 条）`
+                : `共 ${tickets.data.total} 条`}
             </div>
             <div className="flex-1" />
             <button

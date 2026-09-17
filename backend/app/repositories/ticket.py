@@ -111,6 +111,7 @@ class TicketRepository:
         op_status: str | None = None,
         op_statuses: list[str] | None = None,
         process_stages: list[str] | None = None,
+        quick_filter: str | None = None,
         received_from: datetime | None = None,
         received_to: datetime | None = None,
         created_from: datetime | None = None,
@@ -190,6 +191,24 @@ class TicketRepository:
         if unassigned_only:
             base = base.where(Ticket.assigned_user_id.is_(None))
             count_base = count_base.where(Ticket.assigned_user_id.is_(None))
+        if quick_filter == "green_vip":
+            cond = or_(
+                Ticket.service_level.ilike("%绿色%"),
+                Ticket.service_level.ilike("%战略客户%"),
+                Ticket.service_level.ilike("%绿色通道%"),
+            )
+            base = base.where(cond)
+            count_base = count_base.where(cond)
+        elif quick_filter == "today":
+            today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+            tomorrow_start = today_start + timedelta(days=1)
+            base = base.where(Ticket.created_at >= today_start, Ticket.created_at < tomorrow_start)
+            count_base = count_base.where(
+                Ticket.created_at >= today_start, Ticket.created_at < tomorrow_start
+            )
+        elif quick_filter == "unassigned":
+            base = base.where(Ticket.handler_user_id.is_(None))
+            count_base = count_base.where(Ticket.handler_user_id.is_(None))
         if customer_identity_id is not None:
             base = base.where(Ticket.customer_identity_id == customer_identity_id)
             count_base = count_base.where(Ticket.customer_identity_id == customer_identity_id)

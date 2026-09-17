@@ -291,6 +291,7 @@ def list_tickets(
     process_stages: list[str] | None = Query(
         None
     ),  # 处理环节多选筛选（服务处理 / 研发处理 / 完成）
+    quick_filter: str | None = Query(None),  # 快捷筛选：green_vip/today/unassigned
     received_from: datetime | None = Query(None),  # 提单时间起（精确到分钟）
     received_to: datetime | None = Query(None),  # 提单时间止（精确到分钟）
     created_from: datetime | None = Query(None),  # 创建时间起（精确到分钟）
@@ -339,6 +340,7 @@ def list_tickets(
         op_status=op_status,
         op_statuses=op_statuses,
         process_stages=process_stages,
+        quick_filter=quick_filter,
         received_from=rf_start,
         received_to=rf_end,
         created_from=cf_start,
