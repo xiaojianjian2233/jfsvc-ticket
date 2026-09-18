@@ -92,7 +92,10 @@ def test_first_ingest_creates_customer_and_routes(ingest_world: Session) -> None
     assert ticket.type == "Raw"
     assert ticket.source_code == "ksm"
     assert ticket.source_ticket_id == "ksm-bill-001"
-    assert ticket.module == "应付管理"
+    # 来源产品/模块只保留在 source_payload，生效字段等待系统归类链写入。
+    assert ticket.product_line_code is None
+    assert ticket.module is None
+    assert ticket.source_payload["moduleName"] == "应付管理"
 
     # customer + identity created
     cust = ingest_world.get(Customer, res.customer_id)
@@ -338,6 +341,7 @@ def test_webhook_ksm_e2e_full_payload(app_client, db_session: Session) -> None: 
             "erpUid": "ERP-E2E",
             "productLineCode": "cloud-erp",
             "moduleName": "应付管理",
+            "product": {"number": "C28", "name": "金蝶发票云"},
         },
     )
     assert resp.status_code == 200, resp.text
@@ -346,7 +350,8 @@ def test_webhook_ksm_e2e_full_payload(app_client, db_session: Session) -> None: 
     # Verify ingest by query
     t = db_session.query(Ticket).filter_by(source_ticket_id="ksm-bill-e2e").one()
     assert t.assigned_user_id == 1
-    assert t.product_line_code == "cloud-erp"
+    assert t.product_line_code is None
+    assert t.module is None
 
 
 def test_webhook_ksm_invalid_token_returns_401(app_client) -> None:  # type: ignore[no-untyped-def]
@@ -381,7 +386,11 @@ def test_webhook_ksm_idempotent_replay(app_client, db_session: Session) -> None:
     db_session.add(Source(code="ksm", name="KSM"))
     db_session.commit()
 
-    payload = {"billId": "replay-001", "accountName": "x"}
+    payload = {
+        "billId": "replay-001",
+        "accountName": "x",
+        "product": {"number": "C28", "name": "金蝶发票云"},
+    }
     r1 = app_client.post("/webhook/ksm?access_token=test-token", json=payload)
     r2 = app_client.post("/webhook/ksm?access_token=test-token", json=payload)
     assert r1.status_code == 200
@@ -640,7 +649,7 @@ def test_ingest_dedup_noop_when_no_hub(db_session, monkeypatch) -> None:  # type
 
 
 def test_ingest_reopens_transferred_return_ticket(db_session, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """转单退回后客户/KSM调整模块重推回流：更新内容与模块，工单状态流转回 processing，hub 状态重置为 draft。"""
+    """转单退回重推不采用来源分类，工单回 processing，hub 重置为 draft。"""
     from app.services.hub_issues.op_status import OP_TRANSFERRED_RETURN
     from app.services.ingest import ksm_ingester as mod
 
@@ -679,7 +688,8 @@ def test_ingest_reopens_transferred_return_ticket(db_session, monkeypatch) -> No
     db_session.refresh(existing)
     db_session.refresh(hub)
     assert existing.status == "processing"
-    assert existing.module == "开票管理"
+    assert existing.product_line_code is None
+    assert existing.module is None
     assert hub.status == "draft"
     assert hub.linear_uuid is None
     assert hub.linear_identifier is None

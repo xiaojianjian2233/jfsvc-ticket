@@ -61,6 +61,12 @@ def test_ingest_creates_ticket_triple_and_attachment(world: Session) -> None:
     assert t.source_code == "ai_cs"
     assert t.source_ticket_id == "sess-100"
     assert t.body == "数电开票点击开具没反应"
+    assert t.product_line_code is None
+    assert t.module is None
+    assert t.source_payload["_original_catalog"] == {
+        "product_line_code": "cloud-fapiao",
+        "module": "数电开票",
+    }
     triple = t.source_payload["ai_cs"]
     assert triple["ai_answer"] == "请确认已完成税局认证"
     assert triple["dissatisfaction"] == "认证做了，还是开不了"

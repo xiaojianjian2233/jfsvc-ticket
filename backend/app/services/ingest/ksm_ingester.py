@@ -40,7 +40,6 @@ from app.services.hub_issues.op_status import (
     resolve_op_handler,
 )
 from app.services.identity.resolver import IdentityInput, IdentityResolver
-from app.services.ingest.catalog_upsert import safe_product_line_code, upsert_catalog
 from app.services.ingest.content_refresh import apply_content_refresh
 
 logger = get_logger(__name__)
@@ -217,16 +216,9 @@ class KSMIngester:
             if is_reopened_from_returned:
                 # 客户调整模块/重新分派回流（此时 KSM 状态非结案）：
                 apply_content_refresh(self._db, existing, payload)
-                raw_plc = payload.get("productLineCode") or payload.get("product_line")
-                raw_mod = payload.get("moduleName") or payload.get("module")
                 raw_feat = payload.get("featureName") or payload.get("feature")
-                if raw_mod:
-                    existing.module = raw_mod
                 if raw_feat:
                     existing.feature = raw_feat
-                if raw_plc:
-                    existing.product_line_code = safe_product_line_code(self._db, raw_plc)
-                upsert_catalog(self._db, product_line_code=raw_plc, module=raw_mod)
 
                 prev_ticket_status = existing.status
                 existing.status = "processing"
@@ -247,10 +239,6 @@ class KSMIngester:
                     hub.linear_identifier = None
                     hub.linear_status = None
                     hub.linear_status_synced_at = None
-                    if existing.module:
-                        hub.module = existing.module
-                    if existing.product_line_code:
-                        hub.product_line_code = existing.product_line_code
                     if hub.type == "Operation":
                         apply_op_status(
                             self._db,
@@ -298,14 +286,8 @@ class KSMIngester:
         identity_input = self._extract_identity(payload)
         resolve = self._resolver.resolve(identity_input)
 
-        # 3. Ensure product_line + module exist (auto-create if unknown)
-        upsert_catalog(
-            self._db,
-            product_line_code=payload.get("productLineCode") or payload.get("product_line"),
-            module=payload.get("moduleName") or payload.get("module"),
-        )
-
-        # 4. Create ticket (type=Raw, status=received)
+        # 3. Create ticket (type=Raw, status=received)。产品分类/问题模块不采用
+        # 来源系统原值，统一留空，后续只由 module_resolve 系统归类链写入生效值。
         short_code = self._tickets.next_short_code()
         is_already_closed = str(payload.get("sourceStatus") or "") == "4"
         initial_status = "closed" if is_already_closed else "processing"
@@ -320,10 +302,8 @@ class KSMIngester:
             process_stage=initial_stage,
             source_payload=payload,
             customer_identity_id=resolve.customer_identity_id,
-            product_line_code=safe_product_line_code(
-                self._db, payload.get("productLineCode") or payload.get("product_line")
-            ),
-            module=payload.get("moduleName") or payload.get("module"),
+            product_line_code=None,
+            module=None,
             feature=payload.get("featureName") or payload.get("feature"),
             title=payload.get("title"),
             body=payload.get("content") or payload.get("description"),

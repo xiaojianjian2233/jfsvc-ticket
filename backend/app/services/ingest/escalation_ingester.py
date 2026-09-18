@@ -37,7 +37,6 @@ from app.repositories.status_history import StatusHistoryRepository
 from app.repositories.ticket import TicketRepository
 from app.services.dispatch import dispatch_handler
 from app.services.identity.resolver import IdentityInput, IdentityResolver
-from app.services.ingest.catalog_upsert import safe_product_line_code, upsert_catalog
 
 logger = get_logger(__name__)
 
@@ -140,8 +139,6 @@ class EscalationIngester:
                 raw_name=p.customer.get("name"),
             )
         )
-        upsert_catalog(self._db, product_line_code=p.product_line_code, module=p.module)
-
         # golden triple + 反哺扩展字段（conversation/cited_knowledge/skills_used
         # 缺省时不写 key — 老载荷形状不变，下游用 .get() 降级）
         ai_cs_ctx: dict[str, Any] = {
@@ -164,10 +161,16 @@ class EscalationIngester:
             status="processing",
             # escalation context lives under ['ai_cs'] for escalation_classify
             # + the knowledge-feedback reflect UI
-            source_payload={"ai_cs": ai_cs_ctx},
+            source_payload={
+                "ai_cs": ai_cs_ctx,
+                "_original_catalog": {
+                    "product_line_code": p.product_line_code,
+                    "module": p.module,
+                },
+            },
             customer_identity_id=resolve.customer_identity_id,
-            product_line_code=safe_product_line_code(self._db, p.product_line_code),
-            module=p.module,
+            product_line_code=None,
+            module=None,
             title=p.original_question[:_TITLE_MAX],
             body=p.original_question,
             reporter={

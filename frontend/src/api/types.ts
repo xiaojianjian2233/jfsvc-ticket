@@ -5710,6 +5710,8 @@ export interface components {
             process_stage: string | null;
             /** Product Line Code */
             product_line_code: string | null;
+            /** Product Line Name */
+            product_line_name?: string | null;
             /** Product Name */
             product_name?: string | null;
             /** Received At */
@@ -5884,6 +5886,8 @@ export interface components {
             process_stage: string | null;
             /** Product Line Code */
             product_line_code: string | null;
+            /** Product Line Name */
+            product_line_name?: string | null;
             /** Product Name */
             product_name?: string | null;
             /** Received At */

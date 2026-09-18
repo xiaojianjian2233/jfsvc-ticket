@@ -144,6 +144,60 @@ def test_list_tickets_requires_auth(app_client: TestClient, world: Session) -> N
     assert app_client.get("/api/tickets").status_code == 401
 
 
+def test_list_tickets_returns_product_line_chinese_name(
+    app_client: TestClient, world: Session
+) -> None:
+    world.add(ProductLine(code="PROLINE6067", name="其他非发票云问题"))
+    world.add(
+        Ticket(
+            id=105,
+            short_code="TKT-PL-NAME",
+            source_code="ksm",
+            source_ticket_id="pl-name",
+            type="Raw",
+            status="processing",
+            title="产品分类中文名",
+            product_line_code="PROLINE6067",
+            module="其他非发票云问题",
+            module_classified_at=datetime.now(UTC),
+        )
+    )
+    world.commit()
+
+    response = app_client.get("/api/tickets", headers=_bearer())
+    item = next(it for it in response.json()["items"] if it["id"] == 105)
+    assert item["product_line_code"] == "PROLINE6067"
+    assert item["product_line_name"] == "其他非发票云问题"
+    assert item["module"] == "其他非发票云问题"
+
+
+def test_list_tickets_hides_legacy_source_catalog_before_system_classification(
+    app_client: TestClient, world: Session
+) -> None:
+    world.add(ProductLine(code="legacy-source", name="来源产品"))
+    world.add(
+        Ticket(
+            id=106,
+            short_code="TKT-LEGACY-SOURCE",
+            source_code="zammad",
+            source_ticket_id="legacy-source",
+            type="Raw",
+            status="processing",
+            title="旧来源分类",
+            product_line_code="legacy-source",
+            module="来源模块",
+            module_classified_at=None,
+        )
+    )
+    world.commit()
+
+    response = app_client.get("/api/tickets", headers=_bearer())
+    item = next(it for it in response.json()["items"] if it["id"] == 106)
+    assert item["product_line_code"] is None
+    assert item["product_line_name"] is None
+    assert item["module"] is None
+
+
 def test_quick_stats_and_overdue_filter_use_full_visible_set(
     app_client: TestClient, world: Session
 ) -> None:
@@ -713,6 +767,10 @@ def test_summary_product_name_ksm_uses_main_product_name(
     by = {it["short_code"]: it for it in r.json()["items"]}
     assert by["TKT-KSM-MPN"]["product_name"] == "金蝶发票云【星空旗舰版】公有云"
 
+    detail = app_client.get("/api/tickets/211", headers=_bearer()).json()
+    assert detail["product_name"] == "金蝶发票云【星空旗舰版】公有云"
+    assert detail["product_name"] == by["TKT-KSM-MPN"]["product_name"]
+
 
 def test_summary_product_name_non_ksm_is_none(app_client: TestClient, world2: Session) -> None:
     """非 KSM 来源：即便有 product_line_code，主产品名称也留空（不回退归类结果）。"""
@@ -736,6 +794,9 @@ def test_summary_product_name_non_ksm_is_none(app_client: TestClient, world2: Se
     r = app_client.get("/api/tickets", headers=_bearer())
     by = {it["short_code"]: it for it in r.json()["items"]}
     assert by["TKT-ZHICHI-PL"]["product_name"] is None
+
+    detail = app_client.get("/api/tickets/212", headers=_bearer()).json()
+    assert detail["product_name"] is None
 
 
 def test_summary_graduated_uses_hub_product_and_module(

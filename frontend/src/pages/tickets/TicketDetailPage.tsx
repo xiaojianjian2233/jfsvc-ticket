@@ -1501,7 +1501,7 @@ export function TicketDetailPage() {
                         title: hub.data?.title ?? d.title,
                         predicted_type: hub.data?.type ?? d.predicted_type,
                         product_line_code:
-                          hub.data?.product_line_code || d.product_line_code || (d as any).product_name || "",
+                          hub.data?.product_line_code || d.product_line_code || "",
                         module: hub.data?.module || d.module || "",
                         status: hub.data?.status ?? d.status,
                         assigned_user_name: d.assigned_user_name,

@@ -58,3 +58,14 @@ metadata:
 **问题**：快捷统计和“超时未关闭”筛选在 PostgreSQL 环境先读取大量记录、再由 Python 逐条计算 SLA，列表筛选时会造成明显等待。
 
 **修复**：PostgreSQL 改由数据库执行 SLA 超时条件和三项快捷统计聚合；SQLite 测试环境保留原有兼容实现。UAT 验证超时筛选从约 1.6 秒降至约 43–53 毫秒，统计口径保持一致。
+
+## 工单产品分类与主产品字段统一（2026-09-18）
+
+**用户要求**：工单列表“产品分类”展示产品线中文名称；所有来源系统都不得把原始产品分类、问题模块直接作为生效值，必须展示系统分析结果；`TicketDetail.product_name` 与 `TicketSummary.product_name` 统一表示“主产品”。
+
+**修复**：
+- 列表接口新增 `product_line_name`，由 `product_lines.name` 批量解析，前端“产品分类”只展示中文名称。
+- KSM、智齿、Zammad、AI 客服、飞书 AI 入库时不再把来源产品/模块写入 `ticket.product_line_code/module`；原值仅保留在审计载荷或 KSM 原始字段中。
+- 产品模块归类链不再使用来源分类做锁线、精确或相似匹配，只采信 AI 对系统有效目录的判断；AI 不确定或不可用时使用系统统一兜底。
+- 未经过系统归类且未关联 Hub 任务的历史工单不再展示旧来源分类，归类完成前显示为空。
+- `TicketDetail.product_name` 与列表口径统一：KSM 取 `version.mainproductname` 原样值，其它来源留空；详情页不再把该字段作为产品分类编码兜底。

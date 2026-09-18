@@ -154,8 +154,10 @@ def test_lightweight_ping_returns_code0_immediately(
     # BackgroundTask ran and ingested via KSMIngester
     t = ingest_world.query(Ticket).filter_by(source_ticket_id="BILL-LP-1").one()
     assert t.title == "测试工单"
-    assert t.product_line_code == "cloud-erp-star"
-    assert t.module == "财务模块"
+    # 来源产品/模块不直接成为生效分类，等待系统归类链写入。
+    assert t.product_line_code is None
+    assert t.module is None
+    assert t.ksm_reporter_module == "财务模块"
     assert t.assigned_user_id == 1
     # notice 同步落库（迁移 0044，不设过期时间）——Redis 24h TTL 过期后仍有得回落。
     assert t.ksm_notice_num == "N-100"

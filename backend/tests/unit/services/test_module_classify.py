@@ -1,7 +1,7 @@
 """module_classify + module_resolve 测试。
 
 module_classify：两步（产品线→模块）候选校验、越界拒绝、低置信。
-module_resolve：四级回退（AI命中 / 源系统精确 / 相似 / 兜底 PROLINE6067）。
+module_resolve：只采信 AI 结果；来源分类不参与判定，失败统一兜底 PROLINE6067。
 """
 
 from __future__ import annotations
@@ -136,8 +136,10 @@ def test_resolve_ai_hit(catalog: Session, monkeypatch) -> None:  # type: ignore[
     get_settings.cache_clear()
 
 
-def test_resolve_source_exact(catalog: Session, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """AI 不确定（低置信）→ 按源系统原值在 active 目录精确命中。"""
+def test_resolve_low_confidence_ignores_source_and_falls_back(
+    catalog: Session, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    """AI 低置信时不采信来源原值，统一进入系统兜底。"""
     monkeypatch.setenv("MODULE_CLASSIFY_ENABLED", "true")
     from app.config import get_settings
 
@@ -148,13 +150,13 @@ def test_resolve_source_exact(catalog: Session, monkeypatch) -> None:  # type: i
     )
     t = _ticket(catalog, product_line_code="PL_A", module="收票模块")
     res = resolve_module(catalog, t)
-    assert res.source == "source_exact"
-    assert t.product_line_code == "PL_A" and t.module == "收票模块"
+    assert res.source == "fallback"
+    assert t.product_line_code == "PROLINE6067" and t.module == "其他非发票云问题"
     get_settings.cache_clear()
 
 
-def test_resolve_similar(catalog: Session, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """源值精确找不到 → 相似匹配（'开票' 含于 '开票模块'）。"""
+def test_resolve_does_not_use_source_similarity(catalog: Session, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """AI 不可用时不按来源模块做相似匹配。"""
     monkeypatch.setenv("MODULE_CLASSIFY_ENABLED", "true")
     from app.config import get_settings
 
@@ -165,8 +167,8 @@ def test_resolve_similar(catalog: Session, monkeypatch) -> None:  # type: ignore
     )
     t = _ticket(catalog, product_line_code="旧码", module="开票")
     res = resolve_module(catalog, t)
-    assert res.source == "similar"
-    assert t.module == "开票模块"
+    assert res.source == "fallback"
+    assert t.module == "其他非发票云问题"
     get_settings.cache_clear()
 
 
@@ -189,10 +191,12 @@ def test_resolve_fallback(catalog: Session, monkeypatch) -> None:  # type: ignor
 
 
 def test_resolve_disabled_noop(catalog: Session) -> None:
-    """开关关 → AI 不跑，但仍走②③④回退（源值精确命中）。"""
+    """开关关 → AI 不跑且不采信来源分类，使用系统兜底。"""
     t = _ticket(catalog, product_line_code="PL_A", module="开票模块")
     res = resolve_module(catalog, t)
-    assert res.source == "source_exact"
+    assert res.source == "fallback"
+    assert t.product_line_code == "PROLINE6067"
+    assert t.module == "其他非发票云问题"
 
 
 def test_resolve_original_catalog_kept(catalog: Session, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -211,11 +215,11 @@ def test_resolve_original_catalog_kept(catalog: Session, monkeypatch) -> None:  
     get_settings.cache_clear()
 
 
-# ---- 归类链修正：line_hint（智齿场景）+ 模块名匹配反推产品线 ----------------
+# ---- 来源分类隔离 -----------------------------------------------------------
 
 
-def test_resolve_zhichi_line_hint_ai_picks_module(catalog: Session, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """智齿 module=产品线名（'产品线A'）→ line_hint=PL_A，AI 在该线下选模块。"""
+def test_resolve_zhichi_source_does_not_become_line_hint(catalog: Session, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """智齿来源模块即使像产品线名，也不作为 AI 产品线暗示。"""
     monkeypatch.setenv("MODULE_CLASSIFY_ENABLED", "true")
     from app.config import get_settings
 
@@ -230,14 +234,14 @@ def test_resolve_zhichi_line_hint_ai_picks_module(catalog: Session, monkeypatch)
     # 智齿工单：module 填的是产品线名
     t = _ticket(catalog, product_line_code=None, module="产品线A")
     res = resolve_module(catalog, t)
-    assert captured["line_hint"] == "PL_A"  # module=产品线名 → 锁定该产品线
+    assert captured["line_hint"] is None
     assert res.source == "ai"
     assert res.product_line_code == "PL_A" and res.module == "开票模块"
     get_settings.cache_clear()
 
 
-def test_resolve_exact_module_reverse_lookup_line(catalog: Session, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """orig_plc=NULL（被 safe_ 抹掉）但 module 名精确命中 → 反推产品线。"""
+def test_resolve_source_module_does_not_reverse_lookup_line(catalog: Session, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """来源模块即使精确命中目录，也不反推产品线。"""
     monkeypatch.setenv("MODULE_CLASSIFY_ENABLED", "true")
     from app.config import get_settings
 
@@ -245,13 +249,16 @@ def test_resolve_exact_module_reverse_lookup_line(catalog: Session, monkeypatch)
     monkeypatch.setattr("app.services.agents.module_resolve.classify_module", lambda db, **kw: None)
     t = _ticket(catalog, product_line_code=None, module="收票模块")
     res = resolve_module(catalog, t)
-    assert res.source == "source_exact"
-    assert res.product_line_code == "PL_A" and res.module == "收票模块"  # 反推产品线
+    assert res.source == "fallback"
+    assert res.product_line_code == "PROLINE6067"
+    assert res.module == "其他非发票云问题"
     get_settings.cache_clear()
 
 
-def test_resolve_line_locked_fallback_module(catalog: Session, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """智齿产品线锁定（PROLINE6067）但 AI 关/无模块命中 → 落该线兜底模块。"""
+def test_resolve_source_line_name_only_reaches_global_fallback(
+    catalog: Session, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    """来源产品线名称不锁线；AI 不可用时仅使用全局系统兜底。"""
     monkeypatch.setenv("MODULE_CLASSIFY_ENABLED", "true")
     from app.config import get_settings
 

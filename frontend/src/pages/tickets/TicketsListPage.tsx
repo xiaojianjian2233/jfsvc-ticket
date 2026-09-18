@@ -276,12 +276,7 @@ function getTicketColumnValue(ticket: TicketSummary, colId: string): string {
     case "body":
       return (ticket as any).body ?? p?.ticket_content ?? (ticket as any).description ?? "";
     case "product_category":
-      return (
-        (ticket as any).product_category ??
-        (ticket as any).predicted_product_line_code ??
-        ticket.product_line_code ??
-        ""
-      );
+      return ticket.product_line_name ?? "";
     case "module":
       return ticket.module ?? "";
     case "closing_note":
@@ -1151,10 +1146,7 @@ export function TicketsListPage() {
         header: "产品分类",
         size: 110,
         cell: ({ row }) => {
-          const cat =
-            (row.original as any).product_category ??
-            (row.original as any).predicted_product_line_code ??
-            row.original.product_line_code;
+          const cat = row.original.product_line_name;
           return (
             <span className="text-[11.5px] text-hub-textSecondary truncate block" title={cat ?? ""}>
               {cat ?? "—"}

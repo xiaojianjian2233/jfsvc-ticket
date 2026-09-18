@@ -43,6 +43,12 @@ def test_ingest_creates_feishu_ai_ticket(world: Session) -> None:
     assert t.source_ticket_id == "fa-100"
     assert t.type == "Raw" and t.status == "processing"
     assert t.body == "数电开票点击开具没反应"
+    assert t.product_line_code is None
+    assert t.module is None
+    assert t.source_payload["_original_catalog"] == {
+        "product_line_code": "cloud-fapiao",
+        "module": "数电开票",
+    }
 
 
 def test_triple_archived_in_source_payload(world: Session) -> None:

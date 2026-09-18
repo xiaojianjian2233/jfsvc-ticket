@@ -90,6 +90,7 @@ class TicketSummary(BaseModel):
     body: str | None  # 问题描述（列表页展示与表头筛选使用）
     customer_identity_id: int | None
     product_line_code: str | None
+    product_line_name: str | None = None  # 产品分类中文名（来自 product_lines.name）
     module: str | None
     feature: str | None
     assigned_user_id: int | None  # 责任人（路由分工）
@@ -436,13 +437,15 @@ def list_tickets(
     pl_codes = {t.product_line_code for t in p.items if t.product_line_code}
     pl_codes |= {code for code in hub_plc_map.values() if code}
     pl_resolve_hours_map: dict[str, int | None] = {}
+    pl_name_map: dict[str, str] = {}
     if pl_codes:
         prows = db.execute(
-            select(ProductLine.code, ProductLine.sla_resolve_hours).where(
+            select(ProductLine.code, ProductLine.name, ProductLine.sla_resolve_hours).where(
                 ProductLine.code.in_(pl_codes)
             )
         ).all()
         pl_resolve_hours_map = {r.code: r.sla_resolve_hours for r in prows}
+        pl_name_map = {r.code: r.name for r in prows}
 
     now = datetime.now(UTC)
 
@@ -467,6 +470,11 @@ def list_tickets(
 
     def _to_summary(t: Any) -> TicketSummary:
         s = TicketSummary.model_validate(t)
+        # 历史数据可能在入库时直接把来源产品/模块写进 ticket 生效字段。未经过
+        # 系统归类且尚未毕业的工单不展示这些旧来源值；归类完成后再展示系统结果。
+        if t.hub_issue_id is None and t.module_classified_at is None:
+            s.product_line_code = None
+            s.module = None
         if t.assigned_user_id is not None:
             s.assigned_user_name = user_name_map.get(t.assigned_user_id)
         if t.handler_user_id is not None:
@@ -488,6 +496,8 @@ def list_tickets(
             hub_type = hub_type_map.get(t.hub_issue_id)
             if hub_type is not None:
                 s.predicted_type = hub_type
+        # 列表「产品分类」展示目录中文名，不把内部产品线编码直接暴露给用户。
+        s.product_line_name = pl_name_map.get(s.product_line_code) if s.product_line_code else None
         # 主产品：KSM 来源直接用 version.mainproductname 原样值（未经归类映射）；
         # 其它来源暂缺权威字段来源，先留空（不回退 product_line_code→name）
         s.product_name = t.ksm_main_product_name if t.source_code == "ksm" else None
@@ -604,11 +614,10 @@ def build_ticket_detail(db: Session, ticket: Ticket) -> TicketDetail:
             # ticket.predicted_type 从未被回写，只读 predicted_type 会让已毕业
             # 工单在详情页误判成「未分类」（前端 isOperation/isDevType 据此判断）。
             detail.predicted_type = hub.type
-    if detail.product_line_code:
-        pl = db.execute(
-            select(ProductLine.name).where(ProductLine.code == detail.product_line_code)
-        ).scalar()
-        detail.product_name = pl
+    # 与 TicketSummary.product_name 保持同一语义：只表示来源工单的「主产品」。
+    # KSM 取 version.mainproductname 原样值，其它来源暂无权威字段，留空；
+    # 产品分类中文名应使用 product_line_name/目录查询，不能复用 product_name。
+    detail.product_name = ticket.ksm_main_product_name if ticket.source_code == "ksm" else None
     detail.source_ticket_number = _source_ticket_number(ticket)
     if ticket.customer_identity_id is not None:
         identity = db.get(CustomerIdentity, ticket.customer_identity_id)

@@ -8787,6 +8787,17 @@
             ],
             "title": "Product Line Code"
           },
+          "product_line_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Line Name"
+          },
           "product_name": {
             "anyOf": [
               {
@@ -9496,6 +9507,17 @@
               }
             ],
             "title": "Product Line Code"
+          },
+          "product_line_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Line Name"
           },
           "product_name": {
             "anyOf": [

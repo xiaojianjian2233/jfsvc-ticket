@@ -23,7 +23,6 @@ from app.repositories.status_history import StatusHistoryRepository
 from app.repositories.ticket import TicketRepository
 from app.services.dispatch import dispatch_handler
 from app.services.identity.resolver import IdentityInput, IdentityResolver
-from app.services.ingest.catalog_upsert import safe_product_line_code, upsert_catalog
 
 # 复用 ai_cs 的载荷解析层（参数形状完全一致）。IngestError 显式 re-export，
 # 供 webhook 层 catch（与 escalation_ingester.IngestError 是同一个异常类）。
@@ -77,8 +76,6 @@ class FeishuAiIngester:
                 raw_name=p.customer.get("name"),
             )
         )
-        upsert_catalog(self._db, product_line_code=p.product_line_code, module=p.module)
-
         # 三元组仅存档（triage 用 ticket.body 分类，不读此块）。conversation/
         # cited_knowledge/skills_used 缺省时不写 key，保持载荷形状与 ai_cs 一致。
         ai_cs_ctx: dict[str, Any] = {
@@ -99,10 +96,16 @@ class FeishuAiIngester:
             source_ticket_id=p.session_id,
             type="Raw",
             status="processing",
-            source_payload={"ai_cs": ai_cs_ctx},
+            source_payload={
+                "ai_cs": ai_cs_ctx,
+                "_original_catalog": {
+                    "product_line_code": p.product_line_code,
+                    "module": p.module,
+                },
+            },
             customer_identity_id=resolve.customer_identity_id,
-            product_line_code=safe_product_line_code(self._db, p.product_line_code),
-            module=p.module,
+            product_line_code=None,
+            module=None,
             title=p.original_question[:_TITLE_MAX],
             body=p.original_question,
             reporter={

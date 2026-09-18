@@ -96,8 +96,9 @@ def test_first_ingest(world: Session) -> None:
     assert ticket.source_code == "zammad"
     assert ticket.source_ticket_id == "1001"
     assert ticket.title == "发票同步失败"
-    assert ticket.module == "数电开票"
-    assert ticket.product_line_code == "cloud-fapiao"
+    assert ticket.module is None
+    assert ticket.product_line_code is None
+    assert ticket.source_payload["ticket"]["group"] == "数电开票"
     assert ticket.feature == "urgent"  # first tag becomes feature hint
 
 

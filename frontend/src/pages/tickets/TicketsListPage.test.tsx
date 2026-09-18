@@ -29,6 +29,7 @@ const sample = {
       title: "测试工单",
       customer_identity_id: null,
       product_line_code: "cloud-fapiao",
+      product_line_name: "数电票",
       module: "开票管理",
       feature: null,
       assigned_user_id: 1,
@@ -116,6 +117,7 @@ describe("TicketsListPage", () => {
 
     expect(await screen.findByText("TKT-1")).toBeInTheDocument();
     expect(screen.getByText("发票云")).toBeInTheDocument(); // 主产品
+    expect(screen.getByText("数电票")).toBeInTheDocument(); // 产品分类中文名
     expect(screen.getByText("2")).toBeInTheDocument(); // 驳回次数
     expect(screen.getByText("3")).toBeInTheDocument(); // 关联任务
   });

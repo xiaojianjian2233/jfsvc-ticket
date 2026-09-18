@@ -28,7 +28,6 @@ from app.services.dispatch import dispatch_handler
 from app.services.hub_issues.creator import ensure_hub_issue_for_ticket
 from app.services.hub_issues.op_status import OP_ANSWERED, OP_CLOSED, apply_op_status
 from app.services.identity.resolver import IdentityInput, IdentityResolver
-from app.services.ingest.catalog_upsert import safe_product_line_code, upsert_catalog
 
 logger = get_logger(__name__)
 
@@ -266,15 +265,6 @@ class ZhichiIngester:
         identity_input = self._extract_identity(payload)
         resolve = self._resolver.resolve(identity_input)
 
-        # Ensure product_line and module rows exist (auto-create if new)
-        upsert_catalog(
-            self._db,
-            product_line_code=payload.get("productLineCode") or payload.get("product"),
-            module=payload.get("moduleName")
-            or payload.get("category")
-            or payload.get("subcategory"),
-        )
-
         short_code = self._tickets.next_short_code()
         ticket = Ticket(
             short_code=short_code,
@@ -284,12 +274,9 @@ class ZhichiIngester:
             status="processing",
             source_payload=payload.get("_envelope") or payload,
             customer_identity_id=resolve.customer_identity_id,
-            product_line_code=safe_product_line_code(
-                self._db, payload.get("productLineCode") or payload.get("product")
-            ),
-            module=payload.get("moduleName")
-            or payload.get("category")
-            or payload.get("subcategory"),
+            # 来源分类仅保留在 source_payload；生效值只由 module_resolve 写入。
+            product_line_code=None,
+            module=None,
             feature=payload.get("featureName") or payload.get("feature"),
             title=payload.get("title") or payload.get("ticket_title"),
             body=payload.get("content") or payload.get("ticket_content"),

@@ -1,10 +1,9 @@
 """module_resolve — 产品模块归类链（决定生效 product_line_code + module）。
 
-保证生效值必落在现有 active 目录内，绝不自建。四级回退：
+保证生效值必落在现有 active 目录内，绝不自建。来源系统产品/模块只留档，
+不参与生效值判定：
   ① AI（module_classify）置信度够 → 用 AI 的 (产品线, 模块)
-  ② AI 不确定 → 按工单源系统原始分类在 active 目录里精确找
-  ③ 未命中 → 相似匹配（模块 name 规范化字符串比对）
-  ④ 全落空 → 兜底「其他非发票云问题」(PROLINE6067)
+  ② AI 不确定或不可用 → 兜底「其他非发票云问题」(PROLINE6067)
 
 覆盖 ticket.product_line_code/module 为规范值；源系统原值存 source_payload
 ["_original_catalog"] 留档；AI 原始判定写 predicted_* + 审计。不 commit（调用方管）。
@@ -22,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.core.logging import get_logger
-from app.models import AgentDecision, Module, ProductLine, Ticket
+from app.models import AgentDecision, Module, Ticket
 from app.services.agents.module_classify import classify_module
 
 logger = get_logger(__name__)
@@ -34,12 +33,7 @@ _SKILL_NAME = "module_classify"
 class ModuleResolveResult:
     product_line_code: str
     module: str
-    source: str  # 'ai' | 'source_exact' | 'similar' | 'fallback'
-
-
-def _norm(s: str | None) -> str:
-    """模块名规范化：去空白、转小写，供相似匹配。"""
-    return "".join((s or "").split()).lower()
+    source: str  # 'ai' | 'fallback'
 
 
 def _active_module_exists(db: Session, plc: str, module: str) -> bool:
@@ -53,78 +47,6 @@ def _active_module_exists(db: Session, plc: str, module: str) -> bool:
     return row is not None
 
 
-def _active_line_exists(db: Session, plc: str) -> bool:
-    row = db.execute(
-        select(ProductLine.id).where(ProductLine.code == plc, ProductLine.is_active.is_(True))
-    ).first()
-    return row is not None
-
-
-def _line_hint(db: Session, orig_plc: str | None, orig_module: str | None) -> str | None:
-    """源系统暗示的产品线 code。智齿 module=产品线 name → 该产品线；否则源产品线
-    原值若在 active 目录 → 用之；都不满足 → None。"""
-    if orig_module:
-        pl = db.execute(
-            select(ProductLine.code).where(
-                ProductLine.name == orig_module, ProductLine.is_active.is_(True)
-            )
-        ).first()
-        if pl is not None:
-            return str(pl[0])
-    if orig_plc and _active_line_exists(db, orig_plc):
-        return orig_plc
-    return None
-
-
-def _find_exact_module(db: Session, module: str) -> tuple[str, str] | None:
-    """全部 active 模块里 name 精确相等 → (plc, name)，反推产品线。"""
-    row = db.execute(
-        select(Module.product_line_code, Module.name).where(
-            Module.name == module, Module.is_active.is_(True)
-        )
-    ).first()
-    return (str(row[0]), str(row[1])) if row is not None else None
-
-
-def _line_default_module(db: Session, plc: str) -> str | None:
-    """产品线锁定但模块未定时，取该产品线下的兜底模块：优先名字含"其他"的，
-    否则第一个（按 name）。该线无 active 模块 → None。"""
-    mods = (
-        db.execute(
-            select(Module.name)
-            .where(Module.product_line_code == plc, Module.is_active.is_(True))
-            .order_by(Module.name)
-        )
-        .scalars()
-        .all()
-    )
-    if not mods:
-        return None
-    for m in mods:
-        if "其他" in m:
-            return str(m)
-    return str(mods[0])
-
-
-def _find_similar_module(db: Session, module: str | None) -> tuple[str, str] | None:
-    """在全部 active 模块里按规范化 name 找相似（相等 / 互相包含）。命中返回 (plc, name)。"""
-    if not module:
-        return None
-    target = _norm(module)
-    if not target:
-        return None
-    mods = db.execute(select(Module).where(Module.is_active.is_(True))).scalars().all()
-    # 优先完全相等（跨产品线的同名），再退化到包含关系
-    for m in mods:
-        if _norm(m.name) == target:
-            return (m.product_line_code, m.name)
-    for m in mods:
-        nm = _norm(m.name)
-        if nm and (target in nm or nm in target):
-            return (m.product_line_code, m.name)
-    return None
-
-
 def resolve_module(
     db: Session, ticket: Ticket, *, settings: Settings | None = None
 ) -> ModuleResolveResult:
@@ -134,16 +56,12 @@ def resolve_module(
     orig_plc = ticket.product_line_code
     orig_module = ticket.module
 
-    # line_hint：源系统暗示的产品线。智齿 module=产品线 name（如"标准版-收票"）→ 锁定
-    # 该产品线；否则源产品线原值若在 active 目录也可用。用于让 AI 只在该线下选模块。
-    line_hint = _line_hint(db, orig_plc, orig_module)
-
-    # ---- ① AI 判定（有 line_hint 则只在该线下选模块）----
+    # ---- ① AI 判定。明确不传来源产品线暗示，避免上游分类影响系统分析。----
     ai_plc: str | None = None
     ai_module: str | None = None
     ai_conf = 0.0
     if settings.module_classify_enabled:
-        ai = classify_module(db, title=ticket.title, body=ticket.body, line_hint=line_hint)
+        ai = classify_module(db, title=ticket.title, body=ticket.body, line_hint=None)
         if ai is not None:
             ai_plc, ai_module, ai_conf = ai.product_line_code, ai.module, ai.confidence
             ticket.predicted_product_line_code = ai_plc
@@ -178,28 +96,7 @@ def resolve_module(
     ):
         result = ModuleResolveResult(ai_plc, ai_module, "ai")
 
-    # ---- ② 按源系统模块名在全部 active 模块里精确匹配，反推产品线 ----
-    # （KSM 模块名如"开票管理"可能直接命中；不依赖被 safe_ 抹 NULL 的产品线码）
-    if result is None and orig_module:
-        exact = _find_exact_module(db, orig_module)
-        if exact is not None:
-            result = ModuleResolveResult(exact[0], exact[1], "source_exact")
-
-    # ---- ③ 相似匹配（全 active 模块规范化 name 比对，反推产品线）----
-    if result is None:
-        sim = _find_similar_module(db, orig_module)
-        if sim is not None:
-            result = ModuleResolveResult(sim[0], sim[1], "similar")
-
-    # ---- ②b 产品线锁定但模块落到别的线（智齿：module=产品线名，无具体模块）----
-    # 源系统已明确产品线（line_hint），但 AI/精确/相似没在该线下定出模块（甚至跨线
-    # 命中了别的产品线）→ 以源系统的产品线为准，落该线下兜底模块。产品线可信优先。
-    if line_hint is not None and (result is None or result.product_line_code != line_hint):
-        dft = _line_default_module(db, line_hint)
-        if dft is not None:
-            result = ModuleResolveResult(line_hint, dft, "line_locked")
-
-    # ---- ④ 兜底 ----
+    # ---- ② 统一系统兜底；不使用来源系统产品/模块做精确或相似匹配。----
     if result is None:
         result = ModuleResolveResult(
             settings.module_fallback_product_line_code,
@@ -216,6 +113,7 @@ def resolve_module(
     # 覆盖生效值为规范值
     ticket.product_line_code = result.product_line_code
     ticket.module = result.module
+    ticket.module_classified_at = datetime.now(UTC)
 
     logger.info(
         "module_resolved",

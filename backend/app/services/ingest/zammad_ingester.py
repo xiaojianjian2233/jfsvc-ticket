@@ -30,7 +30,6 @@ from app.repositories.status_history import StatusHistoryRepository
 from app.repositories.ticket import TicketRepository
 from app.services.dispatch import dispatch_handler
 from app.services.identity.resolver import IdentityInput, IdentityResolver
-from app.services.ingest.catalog_upsert import safe_product_line_code, upsert_catalog
 
 logger = get_logger(__name__)
 
@@ -93,13 +92,6 @@ class ZammadIngester:
         )
         resolve = self._resolver.resolve(identity_input)
 
-        # Ensure product_line and module rows exist (auto-create if new)
-        upsert_catalog(
-            self._db,
-            product_line_code=zt.product_line_code,
-            module=zt.group or None,
-        )
-
         short_code = self._tickets.next_short_code()
         ticket = Ticket(
             short_code=short_code,
@@ -109,8 +101,9 @@ class ZammadIngester:
             status="processing",
             source_payload=payload,
             customer_identity_id=resolve.customer_identity_id,
-            product_line_code=safe_product_line_code(self._db, zt.product_line_code),
-            module=zt.group or None,
+            # 来源分类仅保留在 source_payload；生效值只由 module_resolve 写入。
+            product_line_code=None,
+            module=None,
             feature=self._pick_feature(zt.tags),
             title=zt.title or None,
             body=zt.article.body or None,

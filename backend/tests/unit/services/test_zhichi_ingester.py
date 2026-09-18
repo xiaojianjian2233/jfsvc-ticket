@@ -226,8 +226,8 @@ def test_ingest_envelope_maps_fields(world: Session) -> None:
     assert t.source_ticket_id == "T20260101001"
     assert t.title == "工单标题"
     assert t.body == "问题描述内容"
-    assert t.product_line_code == "金蝶发票云"
-    assert t.module == "星空旗舰版-开票"
+    assert t.product_line_code is None
+    assert t.module is None
     assert t.reporter["name"] == "张三"
     assert t.reporter["mobile"] == "13800000000"
     assert t.reporter["email"] == "user@example.com"
@@ -246,7 +246,7 @@ def test_ingest_legacy_flat_still_works(world: Session) -> None:
     assert t is not None
     assert t.source_ticket_id == "OLD1"
     assert t.title == "旧格式"
-    assert t.product_line_code == "cloud-erp"
+    assert t.product_line_code is None
 
 
 def test_ingest_extend_fields_type6_takes_text(world: Session) -> None:
@@ -277,8 +277,9 @@ def test_ingest_extend_fields_type6_takes_text(world: Session) -> None:
     world.commit()
     t = world.get(Ticket, res.ticket_id)
     assert t is not None
-    # field_type=6 取 field_text（不是 field_value 的 code123）
-    assert t.product_line_code == "云星空-税务"
+    # 原始下拉值保留在审计载荷中，不直接写入生效产品分类。
+    assert t.product_line_code is None
+    assert t.source_payload["raw"]["extend_fields_list"][0]["field_text"] == "云星空-税务"
 
 
 # ---- 智齿原生扁平格式（线上真实推送，TKT-000015 结构）----
@@ -331,8 +332,8 @@ def test_ingest_native_flat_maps_fields(world: Session) -> None:
     t = world.get(Ticket, res.ticket_id)
     assert t is not None
     assert t.source_ticket_id == "e240351f6a7e4e518df9d61d1fa5af11"
-    assert t.product_line_code == "星瀚-收票"
-    assert t.module == "星瀚-收票"
+    assert t.product_line_code is None
+    assert t.module is None
     assert t.reporter["name"] == "李志坚"
     assert t.reporter["mobile"] == "13800000000"
     assert t.reporter["email"] == "user@example.com"
