@@ -124,6 +124,7 @@ def test_lightweight_ping_returns_code0_immediately(
             "billId": "BILL-LP-1",
             "title": "测试工单",
             "problem": "请求开票失败",
+            "product": {"number": "C28", "name": "金蝶发票云"},
             "version": {"mainproductname": "金蝶云星空"},
             "module": {"name": "财务模块"},
             "customerInfo": {
@@ -185,6 +186,7 @@ def test_lightweight_ping_takes_over_immediately_after_dispatch(
             "title": "接管测试",
             "status": "1",
             "node": {"id": "N-1"},
+            "product": {"number": "C28", "name": "金蝶发票云"},
             "version": {"mainproductname": "金蝶云星空"},
             "module": {"name": "财务模块"},
             "customerInfo": {"customerNumber": "C-TO", "customerName": "测试公司"},
@@ -217,6 +219,7 @@ def test_lightweight_ping_id_field_fallback(app_client, ingest_world: Session) -
         {
             "billId": "BILL-FALLBACK",
             "title": "id-fallback",
+            "product": {"number": "C28", "name": "金蝶发票云"},
             "version": {"mainproductname": "金蝶云星空"},
             "module": {"name": "财务模块"},
             "customerInfo": {"customerNumber": "X", "customerName": "y"},
@@ -257,6 +260,7 @@ def test_lightweight_ping_overwrites_notice_store_on_re_push(
         {
             "billId": "BILL-RP",
             "title": "rp",
+            "product": {"number": "C28", "name": "金蝶发票云"},
             "version": {"mainproductname": "金蝶云星空"},
             "module": {"name": "财务模块"},
             "customerInfo": {"customerNumber": "C", "customerName": "n"},

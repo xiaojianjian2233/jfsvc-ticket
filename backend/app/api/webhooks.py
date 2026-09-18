@@ -52,6 +52,7 @@ from app.services.ingest.feishu_ai_ingester import IngestError as FeishuAiIngest
 from app.services.ingest.ksm_ingester import IngestError as KSMIngestError
 from app.services.ingest.ksm_ingester import KSMIngester
 from app.services.ingest.ksm_payload import from_subscribe_callback
+from app.services.ingest.ksm_product_gate import accepts_product
 from app.services.ingest.zammad_ingester import IngestError as ZammadIngestError
 from app.services.ingest.zammad_ingester import ZammadIngester
 from app.services.ingest.zhichi_ingester import IngestError as ZhichiIngestError
@@ -360,6 +361,8 @@ def _ksm_async_fetch_and_ingest(bill_id: str) -> None:
             logger.exception("ksm_async_fetch_detail_failed", bill_id=bill_id, error=str(e))
             return
 
+        if not accepts_product(detail):
+            return
         payload = from_subscribe_callback(detail)
         if not payload.get("billId"):
             logger.warning("ksm_async_detail_missing_billid", bill_id=bill_id)
@@ -484,6 +487,9 @@ async def ksm_webhook(
     # Legacy / test path: full payload, sync ingest.
     if not bill_id:
         logger.warning("ksm_webhook_full_payload_missing_billid")
+        return KSMAck(code=0)
+    original = payload.get("_subscribe_callback", payload)
+    if not isinstance(original, dict) or not accepts_product(original):
         return KSMAck(code=0)
     try:
         result = KSMIngester(db).ingest(payload)
