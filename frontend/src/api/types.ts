@@ -5815,6 +5815,8 @@ export interface components {
             assigned_user_id: number | null;
             /** Assigned User Name */
             assigned_user_name?: string | null;
+            /** Body */
+            body: string | null;
             /**
              * Children Count
              * @default 1

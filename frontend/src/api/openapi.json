@@ -9016,6 +9016,7 @@
           "type",
           "status",
           "title",
+          "body",
           "customer_identity_id",
           "product_line_code",
           "module",
@@ -9025,7 +9026,6 @@
           "received_at",
           "customer_replied_at",
           "created_at",
-          "body",
           "body_html",
           "reporter",
           "source_payload",
@@ -9183,6 +9183,17 @@
               }
             ],
             "title": "Assigned User Name"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
           },
           "children_count": {
             "default": 1,
@@ -9680,6 +9691,7 @@
           "type",
           "status",
           "title",
+          "body",
           "customer_identity_id",
           "product_line_code",
           "module",

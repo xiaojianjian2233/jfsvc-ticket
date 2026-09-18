@@ -7,6 +7,15 @@ from app.models import AgentDecision, HubIssue, Source, SyncOutbox, Ticket
 from app.services.agents.answer_draft import generate_answer_draft
 
 
+@pytest.fixture(autouse=True)
+def draft_lease():
+    lease = Mock()
+    lease.owned.return_value = True
+    with patch("app.services.agents.answer_draft._draft_lease") as acquire:
+        acquire.return_value.__enter__.return_value = lease
+        yield acquire
+
+
 def seed(db, kind="Raw"):
     db.add(Source(code="ksm", name="KSM"))
     ticket = Ticket(
@@ -168,3 +177,54 @@ def test_escalation_resolves_catalog_before_initial_answer():
         run_escalation_agents(123)
     assert order == ["catalog", "answer"]
     route.assert_not_called()
+
+
+def test_agent_wait_has_no_database_transaction(db_session):
+    ticket = seed(db_session)
+    def replay(*args, **kwargs):
+        assert not db_session.in_transaction()
+        return ReplayResult(answer="draft", cited_knowledge=[], skills_used=[], trace_id="test")
+    with patch("app.services.agents.answer_draft._replay_with_retry", side_effect=replay), patch("app.services.agents.answer_draft.build_client"):
+        assert generate_answer_draft(db_session, ticket_id=ticket.id) == "draft"
+    assert not db_session.in_transaction()
+
+
+def test_busy_subject_does_not_call_agent(db_session, draft_lease):
+    ticket = seed(db_session)
+    draft_lease.return_value.__enter__.return_value = None
+    with patch("app.services.agents.answer_draft.build_client") as client:
+        assert generate_answer_draft(db_session, ticket_id=ticket.id) is None
+        client.assert_not_called()
+    assert not db_session.in_transaction()
+
+
+def test_expired_lease_does_not_save_stale_answer(db_session, draft_lease):
+    ticket = seed(db_session)
+    draft_lease.return_value.__enter__.return_value.owned.return_value = False
+    with patch("app.services.agents.answer_draft.build_client") as client:
+        client.return_value.answer_with_images.return_value = ReplayResult(answer="stale", cited_knowledge=[], skills_used=[], trace_id="test")
+        assert generate_answer_draft(db_session, ticket_id=ticket.id) is None
+    assert db_session.query(AgentDecision).count() == 0
+
+
+def test_human_reply_arriving_during_agent_wait_is_preserved(db_session):
+    from sqlalchemy.orm import Session
+    ticket = seed(db_session)
+    hub = HubIssue(short_code="HUB-race", ticket_id=ticket.id, type="Operation", title="问题", status="created")
+    db_session.add(hub)
+    db_session.commit()
+    hub_id = hub.id
+    def replay(*args, **kwargs):
+        assert not db_session.in_transaction()
+        with Session(db_session.get_bind()) as other:
+            current = other.get(HubIssue, hub_id)
+            current.reply_content = "人工新答复"
+            current.reply_authored_by = "user:1"
+            current.reply_is_draft = False
+            other.commit()
+        return ReplayResult(answer="AI旧结果", cited_knowledge=[], skills_used=[], trace_id="test")
+    with patch("app.services.agents.answer_draft._replay_with_retry", side_effect=replay), patch("app.services.agents.answer_draft.build_client"):
+        generate_answer_draft(db_session, hub_id=hub_id)
+    db_session.refresh(hub)
+    assert hub.reply_content == "人工新答复"
+    assert not hub.reply_is_draft

@@ -214,10 +214,13 @@ def test_list_tickets_op_status(app_client: TestClient, world: Session) -> None:
 
 
 def test_summary_exposes_handler(app_client: TestClient, world: Session) -> None:
+    world.get(Ticket, 100).body = "列表应返回的问题描述"
+    world.commit()
     resp = app_client.get("/api/tickets", headers=_bearer())
     by_code = {it["short_code"]: it for it in resp.json()["items"]}
     assert by_code["TKT-1"]["handler_user_id"] == 1
     assert "handler_user_name" in by_code["TKT-1"]
+    assert by_code["TKT-1"]["body"] == "列表应返回的问题描述"
 
 
 def test_admin_sees_all_tickets(app_client: TestClient, world: Session) -> None:

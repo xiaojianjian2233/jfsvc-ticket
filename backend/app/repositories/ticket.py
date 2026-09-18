@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any, Generic, TypeVar
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.models import HubIssue, ProductLine, Ticket
@@ -83,6 +83,34 @@ class TicketRepository:
         keeps the rule identical on PostgreSQL and SQLite and avoids a fragile
         database-specific interval expression.
         """
+        # PostgreSQL can evaluate all three aggregates in-database.  The
+        # SQLite fallback keeps unit tests and local development on the exact
+        # existing Python rule.
+        if self._db.bind is not None and self._db.bind.dialect.name == "postgresql":
+            base = select(Ticket.id).where(Ticket.deleted_at.is_(None))
+            if visible_to_user_id is not None:
+                base = base.where(Ticket.handler_user_id == visible_to_user_id)
+            now = datetime.now(UTC)
+            start = now.astimezone(_BEIJING).replace(hour=0, minute=0, second=0, microsecond=0)
+            start_utc = start.astimezone(UTC)
+            end_utc = start_utc + timedelta(days=1)
+            green = self._db.execute(
+                select(func.count(Ticket.id)).where(
+                    Ticket.id.in_(base), self._green_vip_condition()
+                )
+            ).scalar_one()
+            today = self._db.execute(
+                select(func.count(Ticket.id)).where(
+                    Ticket.id.in_(base), Ticket.created_at >= start_utc, Ticket.created_at < end_utc
+                )
+            ).scalar_one()
+            overdue = self._db.execute(
+                select(func.count(Ticket.id))
+                .outerjoin(ProductLine, ProductLine.code == Ticket.product_line_code)
+                .where(Ticket.id.in_(base), self._postgres_overdue_condition())
+            ).scalar_one()
+            return TicketQuickStats(green_vip=green, today=today, overdue=overdue)
+
         stmt = (
             select(Ticket, ProductLine.sla_resolve_hours)
             .outerjoin(ProductLine, ProductLine.code == Ticket.product_line_code)
@@ -107,6 +135,14 @@ class TicketRepository:
         return TicketQuickStats(green_vip=green_vip, today=today_count, overdue=overdue)
 
     def _overdue_ticket_ids(self) -> list[int]:
+        if self._db.bind is not None and self._db.bind.dialect.name == "postgresql":
+            return list(
+                self._db.execute(
+                    select(Ticket.id)
+                    .outerjoin(ProductLine, ProductLine.code == Ticket.product_line_code)
+                    .where(Ticket.deleted_at.is_(None), self._postgres_overdue_condition())
+                ).scalars()
+            )
         rows = self._db.execute(
             select(Ticket, ProductLine.sla_resolve_hours)
             .outerjoin(ProductLine, ProductLine.code == Ticket.product_line_code)
@@ -128,6 +164,28 @@ class TicketRepository:
                 or "战略客户" in service_level
                 or "绿色通道" in service_level
             )
+        )
+
+    @staticmethod
+    def _green_vip_condition() -> Any:
+        return or_(
+            Ticket.service_level.ilike("%绿色%"),
+            Ticket.service_level.ilike("%战略客户%"),
+            Ticket.service_level.ilike("%绿色通道%"),
+        )
+
+    @staticmethod
+    def _postgres_overdue_condition() -> Any:
+        """PostgreSQL equivalent of _is_overdue, evaluated without full-row scan."""
+        deadline = Ticket.received_at + (
+            func.coalesce(Ticket.sla_standard_hours, ProductLine.sla_resolve_hours)
+            * text("INTERVAL '1 hour'")
+        )
+        return and_(
+            Ticket.status.not_in(_CLOSED_TICKET_STATUSES),
+            Ticket.received_at.is_not(None),
+            func.coalesce(Ticket.sla_standard_hours, ProductLine.sla_resolve_hours).is_not(None),
+            deadline < func.now(),
         )
 
     @staticmethod
@@ -286,11 +344,7 @@ class TicketRepository:
             base = base.where(Ticket.assigned_user_id.is_(None))
             count_base = count_base.where(Ticket.assigned_user_id.is_(None))
         if quick_filter == "green_vip":
-            cond = or_(
-                Ticket.service_level.ilike("%绿色%"),
-                Ticket.service_level.ilike("%战略客户%"),
-                Ticket.service_level.ilike("%绿色通道%"),
-            )
+            cond = self._green_vip_condition()
             base = base.where(cond)
             count_base = count_base.where(cond)
         elif quick_filter == "today":
