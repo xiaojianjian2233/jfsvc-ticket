@@ -20,6 +20,9 @@ const STATIC: Record<string, string> = {
   "/admin/dispatch": "派单规则配置",
   "/admin/sla": "服务等级&SLA配置",
   "/admin/skills": "技能编排",
+  "/reception/agents": "坐席设置",
+  "/reception/sessions": "会话记录列表",
+  "/reception/workbench": "在线接待工作台",
 };
 
 // 详情路由前缀 → 占位标题（拿到数据前）

@@ -122,6 +122,19 @@ function BookIcon({ active }: { active: boolean }) {
   );
 }
 
+function HeadsetIcon({ active }: { active: boolean }) {
+  const c = "currentColor";
+  void active;
+  return (
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+      <path
+        d="M2.5 7.5a5 5 0 0 1 10 0v3.5a1.5 1.5 0 0 1-1.5 1.5h-1a.5.5 0 0 1-.5-.5v-3a.5.5 0 0 1 .5-.5h1.5V7.5a4 4 0 0 0-8 0V8.5h1.5a.5.5 0 0 1 .5.5v3a.5.5 0 0 1-.5.5h-1A1.5 1.5 0 0 1 2.5 11V7.5Z"
+        fill={c}
+      />
+    </svg>
+  );
+}
+
 function ChevronIcon({ open }: { open: boolean }) {
   return (
     <svg
@@ -156,6 +169,16 @@ const navItems: {
   { to: "/", label: "工作台", icon: GridIcon },
   { to: "/tickets", label: "全部工单列表", icon: TicketIcon },
   { to: "/hub-issues", label: "工单任务表", icon: LinkIcon },
+  {
+    to: "/reception",
+    label: "在线接待管理",
+    icon: HeadsetIcon,
+    children: [
+      { to: "/reception/agents", label: "坐席设置" },
+      { to: "/reception/sessions", label: "会话记录列表" },
+      { to: "/reception/workbench", label: "在线接待工作台" },
+    ],
+  },
   {
     to: "/reflect",
     label: "反思诊断",

@@ -23,6 +23,9 @@ import { ReflectTrainingPage } from "@/pages/reflect-training/ReflectTrainingPag
 import { KnowledgeBasePage } from "@/pages/knowledge-base/KnowledgeBasePage";
 import { AnalyticsPage } from "@/pages/analytics/AnalyticsPage";
 import { DailyDashboardPage } from "@/pages/analytics/DailyDashboardPage";
+import { AgentsPage } from "@/pages/reception/AgentsPage";
+import { SessionListPage } from "@/pages/reception/SessionListPage";
+import { ReceptionWorkbenchPage } from "@/pages/reception/ReceptionWorkbenchPage";
 
 /**
  * require_admin 页面守卫：非管理员（含 supervisor）直接跳回 /admin/users。
@@ -105,5 +108,8 @@ export const authedRoutes = (
         </RequireAdmin>
       }
     />
+    <Route path="/reception/agents" element={<AgentsPage />} />
+    <Route path="/reception/sessions" element={<SessionListPage />} />
+    <Route path="/reception/workbench" element={<ReceptionWorkbenchPage />} />
   </>
 );

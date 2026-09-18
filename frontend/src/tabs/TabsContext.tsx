@@ -145,12 +145,32 @@ export function TabsProvider({
 
   const closeAllTabs = useCallback<TabsState["closeAllTabs"]>(() => {
     setState((prev) => {
-      // 保留不可关闭的标签（若有）
+      // 检查是否打开了「在线接待工作台」（在线工作台参考全部工单的页签，清空时不自动关闭，只能手动关闭）
+      const hasWorkbench = prev.tabs.some((t) => t.key === "/reception/workbench");
+
+      if (hasWorkbench) {
+        const preserved = prev.tabs.filter(
+          (t) => !t.closable || t.key === "/tickets" || t.key === "/reception/workbench"
+        );
+        if (!preserved.some((t) => t.key === "/tickets")) {
+          preserved.unshift({
+            key: "/tickets",
+            path: "/tickets",
+            title: "全部工单",
+            closable: true,
+          });
+        }
+        const stillActive = preserved.some((t) => t.key === prev.activeKey);
+        const activeKey = stillActive ? prev.activeKey : "/reception/workbench";
+        return { tabs: preserved, activeKey };
+      }
+
+      // 未打开工作台时：一键清空并重置为默认「全部工单」页签
       const unclosable = prev.tabs.filter((t) => !t.closable);
       if (unclosable.length > 0) {
         return { tabs: unclosable, activeKey: unclosable[0].key };
       }
-      // 全部可关闭时，一键清空并重置为默认「全部工单」页签
+
       const defaultTab: TabItem = {
         key: "/tickets",
         path: "/tickets",

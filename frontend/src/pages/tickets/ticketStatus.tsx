@@ -80,14 +80,14 @@ export function ticketStatusLabel(status: string): string {
 }
 
 /** 列表页用的圆角徽标（含配色 + 中文）。 */
-export function StatusBadge({ status }: { status: string }) {
+export function StatusBadge({ status, prefix }: { status: string; prefix?: string }) {
   const c = TICKET_STATUS_BADGE[status] ?? TICKET_STATUS_BADGE.received;
   return (
     <span
       className="text-[10px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap"
       style={{ background: c.bg, color: c.fg, borderColor: c.bd }}
     >
-      {c.label}
+      {prefix ? `${prefix}${c.label}` : c.label}
     </span>
   );
 }

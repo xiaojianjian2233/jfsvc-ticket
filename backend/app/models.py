@@ -1434,3 +1434,105 @@ class KnowledgeBaseItem(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# ---- 在线接待管理（Online Reception Management）----------------------------
+
+
+class ReceptionAgent(Base):
+    """在线接待坐席配置表。"""
+
+    __tablename__ = "reception_agents"
+    __table_args__ = (
+        CheckConstraint("status IN ('online','busy','offline')", name="ck_reception_agents_status"),
+        Index("ix_reception_agents_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False
+    )
+    user_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    nickname: Mapped[str] = mapped_column(String(64), nullable=False)
+    max_concurrent: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="offline", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class ReceptionSession(Base):
+    """在线与热线会话主表。编号规则：ZXHH + YYYYMMDD + 4位流水号。"""
+
+    __tablename__ = "reception_sessions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queue','in_progress','pending','converted','closed')",
+            name="ck_reception_sessions_status",
+        ),
+        CheckConstraint("session_type IN ('online','hotline')", name="ck_reception_sessions_type"),
+        Index("ix_reception_sessions_status", "status"),
+        Index("ix_reception_sessions_agent", "agent_user_id"),
+        Index("ix_reception_sessions_created_at", "created_at"),
+        Index("ix_reception_sessions_company", "company_name"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)  # ZXHHyyyymmdd0000
+    company_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    tax_no: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tenant_no: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tenant_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    contact_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    contact_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="in_progress", nullable=False)
+    is_human: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    agent_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    agent_name: Mapped[str] = mapped_column(String(64), default="Agent", nullable=False)
+    ticket_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("tickets.id", ondelete="SET NULL"), nullable=True
+    )
+    ticket_short_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    session_type: Mapped[str] = mapped_column(String(16), default="online", nullable=False)
+    hotline_status: Mapped[str | None] = mapped_column(String(16), nullable=True)  # answered | missed
+    unread_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    agent_last_replied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ReceptionMessage(Base):
+    """在线会话对话消息流。"""
+
+    __tablename__ = "reception_messages"
+    __table_args__ = (
+        CheckConstraint(
+            "sender_type IN ('customer','agent','bot','system')",
+            name="ck_reception_messages_sender_type",
+        ),
+        Index("ix_reception_messages_session", "session_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("reception_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    sender_type: Mapped[str] = mapped_column(String(16), nullable=False)  # customer|agent|bot|system
+    sender_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+

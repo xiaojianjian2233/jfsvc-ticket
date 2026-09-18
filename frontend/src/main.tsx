@@ -84,11 +84,16 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
     if (!currentToken || isTokenExpired(currentToken)) {
       localStorage.setItem(
         "auth_token",
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzNSIsIm5hbWUiOiJcdTY3NjhcdTYxNjdcdTgzODkiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3ODkwMzA0OTAsImV4cCI6MTc4OTYzNTI5MH0.QLT-Rs3URjC2MMJf0v-DNbCH6-qGB-6VFaXXR2rw56Y",
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzNSIsIm5hbWUiOiJcdTY3NjhcdTYxNjdcdTgzODkiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3ODk3MDM0OTQsImV4cCI6MTc5MDMwODI5NH0.q9W9u7I-NE43Zn67kBNgzBFkzkGn8UmXPSuU6X_2n4E",
       );
       localStorage.setItem(
         "auth_user",
-        JSON.stringify({ id: 3, name: "杨慧莉", role: "admin", feishu_uid: "ou_403664c7631e065b4ea31d67f07c2bed" }),
+        JSON.stringify({
+          id: 35,
+          name: "杨慧莉",
+          role: "admin",
+          feishu_uid: "ou_bc3d1376d982e452056b469b4e73cad4",
+        }),
       );
     }
     return <>{children}</>;

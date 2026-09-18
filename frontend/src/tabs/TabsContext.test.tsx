@@ -116,4 +116,21 @@ describe("TabsContext", () => {
     // 依然保留默认全部工单页签
     expect(screen.getByText("全部工单")).toBeInTheDocument();
   });
+
+  it("preserves /reception/workbench tab on closeAllTabs, but allows manual closing", () => {
+    const { result } = renderHook(() => useTabs(), { wrapper: wrapper("/tickets") });
+    act(() => result.current.openTab("/reception/workbench", "在线接待工作台"));
+    act(() => result.current.openTab("/tickets/1", "TKT-1"));
+    expect(result.current.tabs).toHaveLength(3);
+    expect(result.current.activeKey).toBe("/tickets/1");
+
+    // 点击清空：仅关闭 /tickets/1，保留 /tickets 与 /reception/workbench
+    act(() => result.current.closeAllTabs());
+    expect(result.current.tabs.map((t) => t.key)).toEqual(["/tickets", "/reception/workbench"]);
+    expect(result.current.activeKey).toBe("/reception/workbench");
+
+    // 手动点击关闭 /reception/workbench：允许关闭
+    act(() => result.current.closeTab("/reception/workbench"));
+    expect(result.current.tabs.map((t) => t.key)).toEqual(["/tickets"]);
+  });
 });

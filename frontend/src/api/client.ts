@@ -55,9 +55,25 @@ async function request<T>(
   });
   if (!resp.ok) {
     if (resp.status === 401) {
-      localStorage.removeItem("auth_token");
-      localStorage.removeItem("auth_user");
-      window.location.href = appPath("/login");
+      if (import.meta.env.DEV) {
+        localStorage.setItem(
+          "auth_token",
+          "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzNSIsIm5hbWUiOiJcdTY3NjhcdTYxNjdcdTgzODkiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3ODk3MDM0OTQsImV4cCI6MTc5MDMwODI5NH0.q9W9u7I-NE43Zn67kBNgzBFkzkGn8UmXPSuU6X_2n4E",
+        );
+        localStorage.setItem(
+          "auth_user",
+          JSON.stringify({
+            id: 35,
+            name: "杨慧莉",
+            role: "admin",
+            feishu_uid: "ou_bc3d1376d982e452056b469b4e73cad4",
+          }),
+        );
+      } else {
+        localStorage.removeItem("auth_token");
+        localStorage.removeItem("auth_user");
+        window.location.href = appPath("/login");
+      }
       throw new ApiError(401, "session expired");
     }
     // 只读一次 body（读两次会抛 "body stream already read"）：先取文本，再尝试解析 JSON

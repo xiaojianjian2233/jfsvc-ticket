@@ -3,12 +3,12 @@ import { api } from "@/api/client";
 import { appPath } from "@/api/base";
 
 const DEV_DEFAULT_TOKEN =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzIiwibmFtZSI6Ilx1Njc2OFx1NjE2N1x1ODM4OSIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc4OTA5MjQ5MiwiZXhwIjoxNzg5Njk3MjkyfQ.sjvB4MCkjsrViqw5JneiCQ3QTqfNYhaK1sHcZcSseb4";
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzNSIsIm5hbWUiOiJcdTY3NjhcdTYxNjdcdTgzODkiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3ODk3MDM0OTQsImV4cCI6MTc5MDMwODI5NH0.q9W9u7I-NE43Zn67kBNgzBFkzkGn8UmXPSuU6X_2n4E";
 const DEV_DEFAULT_USER = {
-  id: 3,
+  id: 35,
   name: "杨慧莉",
   role: "admin",
-  feishu_uid: "ou_403664c7631e065b4ea31d67f07c2bed",
+  feishu_uid: "ou_bc3d1376d982e452056b469b4e73cad4",
 };
 
 export function LoginPage() {
@@ -17,6 +17,14 @@ export function LoginPage() {
   const [ssoError, setSsoError] = useState<string | null>(null);
 
   useEffect(() => {
+    // 本地开发环境自动写入有效授权并直接进入系统，防止飞书授权重定向到 SIT 线上环境
+    if (import.meta.env.DEV) {
+      localStorage.setItem("auth_token", DEV_DEFAULT_TOKEN);
+      localStorage.setItem("auth_user", JSON.stringify(DEV_DEFAULT_USER));
+      window.location.href = appPath("/tickets");
+      return;
+    }
+
     // If main.tsx flagged an SSO failure (callback returned with sso_error),
     // surface it here.
     const stored = localStorage.getItem("auth_sso_error");

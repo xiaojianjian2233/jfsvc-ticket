@@ -30,7 +30,13 @@ import {
   type ProcessLinkStage,
 } from "./ticketStatus";
 
-function ProcessStageBadge({ stage }: { stage: ProcessLinkStage }) {
+function ProcessStageBadge({
+  stage,
+  prefix = "环节：",
+}: {
+  stage: ProcessLinkStage;
+  prefix?: string;
+}) {
   const style =
     stage === "完成"
       ? { bg: "#edf5ee", fg: "#2f7d4f", bd: "#bcd9c4" }
@@ -47,7 +53,7 @@ function ProcessStageBadge({ stage }: { stage: ProcessLinkStage }) {
       }}
       aria-label={`处理环节：${stage}`}
     >
-      {stage}
+      {prefix ? `${prefix}${stage}` : stage}
     </span>
   );
 }
@@ -789,11 +795,8 @@ export function TicketDetailPage() {
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
                     <Tag tone="cyan">{sourceLabel(d.source_code)}</Tag>
                     <Tag tone="purple">{d.service_level ?? "标准服务"}</Tag>
-                    <ProcessStageBadge stage={effectiveProcessStage} />
-                    {d.predicted_type && (
-                      <PredictedTypeBadge type={d.predicted_type} confidence={d.predicted_confidence} />
-                    )}
                     <StatusBadge
+                      prefix="状态："
                       status={
                         hub.data?.status === "released" &&
                         (d.predicted_type === "Bug_fix" || d.predicted_type === "Demand")
@@ -801,6 +804,7 @@ export function TicketDetailPage() {
                           : (overrideStatus ?? d.status)
                       }
                     />
+                    <ProcessStageBadge prefix="环节：" stage={effectiveProcessStage} />
                     <RemainingTag hours={d.remaining_hours} />
                     {!hasOperatePermission && (
                       <span className="inline-block px-2 py-0.5 rounded-full text-[10.5px] font-medium bg-slate-100 text-slate-500 border border-slate-200 whitespace-nowrap">
@@ -1307,10 +1311,22 @@ export function TicketDetailPage() {
               d.assigned_user_name ??
               (d.assigned_user_id ? `#${d.assigned_user_id}` : "—");
 
+            const productName =
+              d.product_name ??
+              (d as any).product_line_name ??
+              (d as any).product_line_code;
+
+            const sourceModule =
+              (d as any).source_module ??
+              d.ksm_reporter_module ??
+              p?._original_catalog?.module ??
+              p?.module;
+
             return (
               <Card title="工单基础信息">
-                <div className="px-1 py-1">
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-6 gap-y-4">
+                <div className="px-1 py-1 overflow-x-auto">
+                  <div className="grid grid-cols-6 gap-x-6 gap-y-4 min-w-[760px]">
+                    {/* 第 1 行（6 个字段） */}
                     <Field label="提单公司">{d.reporter_company ?? "—"}</Field>
                     <Field label="联系人">{contactName ?? "—"}</Field>
                     <Field label="联系人手机">
@@ -1318,7 +1334,10 @@ export function TicketDetailPage() {
                     </Field>
                     <Field label="联系人邮箱">{contactEmail ?? "—"}</Field>
                     <Field label="归属租户">{d.reporter_tenant ?? "—"}</Field>
+                    <Field label="提单产品">{productName ?? "—"}</Field>
 
+                    {/* 第 2 行（6 个字段） */}
+                    <Field label="提单模块">{sourceModule ?? "—"}</Field>
                     <Field label="提单人">{d.reporter_name ?? "—"}</Field>
                     <Field label="提单人手机">
                       <span className="font-mono">{d.reporter_mobile ?? "—"}</span>

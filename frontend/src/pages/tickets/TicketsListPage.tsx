@@ -1284,7 +1284,7 @@ export function TicketsListPage() {
       },
       {
         id: "product_name",
-        header: "主产品",
+        header: "提单产品",
         accessorKey: "product_name",
         size: 110,
         cell: ({ row }) => (

@@ -24,6 +24,7 @@ from app.api import (
     hub_issues,
     knowledge_base,
     metrics,
+    reception,
     supervisor,
     tickets,
     webhooks,
@@ -85,6 +86,7 @@ def create_app() -> FastAPI:
     app.include_router(webhooks.router, prefix="/webhook", tags=["webhook"])
     app.include_router(ai_cs_query.router, prefix="/api/ai-cs", tags=["ai-cs"])
     app.include_router(knowledge_base.router, prefix="/api/knowledge-base", tags=["knowledge-base"])
+    app.include_router(reception.router, prefix="/api/reception", tags=["reception"])
 
     return app
 
