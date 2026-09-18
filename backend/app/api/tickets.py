@@ -87,6 +87,7 @@ class TicketSummary(BaseModel):
     status: str
     process_stage: str | None = "服务处理"  # 处理环节（服务处理 / 研发处理 / 完成）
     title: str | None
+    body: str | None  # 问题描述（列表页展示与表头筛选使用）
     customer_identity_id: int | None
     product_line_code: str | None
     module: str | None
@@ -164,7 +165,6 @@ class AttachmentOut(BaseModel):
 
 
 class TicketDetail(TicketSummary):
-    body: str | None
     body_html: str | None
     reporter: dict[str, Any] | None
     source_payload: dict[str, Any] | None
