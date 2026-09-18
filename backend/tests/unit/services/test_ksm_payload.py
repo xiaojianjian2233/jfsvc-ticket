@@ -82,6 +82,27 @@ def test_falls_back_to_product_name_when_version_missing() -> None:
     assert from_subscribe_callback(data)["productLineCode"] == "cloud-fapiao"
 
 
+# ---- ksm main product name (raw, unmapped) ---------------------------------
+
+
+def test_ksm_main_product_name_preserves_raw_version_string() -> None:
+    """ksmMainProductName 原样保留 version.mainproductname，不经 PRODUCT_NAME_TO_CODE
+    映射——即便该字符串在映射表里查不到（跟 productLineCode 不同，这里不校验/不归一）。"""
+    data = {"version": {"mainproductname": "金蝶发票云【星空旗舰版】公有云"}}
+    out = from_subscribe_callback(data)
+    assert out["ksmMainProductName"] == "金蝶发票云【星空旗舰版】公有云"
+
+
+def test_ksm_main_product_name_none_when_missing() -> None:
+    assert from_subscribe_callback({})["ksmMainProductName"] is None
+    assert from_subscribe_callback({"version": {}})["ksmMainProductName"] is None
+    # 只有 product.name 没有 version 时，ksmMainProductName 仍为 None（跟 productLineCode
+    # 的 product.name 兜底不同——mainproductname 只能来自 version 块）
+    assert (
+        from_subscribe_callback({"product": {"name": "金蝶发票云"}})["ksmMainProductName"] is None
+    )
+
+
 # ---- field extraction ------------------------------------------------------
 
 

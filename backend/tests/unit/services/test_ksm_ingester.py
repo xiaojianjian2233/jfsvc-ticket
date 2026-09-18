@@ -113,9 +113,10 @@ def test_first_ingest_creates_customer_and_routes(ingest_world: Session) -> None
 
 
 def test_ksm_source_fields_persisted_on_first_ingest(ingest_world: Session) -> None:
-    """入库落 source_status + ksm_reporter_*/ksm_linkman/ksm_contact_*/ksm_close_node_*
-    （从 payload 的 sourceStatus/reporterProductLine/reporterModule/linkman/
-    contactMobile/contactEmail/closeNodeId/closeNodeName/closeNodeStatus）。"""
+    """入库落 source_status + ksm_reporter_*/ksm_linkman/ksm_contact_*/ksm_close_node_*/
+    ksm_main_product_name（从 payload 的 sourceStatus/reporterProductLine/reporterModule/
+    linkman/contactMobile/contactEmail/closeNodeId/closeNodeName/closeNodeStatus/
+    ksmMainProductName）。"""
     res = KSMIngester(ingest_world).ingest(
         _payload(
             sourceStatus="1",
@@ -127,6 +128,7 @@ def test_ksm_source_fields_persisted_on_first_ingest(ingest_world: Session) -> N
             closeNodeId="CR1",
             closeNodeName="已给方案",
             closeNodeStatus="1",
+            ksmMainProductName="金蝶发票云【星空旗舰版】公有云",
         )
     )
     ingest_world.commit()
@@ -142,6 +144,7 @@ def test_ksm_source_fields_persisted_on_first_ingest(ingest_world: Session) -> N
     assert ticket.ksm_close_node_id == "CR1"
     assert ticket.ksm_close_node_name == "已给方案"
     assert ticket.ksm_close_node_status == "1"
+    assert ticket.ksm_main_product_name == "金蝶发票云【星空旗舰版】公有云"
 
 
 def test_ksm_source_fields_synced_on_reingest_noop_path(ingest_world: Session) -> None:

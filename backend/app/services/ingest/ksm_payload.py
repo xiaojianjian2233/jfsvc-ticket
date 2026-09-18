@@ -129,6 +129,11 @@ def from_subscribe_callback(data: dict[str, Any]) -> dict[str, Any]:
         "content": data.get("problem"),
         "productLineCode": _resolve_product_line_code(data),
         "moduleName": module.get("name") or None,
+        # KSM 主产品名称原样值（version.mainproductname），未经归类映射；
+        # 工单列表「主产品」列 KSM 来源直接展示此值（与 productLineCode 归类结果区分）
+        "ksmMainProductName": (data.get("version") or {}).get("mainproductname")
+        if isinstance(data.get("version"), dict)
+        else None,
         # 接收工单状态（KSM status：1=受理/2=处理，原样落 source_status）
         "sourceStatus": str(status) if status is not None else None,
         # 提单产品线/模块原样值（KSM 侧原始名称，未经 _resolve_product_line_code

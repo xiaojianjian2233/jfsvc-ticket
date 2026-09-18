@@ -420,6 +420,7 @@ class KSMIngester:
         ticket.source_status = payload.get("sourceStatus")
         ticket.ksm_reporter_product_line = payload.get("reporterProductLine")
         ticket.ksm_reporter_module = payload.get("reporterModule")
+        ticket.ksm_main_product_name = payload.get("ksmMainProductName")
         ticket.ksm_linkman = payload.get("linkman")
         ticket.ksm_contact_mobile = payload.get("contactMobile")
         ticket.ksm_contact_email = payload.get("contactEmail")

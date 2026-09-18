@@ -511,6 +511,11 @@ class Ticket(Base):
     ksm_close_node_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     ksm_close_node_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
+    # KSM 主产品名称（迁移 0055）：version.mainproductname 原样字符串，未经
+    # _resolve_product_line_code 的归类映射（跟 ksm_reporter_product_line 取自
+    # product.name 不同源）。工单列表「主产品」列 KSM 来源直接展示此值。
+    ksm_main_product_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
     # KSM notice 凭证持久化（迁移 0044）：每次收到 webhook 推送时把最新
     # (noticeNum, subscribeNum) 同步落库，不设过期时间——之前只存 Redis（24h
     # TTL），过期后即使 KSM 服务端该凭证仍有效也拿不到，导致退回/重拉详情

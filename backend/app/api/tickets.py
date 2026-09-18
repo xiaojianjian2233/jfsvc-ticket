@@ -108,7 +108,9 @@ class TicketSummary(BaseModel):
     linear_status: str | None = (
         None  # 研发类所挂 hub 的 linear_status（镜像 Linear 列名）；「研发进度」列译中文展示
     )
-    product_name: str | None = None  # 主产品名称（product_line_code → product_lines.name）
+    # 主产品名称。KSM 来源：ksm_main_product_name（version.mainproductname 原样值，
+    # 未经归类映射）；其它来源暂无权威字段，留空（不回退 product_line_code→name）
+    product_name: str | None = None
     reject_count: int = 0  # 客户驳回次数（所挂 hub_issue 的 reject_count；研发类/无 hub 为 0）
     children_count: int = 1  # 关联任务数（拆分子单数；单问题=1，Parent=children_ticket_ids 长度）
     # 提单快照 + SLA（2026-08-04）
@@ -429,19 +431,17 @@ def list_tickets(
         hub_linear_status_map = {r.id: r.linear_status for r in hrows}
         hub_type_map = {r.id: r.type for r in hrows}
 
-    # batch-load 主产品名称 + SLA 解决时限（product_line_code → name / sla_resolve_hours）
-    # 已毕业工单以 hub 的 product_line_code 为准，故两处 code 都要并入名字查询集合
+    # batch-load SLA 解决时限（product_line_code → sla_resolve_hours）
+    # 已毕业工单以 hub 的 product_line_code 为准，故两处 code 都要并入查询集合
     pl_codes = {t.product_line_code for t in p.items if t.product_line_code}
     pl_codes |= {code for code in hub_plc_map.values() if code}
-    product_name_map: dict[str, str] = {}
     pl_resolve_hours_map: dict[str, int | None] = {}
     if pl_codes:
         prows = db.execute(
-            select(ProductLine.code, ProductLine.name, ProductLine.sla_resolve_hours).where(
+            select(ProductLine.code, ProductLine.sla_resolve_hours).where(
                 ProductLine.code.in_(pl_codes)
             )
         ).all()
-        product_name_map = {r.code: r.name for r in prows}
         pl_resolve_hours_map = {r.code: r.sla_resolve_hours for r in prows}
 
     now = datetime.now(UTC)
@@ -488,8 +488,9 @@ def list_tickets(
             hub_type = hub_type_map.get(t.hub_issue_id)
             if hub_type is not None:
                 s.predicted_type = hub_type
-        if s.product_line_code:
-            s.product_name = product_name_map.get(s.product_line_code)
+        # 主产品：KSM 来源直接用 version.mainproductname 原样值（未经归类映射）；
+        # 其它来源暂缺权威字段来源，先留空（不回退 product_line_code→name）
+        s.product_name = t.ksm_main_product_name if t.source_code == "ksm" else None
         # 关联任务数：拆分子单数（Parent 持有 children_ticket_ids）；单问题工单=1
         s.children_count = len(t.children_ticket_ids or []) or 1
         # 提单人信息从 reporter JSON 解析（入库写的是 name/mobile/email）

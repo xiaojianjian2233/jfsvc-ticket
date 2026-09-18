@@ -677,11 +677,62 @@ def test_filter_handler_user_ids_multi(app_client: TestClient, world2: Session) 
 
 
 def test_summary_product_name(app_client: TestClient, world2: Session) -> None:
-    """主产品名称：product_line_code=cloud-fapiao → name=发票云。"""
+    """主产品名称：KSM 来源无 ksm_main_product_name 时为 None（不回退 product_line_code→name）。"""
     r = app_client.get("/api/tickets", headers=_bearer())
     by = {it["short_code"]: it for it in r.json()["items"]}
-    assert by["TKT-A"]["product_name"] == "发票云"
+    assert by["TKT-A"]["product_name"] is None  # 有产品线但未设 ksm_main_product_name
     assert by["TKT-B"]["product_name"] is None  # 无产品线
+
+
+def test_summary_product_name_ksm_uses_main_product_name(
+    app_client: TestClient, world2: Session
+) -> None:
+    """KSM 来源：主产品名称直接取 ksm_main_product_name 原样值，不查 product_lines 表。"""
+    from app.models import Ticket
+
+    world2.add(
+        Ticket(
+            id=211,
+            short_code="TKT-KSM-MPN",
+            source_code="ksm",
+            source_ticket_id="mpn-1",
+            type="Raw",
+            status="received",
+            title="ksm main product",
+            product_line_code="cloud-fapiao",
+            ksm_main_product_name="金蝶发票云【星空旗舰版】公有云",
+            received_at=datetime(2026, 5, 6, 14, 0, tzinfo=UTC),
+        )
+    )
+    world2.commit()
+
+    r = app_client.get("/api/tickets", headers=_bearer())
+    by = {it["short_code"]: it for it in r.json()["items"]}
+    assert by["TKT-KSM-MPN"]["product_name"] == "金蝶发票云【星空旗舰版】公有云"
+
+
+def test_summary_product_name_non_ksm_is_none(app_client: TestClient, world2: Session) -> None:
+    """非 KSM 来源：即便有 product_line_code，主产品名称也留空（不回退归类结果）。"""
+    from app.models import Ticket
+
+    world2.add(
+        Ticket(
+            id=212,
+            short_code="TKT-ZHICHI-PL",
+            source_code="zhichi",
+            source_ticket_id="zc-1",
+            type="Raw",
+            status="received",
+            title="zhichi ticket",
+            product_line_code="cloud-fapiao",
+            received_at=datetime(2026, 5, 6, 15, 0, tzinfo=UTC),
+        )
+    )
+    world2.commit()
+
+    r = app_client.get("/api/tickets", headers=_bearer())
+    by = {it["short_code"]: it for it in r.json()["items"]}
+    assert by["TKT-ZHICHI-PL"]["product_name"] is None
 
 
 def test_summary_graduated_uses_hub_product_and_module(
@@ -729,7 +780,8 @@ def test_summary_graduated_uses_hub_product_and_module(
     edit = by["TKT-EDIT"]
     # 列表返回 hub 的新值，而非 ticket 的旧快照
     assert edit["product_line_code"] == "cloud-bill"
-    assert edit["product_name"] == "票据云"
+    # product_name 不再回退 product_line_code→name，KSM 来源未设 ksm_main_product_name 为 None
+    assert edit["product_name"] is None
     assert edit["module"] == "票据管理"
 
 
@@ -741,7 +793,8 @@ def test_summary_ungraduated_uses_ticket_product_and_module(
     by = {it["short_code"]: it for it in r.json()["items"]}
     # TKT-A 挂的 hub 50 没有 product_line_code/module → 不覆盖，保留 ticket 值
     assert by["TKT-A"]["product_line_code"] == "cloud-fapiao"
-    assert by["TKT-A"]["product_name"] == "发票云"
+    # product_name 不回退 product_line_code→name，未设 ksm_main_product_name 为 None
+    assert by["TKT-A"]["product_name"] is None
 
 
 def test_summary_and_detail_graduated_uses_hub_type_when_predicted_type_unset(
