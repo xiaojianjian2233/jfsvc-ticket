@@ -23,6 +23,7 @@ cache that handles rapid re-pushes correctly.
 from __future__ import annotations
 
 import hmac
+import traceback
 from collections.abc import Sequence
 from typing import Any
 
@@ -350,7 +351,9 @@ def _ksm_async_fetch_and_ingest(bill_id: str) -> None:
     # lock→重拉→handle），故 close 延后到最外层 finally。
     client = KSMClient(cfg)
     ingested_ticket_id: int | None = None
+    ingest_phase = "init"
     try:
+        ingest_phase = "fetch_detail"
         try:
             detail = client.get_order_detail(
                 bill_id=bill_id,
@@ -368,8 +371,19 @@ def _ksm_async_fetch_and_ingest(bill_id: str) -> None:
             logger.warning("ksm_async_detail_missing_billid", bill_id=bill_id)
             return
 
+        logger.info(
+            "ksm_async_ingest_started",
+            bill_id=bill_id,
+            notice_num=notice.notice_num,
+            subscribe_num=notice.subscribe_num,
+            source_bill_number=payload.get("billNumber"),
+            source_status=payload.get("sourceStatus"),
+            product_line_code=payload.get("productLineCode"),
+            module_name=payload.get("moduleName"),
+        )
         db = make_session()
         try:
+            ingest_phase = "ingest"
             try:
                 result = KSMIngester(db).ingest(payload)
             except KSMIngestError as e:
@@ -381,6 +395,7 @@ def _ksm_async_fetch_and_ingest(bill_id: str) -> None:
             # 依然能用）。落库后，Redis 过期时退回/重拉详情仍有得回落，不必人工
             # 去 KSM 系统翻找。每次成功拉取都覆盖为最新一次，见 writeback/takeover
             # 里的 _resolve_notice 消费方。
+            ingest_phase = "persist_notice_and_commit"
             ticket_row = db.get(Ticket, result.ticket_id)
             if ticket_row is not None:
                 ticket_row.ksm_notice_num = notice.notice_num
@@ -398,6 +413,7 @@ def _ksm_async_fetch_and_ingest(bill_id: str) -> None:
             # 派单（dispatch_handler，在 ingest 内）已拿到处理人 → 立即用该处理人
             # 身份接管 KSM，不再等 triage/模块归类/人工审核确认分类。分类判断仍走
             # 后续人工审核，与接管解耦——接管早晚不影响分流/推 Linear 的判断。
+            ingest_phase = "takeover"
             _run_ksm_takeover(
                 db,
                 ticket_id=result.ticket_id,
@@ -407,9 +423,18 @@ def _ksm_async_fetch_and_ingest(bill_id: str) -> None:
                 notice_store=_get_notice_store(),
                 settings=settings,
             )
-        except Exception:
+        except Exception as exc:
             db.rollback()
-            logger.exception("ksm_async_ingest_unexpected_failure", bill_id=bill_id)
+            logger.error(
+                "ksm_async_ingest_unexpected_failure",
+                bill_id=bill_id,
+                notice_num=notice.notice_num,
+                subscribe_num=notice.subscribe_num,
+                ingest_phase=ingest_phase,
+                exception_type=type(exc).__name__,
+                exception_message=str(exc),
+                traceback=traceback.format_exc(),
+            )
         finally:
             db.close()
     finally:

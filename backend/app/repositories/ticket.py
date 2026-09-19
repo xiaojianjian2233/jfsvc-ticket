@@ -67,13 +67,34 @@ class TicketRepository:
         return ticket
 
     def next_short_code(self, prefix: str = "TKT") -> str:
-        """Generate the next short_code by counting current rows + 1.
+        """Return an unused sequential short code.
 
-        D1 fast path: simple counter; D2+ may switch to a sequence/redis counter
-        if write contention becomes an issue.
+        Do not derive the next number from ``count(*)``: soft-deleted rows,
+        historical imports, and concurrent writers can all make ``count + 1``
+        point at an existing code.  Start after the largest numeric code we
+        have seen and explicitly skip occupied codes before returning.
         """
-        n: int | None = self._db.execute(select(func.count(Ticket.id))).scalar()
-        return f"{prefix}-{(n or 0) + 1:06d}"
+        marker = f"{prefix}-"
+        codes = self._db.execute(
+            select(Ticket.short_code).where(Ticket.short_code.like(f"{marker}%"))
+        ).scalars()
+        max_number = 0
+        for code in codes:
+            if not code.startswith(marker):
+                continue
+            suffix = code[len(marker) :]
+            if suffix.isdigit():
+                max_number = max(max_number, int(suffix))
+
+        candidate_number = max_number + 1
+        while True:
+            candidate = f"{marker}{candidate_number:06d}"
+            occupied = self._db.execute(
+                select(Ticket.id).where(Ticket.short_code == candidate).limit(1)
+            ).first()
+            if occupied is None:
+                return candidate
+            candidate_number += 1
 
     def quick_stats(self, *, visible_to_user_id: int | None = None) -> TicketQuickStats:
         """Return global quick-filter counts for the current user's visible tickets.
