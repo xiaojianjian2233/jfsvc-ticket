@@ -660,6 +660,8 @@ export function TicketsListPage() {
   const overdueFilter = params.get("overdue_status") ?? "";
   const sortBy = params.get("sort_by") ?? "";
   const sortOrder = params.get("sort_order") ?? "";
+  const requestedPageSize = Number(params.get("page_size") ?? "20");
+  const pageSize = [20, 50, 100].includes(requestedPageSize) ? requestedPageSize : 20;
   const [quickTag, setQuickTag] = useState<"green_vip" | "today" | "overdue" | "unassigned" | null>(null);
   const [headerFilters, setHeaderFilters] = useState<Record<string, HeaderFilterState>>({});
 
@@ -697,6 +699,7 @@ export function TicketsListPage() {
 
   const authUser = getAuthUser();
   const isSupervisor = authUser?.role === "supervisor" || authUser?.role === "admin";
+  const canTransfer = authUser?.role === "assignee" || isSupervisor;
 
   // 输入框本地态 + debounce 同步到 URL（避免每次击键都请求）
   const [sourceTicketInput, setSourceTicketInput] = useState(sourceTicketQ);
@@ -758,6 +761,7 @@ export function TicketsListPage() {
         opStatuses,
         unassigned,
         page,
+        pageSize,
         handlerUserIds,
         assignedUserIds: effectiveAssignedUserIds,
         predictedTypes,
@@ -805,7 +809,7 @@ export function TicketsListPage() {
         sort_by: sortBy || undefined,
         sort_order: sortOrder || undefined,
         page,
-        page_size: 50,
+        page_size: pageSize,
       }),
   });
 
@@ -870,8 +874,15 @@ export function TicketsListPage() {
     return Array.from(handlerNames).join("、");
   }, [items, selectedIds]);
 
-  const allSelected = items.length > 0 && items.every((t) => selectedIds.has(t.id));
-  const someSelected = items.some((t) => selectedIds.has(t.id)) && !allSelected;
+  const selectableItems = useMemo(
+    () =>
+      isSupervisor
+        ? items
+        : items.filter((t) => authUser?.role === "assignee" && t.handler_user_id === authUser.id),
+    [authUser?.id, authUser?.role, isSupervisor, items],
+  );
+  const allSelected = selectableItems.length > 0 && selectableItems.every((t) => selectedIds.has(t.id));
+  const someSelected = selectableItems.some((t) => selectedIds.has(t.id)) && !allSelected;
 
   useEffect(() => {
     if (headerCheckboxRef.current) {
@@ -950,7 +961,18 @@ export function TicketsListPage() {
     setSelectedIds(new Set());
   }
 
+  function setPageSize(size: number) {
+    const next = new URLSearchParams(params);
+    next.set("page_size", String(size));
+    next.set("page", "1");
+    setParams(next, { replace: true });
+    setSelectedIds(new Set());
+  }
+
   function toggleSelect(id: number) {
+    const ticket = items.find((t) => t.id === id);
+    const canSelect = isSupervisor || (authUser?.role === "assignee" && ticket?.handler_user_id === authUser.id);
+    if (!canSelect) return;
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -960,7 +982,7 @@ export function TicketsListPage() {
   }
 
   function toggleSelectAll() {
-    setSelectedIds(allSelected ? new Set() : new Set(items.map((t) => t.id)));
+    setSelectedIds(allSelected ? new Set() : new Set(selectableItems.map((t) => t.id)));
   }
 
   function setDateRange(fromKey: string, toKey: string, fromVal: string, toVal: string) {
@@ -1039,7 +1061,7 @@ export function TicketsListPage() {
   // ---- 列定义 --------------------------------------------------------------
   const columns = useMemo<ColumnDef<TicketSummary>[]>(() => {
     const cols: ColumnDef<TicketSummary>[] = [];
-    if (Boolean(authUser)) {
+    if (canTransfer) {
       cols.push({
         id: "select",
         header: () => (
@@ -1047,6 +1069,7 @@ export function TicketsListPage() {
             ref={headerCheckboxRef}
             type="checkbox"
             checked={allSelected}
+            disabled={selectableItems.length === 0}
             onChange={toggleSelectAll}
             className="rounded"
           />
@@ -1055,6 +1078,10 @@ export function TicketsListPage() {
           <input
             type="checkbox"
             checked={selectedIds.has(row.original.id)}
+            disabled={
+              !isSupervisor &&
+              !(authUser?.role === "assignee" && row.original.handler_user_id === authUser.id)
+            }
             onChange={() => toggleSelect(row.original.id)}
             className="rounded"
           />
@@ -1677,30 +1704,30 @@ export function TicketsListPage() {
     );
     return cols;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSupervisor, allSelected, selectedIds]);
+  }, [authUser?.id, authUser?.role, canTransfer, isSupervisor, allSelected, selectableItems, selectedIds]);
 
   // 冻结列：选择框 + 工单号 + 来源工单号（sticky left）
   // 冻结列：选择框 + 工单号 + 来源工单号（sticky left）
   const PINNED = useMemo(
     () =>
       new Set(
-        isSupervisor
+        canTransfer
           ? ["select", "short_code", "source_ticket_id"]
           : ["short_code", "source_ticket_id"],
       ),
-    [isSupervisor],
+    [canTransfer],
   );
 
   // 固定列偏移量：精确计算 select(0) -> short_code(36 或 0) -> source_ticket_id(36+105 或 105)
   const leftOffsets = useMemo(() => {
-    const selW = isSupervisor ? (columnSizing["select"] ?? 36) : 0;
+    const selW = canTransfer ? (columnSizing["select"] ?? 36) : 0;
     const scW = columnSizing["short_code"] ?? 105;
     return {
       select: 0,
       short_code: selW,
       source_ticket_id: selW + scW,
     };
-  }, [isSupervisor, columnSizing]);
+  }, [canTransfer, columnSizing]);
 
   function stickyStyle(colId: string, size: number, isHeader = false): React.CSSProperties {
     if (!PINNED.has(colId)) {
@@ -2036,7 +2063,7 @@ export function TicketsListPage() {
               <span>批量补充资料</span>
             </button>
           )}
-          {Boolean(authUser) && (
+          {canTransfer && (
             <button
               type="button"
               onClick={() => {
@@ -2267,6 +2294,19 @@ export function TicketsListPage() {
                 ? `当前页匹配 ${items.length} 条（服务端筛选共 ${tickets.data.total} 条）`
                 : `共 ${tickets.data.total} 条`}
             </div>
+            <label className="flex items-center gap-1.5 text-[11.5px] text-slate-600">
+              <span>每页</span>
+              <select
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+                className="h-[26px] px-1.5 border border-[#cbd5e1] rounded-[6px] bg-white text-xs text-slate-700 outline-none focus:border-hub-teal"
+                aria-label="每页条数"
+              >
+                <option value={20}>20 条</option>
+                <option value={50}>50 条</option>
+                <option value={100}>100 条</option>
+              </select>
+            </label>
             <div className="flex-1" />
             <button
               onClick={() => setPage(page - 1)}

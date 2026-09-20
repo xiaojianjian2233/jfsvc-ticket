@@ -642,6 +642,7 @@ export function TicketDetailPage() {
   // 外部/研发人员访问时，后端返回 can_operate=false，前端进入只读视图，隐藏所有操作按钮。
   const isPrivileged = isSupervisor();
   const isHandler = d?.handler_user_id != null && currentUserId() === d.handler_user_id;
+  const canTransfer = isPrivileged || (currentRole() === "assignee" && isHandler);
   const hasOperatePermission =
     (d as any)?.can_operate !== undefined
       ? Boolean((d as any).can_operate)
@@ -1086,7 +1087,7 @@ export function TicketDetailPage() {
                       </button>
 
                       {/* 3. 转派 */}
-                      {isSupervisor() && (
+                      {canTransfer && (
                         <button
                           type="button"
                           onClick={() => setTransferOpen(true)}
