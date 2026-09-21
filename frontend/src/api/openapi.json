@@ -20,6 +20,77 @@
         "title": "AckResponse",
         "type": "object"
       },
+      "AgentListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "AgentListResponse",
+        "type": "object"
+      },
+      "AgentOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "max_concurrent": {
+            "title": "Max Concurrent",
+            "type": "integer"
+          },
+          "nickname": {
+            "title": "Nickname",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "integer"
+          },
+          "user_name": {
+            "title": "User Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "user_name",
+          "nickname",
+          "max_concurrent",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AgentOut",
+        "type": "object"
+      },
       "AiCsStatusResponse": {
         "properties": {
           "configured": {
@@ -309,6 +380,40 @@
         "title": "AssigneeOut",
         "type": "object"
       },
+      "AssistantSearchItem": {
+        "properties": {
+          "extra": {
+            "additionalProperties": true,
+            "default": {},
+            "title": "Extra",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "snippet": {
+            "title": "Snippet",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "snippet",
+          "type"
+        ],
+        "title": "AssistantSearchItem",
+        "type": "object"
+      },
       "AttachmentOut": {
         "description": "工单附件（attachments 表行）——前端「工单描述」附件区展示用。\n\ndownload_url 指向后端代理端点，从 MinIO 拉流回吐（存档过的）或回落原始 source_url\n重新下载。前端不直接暴露 MinIO 内网地址 / 需鉴权的 source_url。",
         "properties": {
@@ -438,6 +543,22 @@
           "outbox_count"
         ],
         "title": "AuthorReplyResponse",
+        "type": "object"
+      },
+      "BatchRemoveAgentsBody": {
+        "properties": {
+          "agent_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Agent Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "agent_ids"
+        ],
+        "title": "BatchRemoveAgentsBody",
         "type": "object"
       },
       "BatchReviewBody": {
@@ -1017,6 +1138,33 @@
           "notifications_pending"
         ],
         "title": "CountsOut",
+        "type": "object"
+      },
+      "CreateAgentBody": {
+        "properties": {
+          "max_concurrent": {
+            "default": 5,
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Max Concurrent",
+            "type": "integer"
+          },
+          "nickname": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Nickname",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "user_id",
+          "nickname"
+        ],
+        "title": "CreateAgentBody",
         "type": "object"
       },
       "CreateDraftBody": {
@@ -2139,6 +2287,40 @@
         "title": "EditResponse",
         "type": "object"
       },
+      "EligibleUserOut": {
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "role"
+        ],
+        "title": "EligibleUserOut",
+        "type": "object"
+      },
       "EscalationContextResponse": {
         "properties": {
           "ai_answer": {
@@ -2759,6 +2941,24 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HandoverOfflineBody": {
+        "properties": {
+          "from_agent_id": {
+            "title": "From Agent Id",
+            "type": "integer"
+          },
+          "to_agent_id": {
+            "title": "To Agent Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "from_agent_id",
+          "to_agent_id"
+        ],
+        "title": "HandoverOfflineBody",
         "type": "object"
       },
       "HistoryEvent": {
@@ -4864,6 +5064,50 @@
         "title": "LoginUrlResponse",
         "type": "object"
       },
+      "MessageOut": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_read": {
+            "title": "Is Read",
+            "type": "boolean"
+          },
+          "sender_name": {
+            "title": "Sender Name",
+            "type": "string"
+          },
+          "sender_type": {
+            "title": "Sender Type",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "sender_type",
+          "sender_name",
+          "content",
+          "is_read",
+          "created_at"
+        ],
+        "title": "MessageOut",
+        "type": "object"
+      },
       "ModuleIn": {
         "properties": {
           "dev_owners": {
@@ -6927,6 +7171,66 @@
         "title": "SLAOut",
         "type": "object"
       },
+      "ScheduleSettings": {
+        "properties": {
+          "weekday_slots": {
+            "default": [
+              {
+                "end": "11:45",
+                "start": "09:00"
+              },
+              {
+                "end": "18:00",
+                "start": "13:30"
+              }
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ScheduleSlot"
+            },
+            "title": "Weekday Slots",
+            "type": "array"
+          },
+          "weekend_slots": {
+            "default": [
+              {
+                "end": "11:45",
+                "start": "09:00"
+              },
+              {
+                "end": "18:00",
+                "start": "13:30"
+              }
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ScheduleSlot"
+            },
+            "title": "Weekend Slots",
+            "type": "array"
+          }
+        },
+        "title": "ScheduleSettings",
+        "type": "object"
+      },
+      "ScheduleSlot": {
+        "properties": {
+          "end": {
+            "pattern": "^\\d{2}:\\d{2}$",
+            "title": "End",
+            "type": "string"
+          },
+          "start": {
+            "pattern": "^\\d{2}:\\d{2}$",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "ScheduleSlot",
+        "type": "object"
+      },
       "ScopeRowOut": {
         "properties": {
           "feature": {
@@ -7060,6 +7364,260 @@
           "short_code"
         ],
         "title": "SelfBugResponse",
+        "type": "object"
+      },
+      "SendMessageBody": {
+        "properties": {
+          "content": {
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "SendMessageBody",
+        "type": "object"
+      },
+      "SessionDetailOut": {
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/MessageOut"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "session": {
+            "$ref": "#/components/schemas/SessionListItemOut"
+          }
+        },
+        "required": [
+          "session",
+          "messages"
+        ],
+        "title": "SessionDetailOut",
+        "type": "object"
+      },
+      "SessionListItemOut": {
+        "properties": {
+          "agent_name": {
+            "title": "Agent Name",
+            "type": "string"
+          },
+          "agent_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent User Id"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "company_name": {
+            "title": "Company Name",
+            "type": "string"
+          },
+          "contact_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Name"
+          },
+          "contact_phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Phone"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "hotline_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hotline Status"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_human": {
+            "title": "Is Human",
+            "type": "boolean"
+          },
+          "last_message_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Message At"
+          },
+          "session_type": {
+            "title": "Session Type",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "tax_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax No"
+          },
+          "tenant_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Name"
+          },
+          "tenant_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant No"
+          },
+          "ticket_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticket Id"
+          },
+          "ticket_short_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticket Short Code"
+          },
+          "unread_count": {
+            "default": 0,
+            "title": "Unread Count",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "company_name",
+          "status",
+          "is_human",
+          "agent_name",
+          "session_type",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "SessionListItemOut",
+        "type": "object"
+      },
+      "SessionListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SessionListItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "SessionListResponse",
         "type": "object"
       },
       "SkillDetail": {
@@ -9746,6 +10304,118 @@
         "title": "TransferAttempt",
         "type": "object"
       },
+      "TransferTicketBody": {
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "remark": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remark"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "TransferTicketBody",
+        "type": "object"
+      },
+      "TransferUserOut": {
+        "description": "Active users that can be selected as a ticket transfer target.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "role",
+          "is_active"
+        ],
+        "title": "TransferUserOut",
+        "type": "object"
+      },
+      "UpdateAgentBody": {
+        "properties": {
+          "max_concurrent": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Concurrent"
+          },
+          "nickname": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nickname"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "pattern": "^(online|busy|offline)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "title": "UpdateAgentBody",
+        "type": "object"
+      },
       "UpdateAttributesBody": {
         "properties": {
           "module": {
@@ -10614,6 +11284,180 @@
         "title": "WebhookIntakeOut",
         "type": "object"
       },
+      "WorkbenchCardOut": {
+        "properties": {
+          "agent_name": {
+            "title": "Agent Name",
+            "type": "string"
+          },
+          "company_name": {
+            "title": "Company Name",
+            "type": "string"
+          },
+          "contact_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Name"
+          },
+          "contact_phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Phone"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_human": {
+            "title": "Is Human",
+            "type": "boolean"
+          },
+          "is_in_service": {
+            "default": "是（服务期内）",
+            "title": "Is In Service",
+            "type": "string"
+          },
+          "last_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Message"
+          },
+          "last_message_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Message At"
+          },
+          "purchased_products": {
+            "default": [
+              "发票云敏捷版",
+              "数电发票乐企模块"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Purchased Products",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tax_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax No"
+          },
+          "tenant_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Name"
+          },
+          "tenant_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant No"
+          },
+          "unread_count": {
+            "default": 0,
+            "title": "Unread Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "company_name",
+          "status",
+          "is_human",
+          "agent_name",
+          "created_at"
+        ],
+        "title": "WorkbenchCardOut",
+        "type": "object"
+      },
+      "WorkbenchCounts": {
+        "properties": {
+          "hotline_answered": {
+            "default": 0,
+            "title": "Hotline Answered",
+            "type": "integer"
+          },
+          "hotline_missed": {
+            "default": 0,
+            "title": "Hotline Missed",
+            "type": "integer"
+          },
+          "online_closed": {
+            "default": 0,
+            "title": "Online Closed",
+            "type": "integer"
+          },
+          "online_in_progress": {
+            "default": 0,
+            "title": "Online In Progress",
+            "type": "integer"
+          },
+          "online_pending": {
+            "default": 0,
+            "title": "Online Pending",
+            "type": "integer"
+          },
+          "online_queue": {
+            "default": 0,
+            "title": "Online Queue",
+            "type": "integer"
+          }
+        },
+        "title": "WorkbenchCounts",
+        "type": "object"
+      },
       "WorkbenchOut": {
         "properties": {
           "funnel": {
@@ -10657,6 +11501,29 @@
           "sources"
         ],
         "title": "WorkbenchOut",
+        "type": "object"
+      },
+      "WorkbenchQueueResponse": {
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/WorkbenchCounts"
+          },
+          "sessions": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/WorkbenchCardOut"
+              },
+              "type": "array"
+            },
+            "title": "Sessions",
+            "type": "object"
+          }
+        },
+        "required": [
+          "counts",
+          "sessions"
+        ],
+        "title": "WorkbenchQueueResponse",
         "type": "object"
       },
       "app__api__admin_users__SupervisorOut": {
@@ -15593,6 +16460,985 @@
         ]
       }
     },
+    "/api/reception/agents": {
+      "get": {
+        "description": "获取坐席列表，支持姓名、昵称、多状态过滤。",
+        "operationId": "list_agents_api_reception_agents_get",
+        "parameters": [
+          {
+            "description": "姓名模糊搜索",
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "姓名模糊搜索",
+              "title": "Name"
+            }
+          },
+          {
+            "description": "昵称模糊搜索",
+            "in": "query",
+            "name": "nickname",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "昵称模糊搜索",
+              "title": "Nickname"
+            }
+          },
+          {
+            "description": "逗号分隔的状态过滤: online,busy,offline",
+            "in": "query",
+            "name": "statuses",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "逗号分隔的状态过滤: online,busy,offline",
+              "title": "Statuses"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Agents",
+        "tags": [
+          "reception"
+        ]
+      },
+      "post": {
+        "description": "添加坐席。",
+        "operationId": "create_agent_api_reception_agents_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAgentBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Agent",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/agents/batch-remove": {
+      "post": {
+        "description": "批量移除坐席。",
+        "operationId": "batch_remove_agents_api_reception_agents_batch_remove_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchRemoveAgentsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Batch Remove Agents Api Reception Agents Batch Remove Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Remove Agents",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/agents/{agent_id}": {
+      "put": {
+        "description": "编辑坐席（昵称、接待上限、在线状态）。",
+        "operationId": "update_agent_api_reception_agents__agent_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAgentBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Agent",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/eligible-users": {
+      "get": {
+        "description": "获取系统基础配置中处于启用状态的人员（已配置在坐席中的可标记或全量可选）。",
+        "operationId": "get_eligible_users_api_reception_eligible_users_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EligibleUserOut"
+                  },
+                  "title": "Response Get Eligible Users Api Reception Eligible Users Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Eligible Users",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/sessions": {
+      "get": {
+        "description": "获取会话记录列表，支持企业名称、电话、状态多选、起止时间区间、转人工、接待人查询。",
+        "operationId": "list_sessions_api_reception_sessions_get",
+        "parameters": [
+          {
+            "description": "咨询企业",
+            "in": "query",
+            "name": "company_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "咨询企业",
+              "title": "Company Name"
+            }
+          },
+          {
+            "description": "联系人电话",
+            "in": "query",
+            "name": "contact_phone",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "联系人电话",
+              "title": "Contact Phone"
+            }
+          },
+          {
+            "description": "逗号分隔的会话状态",
+            "in": "query",
+            "name": "statuses",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "逗号分隔的会话状态",
+              "title": "Statuses"
+            }
+          },
+          {
+            "description": "创建时间起: YYYY-MM-DD HH:mm",
+            "in": "query",
+            "name": "start_time",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "创建时间起: YYYY-MM-DD HH:mm",
+              "title": "Start Time"
+            }
+          },
+          {
+            "description": "创建时间止: YYYY-MM-DD HH:mm",
+            "in": "query",
+            "name": "end_time",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "创建时间止: YYYY-MM-DD HH:mm",
+              "title": "End Time"
+            }
+          },
+          {
+            "description": "是否转人工: 不限|是|否",
+            "in": "query",
+            "name": "is_human",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "是否转人工: 不限|是|否",
+              "title": "Is Human"
+            }
+          },
+          {
+            "description": "最后接待人姓名",
+            "in": "query",
+            "name": "agent_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "最后接待人姓名",
+              "title": "Agent Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Sessions",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/sessions/{session_id}": {
+      "get": {
+        "description": "获取会话详情与全部对话记录。",
+        "operationId": "get_session_detail_api_reception_sessions__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Session Detail",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/settings/schedule": {
+      "get": {
+        "description": "获取坐席接待时间设置（工作日与节假日时间段）。",
+        "operationId": "get_schedule_settings_api_reception_settings_schedule_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleSettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Schedule Settings",
+        "tags": [
+          "reception"
+        ]
+      },
+      "put": {
+        "description": "保存坐席接待时间设置。",
+        "operationId": "update_schedule_settings_api_reception_settings_schedule_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleSettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Schedule Settings",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/workbench/assistant-search": {
+      "get": {
+        "description": "坐席助手多类型快捷搜索（知识库、工单、订单、企业权益）。",
+        "operationId": "assistant_search_api_reception_workbench_assistant_search_get",
+        "parameters": [
+          {
+            "description": "knowledge|ticket|order|benefit",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "default": "knowledge",
+              "description": "knowledge|ticket|order|benefit",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          {
+            "description": "查询关键字",
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "查询关键字",
+              "title": "Query",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AssistantSearchItem"
+                  },
+                  "title": "Response Assistant Search Api Reception Workbench Assistant Search Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Assistant Search",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/workbench/auto-dispatch": {
+      "post": {
+        "description": "根据接待时间区间和在线坐席容量，按先进先出与轮询（Round-Robin）原则自动分配排队会话。",
+        "operationId": "auto_dispatch_sessions_api_reception_workbench_auto_dispatch_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Auto Dispatch Sessions Api Reception Workbench Auto Dispatch Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auto Dispatch Sessions",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/workbench/handover-offline": {
+      "post": {
+        "description": "当前坐席切换离线时，将其进行中的会话批量转交给选定的在线坐席，并将原坐席状态更新为离线。",
+        "operationId": "handover_and_offline_api_reception_workbench_handover_offline_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HandoverOfflineBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Handover And Offline Api Reception Workbench Handover Offline Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Handover And Offline",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/workbench/sessions": {
+      "get": {
+        "description": "获取当前坐席工作台会话队列（按分类聚合统计与卡片列表）。",
+        "operationId": "get_workbench_sessions_api_reception_workbench_sessions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchQueueResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Workbench Sessions",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/workbench/sessions/{session_id}/activate": {
+      "post": {
+        "description": "【激活】挂起中的会话：移回进行中列表。",
+        "operationId": "activate_session_api_reception_workbench_sessions__session_id__activate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Activate Session Api Reception Workbench Sessions  Session Id  Activate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Activate Session",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/workbench/sessions/{session_id}/close": {
+      "post": {
+        "description": "【关闭】会话：发送结束通知并标记为已关闭。",
+        "operationId": "close_session_api_reception_workbench_sessions__session_id__close_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Close Session Api Reception Workbench Sessions  Session Id  Close Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Close Session",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/workbench/sessions/{session_id}/invite": {
+      "post": {
+        "description": "【邀请】排队中的会话进入进行中（不受坐席接待上限限制）。",
+        "operationId": "invite_session_api_reception_workbench_sessions__session_id__invite_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Invite Session Api Reception Workbench Sessions  Session Id  Invite Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Invite Session",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/workbench/sessions/{session_id}/send-message": {
+      "post": {
+        "description": "坐席在对话框中发送消息。",
+        "operationId": "send_agent_message_api_reception_workbench_sessions__session_id__send_message_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Send Agent Message",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/workbench/sessions/{session_id}/suspend": {
+      "post": {
+        "description": "【挂起】进行中的会话：发送系统提示并移入挂起列表。",
+        "operationId": "suspend_session_api_reception_workbench_sessions__session_id__suspend_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Suspend Session Api Reception Workbench Sessions  Session Id  Suspend Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Suspend Session",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/workbench/sessions/{session_id}/transfer-ticket": {
+      "post": {
+        "description": "【转工单】：创建工单并给客户自动回复工单编号。",
+        "operationId": "transfer_session_to_ticket_api_reception_workbench_sessions__session_id__transfer_ticket_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferTicketBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Transfer Session To Ticket Api Reception Workbench Sessions  Session Id  Transfer Ticket Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Transfer Session To Ticket",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
     "/api/supervisor/ai-cs/publish": {
       "post": {
         "description": "Publish a skill draft to production. If ticket_id is given, record a\nknowledge-revision audit row on that escalation ticket.",
@@ -17815,6 +19661,32 @@
           }
         },
         "summary": "Ticket Quick Stats",
+        "tags": [
+          "tickets"
+        ]
+      }
+    },
+    "/api/tickets/transfer-users": {
+      "get": {
+        "description": "List active users allowed as manual ticket-transfer targets.\n\nThis is intentionally separate from /api/admin/users: assignees may need\nto transfer their own tickets, but must not gain access to the admin user\nmanagement endpoint.",
+        "operationId": "list_transfer_users_api_tickets_transfer_users_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TransferUserOut"
+                  },
+                  "title": "Response List Transfer Users Api Tickets Transfer Users Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Transfer Users",
         "tags": [
           "tickets"
         ]

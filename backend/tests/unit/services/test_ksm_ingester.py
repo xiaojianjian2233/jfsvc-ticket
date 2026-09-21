@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from zoneinfo import ZoneInfo
+
 import pytest
 from sqlalchemy.orm import Session
 
@@ -18,7 +20,11 @@ from app.models import (
     Ticket,
     User,
 )
-from app.services.ingest.ksm_ingester import IngestError, KSMIngester
+from app.services.ingest.ksm_ingester import (
+    IngestError,
+    KSMIngester,
+    parse_ksm_create_datetime,
+)
 
 
 @pytest.fixture
@@ -69,6 +75,17 @@ def _payload(**overrides) -> dict:  # type: ignore[no-untyped-def]
     return base
 
 
+def test_parse_ksm_create_datetime_uses_beijing_timezone() -> None:
+    parsed = parse_ksm_create_datetime("2026-09-18 10:20:30")
+    assert parsed is not None
+    assert parsed.isoformat() == "2026-09-18T10:20:30+08:00"
+
+
+def test_parse_ksm_create_datetime_invalid_returns_none() -> None:
+    assert parse_ksm_create_datetime(None) is None
+    assert parse_ksm_create_datetime("not-a-time") is None
+
+
 # ---- happy path -----------------------------------------------------------
 
 
@@ -113,6 +130,58 @@ def test_first_ingest_creates_customer_and_routes(ingest_world: Session) -> None
     assert h.from_status is None
     assert h.to_status == "processing"
     assert h.changed_by == "system:ingest"
+
+
+def test_first_ingest_uses_ksm_create_datetime_as_received_at(ingest_world: Session) -> None:
+    res = KSMIngester(ingest_world).ingest(_payload(createDateTime="2026-09-18 10:20:30"))
+    ingest_world.commit()
+
+    ticket = ingest_world.get(Ticket, res.ticket_id)
+    assert ticket is not None
+    assert ticket.received_at.replace(tzinfo=ZoneInfo("Asia/Shanghai")).isoformat() == (
+        "2026-09-18T10:20:30+08:00"
+    )
+
+
+def test_reingest_refreshes_received_at_when_ksm_create_datetime_is_present(
+    ingest_world: Session,
+) -> None:
+    first = KSMIngester(ingest_world).ingest(
+        _payload(billId="ksm-created-at-reingest", createDateTime="2026-09-18 10:20:30")
+    )
+    ingest_world.commit()
+
+    KSMIngester(ingest_world).ingest(
+        _payload(billId="ksm-created-at-reingest", createDateTime="2026-09-18 10:20:31")
+    )
+    ingest_world.commit()
+
+    ticket = ingest_world.get(Ticket, first.ticket_id)
+    assert ticket is not None
+    assert ticket.received_at.replace(tzinfo=ZoneInfo("Asia/Shanghai")).isoformat() == (
+        "2026-09-18T10:20:31+08:00"
+    )
+
+
+def test_reingest_does_not_move_received_at_after_ticket_creation(
+    ingest_world: Session,
+) -> None:
+    first = KSMIngester(ingest_world).ingest(
+        _payload(billId="ksm-created-at-late", createDateTime="2026-09-18 10:20:30")
+    )
+    ingest_world.commit()
+    ticket = ingest_world.get(Ticket, first.ticket_id)
+    assert ticket is not None
+    original_received_at = ticket.received_at
+    original_created_at = ticket.created_at
+
+    KSMIngester(ingest_world).ingest(
+        _payload(billId="ksm-created-at-late", createDateTime="2099-09-18 10:20:31")
+    )
+    ingest_world.commit()
+
+    assert ticket.received_at == original_received_at
+    assert ticket.created_at == original_created_at
 
 
 def test_ksm_source_fields_persisted_on_first_ingest(ingest_world: Session) -> None:
@@ -694,6 +763,67 @@ def test_ingest_reopens_transferred_return_ticket(db_session, monkeypatch) -> No
     assert hub.linear_uuid is None
     assert hub.linear_identifier is None
     assert hub.op_status is None
+
+
+def test_ingest_status_6_reconciles_returned_state_and_stops_outbox(db_session) -> None:  # type: ignore[no-untyped-def]
+    """KSM 已退回是权威状态：本地收敛到转单退回，并停止失败任务继续重试。"""
+    from app.models import StatusHistory, SyncOutbox
+    from app.services.hub_issues.op_status import OP_PROCESSING, OP_TRANSFERRED_RETURN
+    from app.services.ingest import ksm_ingester as mod
+
+    existing, hub = _seed_existing_with_hub(
+        db_session,
+        op_status=OP_PROCESSING,
+        bill_id="bill-returned-sync-1",
+        short_code="TKT-RET-SYNC-1",
+        hub_short_code="HUB-RET-SYNC-1",
+    )
+    existing.status = "processing"
+    existing.process_stage = "服务处理"
+    existing.ksm_takeover_status = "handled"
+    row = SyncOutbox(
+        kind="return",
+        target_source_code="ksm",
+        ticket_id=existing.id,
+        source_ticket_id=existing.source_ticket_id,
+        hub_issue_id=hub.id,
+        payload={"deal_opinion": "非本模块"},
+        status="pending",
+        attempts=4,
+        last_error="未找到可退回的目标节点",
+    )
+    db_session.add(row)
+    db_session.commit()
+
+    result = mod.KSMIngester(db_session).ingest(
+        {"billId": existing.source_ticket_id, "sourceStatus": "6", "status": "6"}
+    )
+    db_session.commit()
+
+    assert result.deduped is True
+    db_session.refresh(existing)
+    db_session.refresh(hub)
+    db_session.refresh(row)
+    assert existing.source_status == "6"
+    assert existing.status == "transferred_return"
+    assert existing.process_stage == "完成"
+    assert existing.ksm_takeover_status is None
+    assert hub.status == "returned"
+    assert hub.op_status == OP_TRANSFERRED_RETURN
+    assert row.status == "skipped"
+    assert row.attempts == 4
+    assert row.last_error is not None and "status=6" in row.last_error
+    assert (
+        db_session.query(StatusHistory)
+        .filter(
+            StatusHistory.entity_type == "ticket",
+            StatusHistory.entity_id == existing.id,
+            StatusHistory.to_status == "transferred_return",
+            StatusHistory.changed_by == "system:ksm_ingest",
+        )
+        .count()
+        == 1
+    )
 
 
 def test_ingest_supplement_reopens_dev_ticket_without_op_status(db_session, monkeypatch) -> None:  # type: ignore[no-untyped-def]

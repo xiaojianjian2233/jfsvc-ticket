@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
 import random
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -19,7 +19,6 @@ from app.models import (
     ReceptionMessage,
     ReceptionSession,
     SystemSetting,
-    Ticket,
     User,
 )
 
@@ -242,7 +241,7 @@ class AssistantSearchItem(BaseModel):
 
 
 def generate_session_id(db: Session) -> str:
-    today_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+    today_str = datetime.now(UTC).strftime("%Y%m%d")
     prefix = f"ZXHH{today_str}"
     last_session = (
         db.query(ReceptionSession.id)
@@ -321,7 +320,9 @@ def create_agent(
 
     existing = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == body.user_id).first()
     if existing:
-        raise HTTPException(status_code=409, detail=f"用户【{target_user.name}】已是坐席，请直接编辑")
+        raise HTTPException(
+            status_code=409, detail=f"用户【{target_user.name}】已是坐席，请直接编辑"
+        )
 
     agent = ReceptionAgent(
         user_id=target_user.id,
@@ -492,9 +493,7 @@ def get_workbench_sessions(
     user: AuthedUser = Depends(require_user),
 ) -> WorkbenchQueueResponse:
     """获取当前坐席工作台会话队列（按分类聚合统计与卡片列表）。"""
-    all_sessions = (
-        db.query(ReceptionSession).order_by(desc(ReceptionSession.last_message_at)).all()
-    )
+    all_sessions = db.query(ReceptionSession).order_by(desc(ReceptionSession.last_message_at)).all()
 
     # 统计数量
     counts = WorkbenchCounts()
@@ -577,7 +576,7 @@ def invite_session(
 
     session.status = "in_progress"
     session.is_human = True
-    session.agent_user_id = user.id
+    session.agent_user_id = user.user_id
     session.agent_name = user.name
 
     sys_msg = ReceptionMessage(
@@ -654,7 +653,7 @@ def close_session(
         raise HTTPException(status_code=404, detail="会话不存在")
 
     session.status = "closed"
-    session.closed_at = datetime.now(timezone.utc)
+    session.closed_at = datetime.now(UTC)
 
     auto_msg = ReceptionMessage(
         session_id=session.id,
@@ -710,7 +709,7 @@ def send_agent_message(
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     msg = ReceptionMessage(
         session_id=session.id,
         sender_type="agent",
@@ -721,7 +720,7 @@ def send_agent_message(
     )
     session.last_message_at = now
     session.agent_last_replied_at = now
-    session.agent_user_id = user.id
+    session.agent_user_id = user.user_id
     session.agent_name = user.name
     db.add(msg)
     db.commit()
@@ -805,9 +804,7 @@ def assistant_search(
         ]
         for oid, title, snip in order_items:
             if not q or q in title or q in snip:
-                results.append(
-                    AssistantSearchItem(id=oid, title=title, snippet=snip, type="order")
-                )
+                results.append(AssistantSearchItem(id=oid, title=title, snippet=snip, type="order"))
 
     elif type == "benefit":
         benefit_items = [
@@ -856,12 +853,12 @@ def update_schedule_settings(
     json_val = json.dumps(body.model_dump())
     if setting:
         setting.value = json_val
-        setting.updated_by = user.id
+        setting.updated_by = user.user_id
     else:
         setting = SystemSetting(
             key=SETTING_KEY_SCHEDULE,
             value=json_val,
-            updated_by=user.id,
+            updated_by=user.user_id,
         )
         db.add(setting)
     db.commit()
@@ -904,7 +901,7 @@ def handover_and_offline(
         .all()
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for s in in_prog_sessions:
         s.agent_user_id = to_agent.user_id
         s.agent_name = to_agent.user_name
@@ -993,13 +990,12 @@ def auto_dispatch_sessions(
 
     # 4. 轮询分发
     dispatched_count = 0
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     agent_idx = 0
 
     for s in queue_sessions:
         # 寻找下一个还有剩余容量的坐席
         found = False
-        start_search = agent_idx
         for _ in range(len(agent_capacities)):
             curr = agent_capacities[agent_idx % len(agent_capacities)]
             agent_idx += 1
@@ -1033,4 +1029,3 @@ def auto_dispatch_sessions(
 
     db.commit()
     return {"dispatched": dispatched_count}
-

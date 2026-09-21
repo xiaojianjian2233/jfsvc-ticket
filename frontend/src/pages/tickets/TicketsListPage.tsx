@@ -92,7 +92,10 @@ const OP_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "transferred_return", label: "转单退回" },
 ];
 
-const DEFAULT_OP_STATUSES = ["processing", "reviewing", "supplementing"];
+// 默认只展示处理中/待审核；补充资料属于独立等待态，必须由用户明确勾选。
+// 之前把 supplementing 隐式塞进默认值，用户没有选择它时列表仍会出现补料单，
+// 造成筛选条件与页面认知不一致。
+const DEFAULT_OP_STATUSES = ["processing", "reviewing"];
 
 // v9: 新增【处理环节】列、替换提单企业为处理环节多选筛选
 const PREFS_KEY = "tickets_table_prefs_v20260909_process_stage";
@@ -646,7 +649,7 @@ export function TicketsListPage() {
   const processStagesKey = processStagesParam.join(",");
   const processStages = useMemo(() => processStagesParam, [processStagesKey]);
 
-  // 状态筛选条件多选：默认选中 处理中、补充重提、待审核
+  // 状态筛选条件多选：默认仅选中 处理中、待审核；补充资料需用户明确选择
   // 当用户在处理环节中选择「完成」或「全部」时，若未指定处理状态，默认不限定仅查进行中，允许后端返回已完成工单
   const isOpStatusSpecified = params.has("op_statuses") || params.has("op_status");
   const rawOpStatuses = params.getAll("op_statuses").filter(Boolean);
@@ -1936,7 +1939,7 @@ export function TicketsListPage() {
               onChange={handleSourceCodesChange}
             />
 
-            {/* 3. 处理状态多选（默认选中：处理中、补充重提、待审核） */}
+            {/* 3. 处理状态多选（默认选中：处理中、待审核） */}
             <MultiCheckDropdown
               placeholder="全部处理状态"
               options={OP_STATUS_OPTIONS}

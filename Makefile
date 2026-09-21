@@ -1,4 +1,4 @@
-.PHONY: help gen-types check-types backend-test frontend-test test eval-routing
+.PHONY: help gen-types check-types backend-test frontend-test test eval-routing deploy-uat deploy-sit
 
 help:
 	@echo "Top-level targets:"
@@ -8,6 +8,8 @@ help:
 	@echo "  frontend-test Run frontend type-check + unit"
 	@echo "  test         backend-test + frontend-test"
 	@echo "  eval-routing Run D1 routing replay against tests/eval/routing_v1.jsonl"
+	@echo "  deploy-uat   Build, publish, and verify the UAT frontend"
+	@echo "  deploy-sit   Pull old-repository code, deploy, and verify SIT"
 	@echo ""
 	@echo "Per-stack: cd backend / frontend / cli and use their own Makefile / npm scripts."
 
@@ -39,3 +41,9 @@ test: backend-test frontend-test
 
 eval-routing:
 	$(MAKE) -C backend eval-routing
+
+deploy-uat:
+	./deploy/deploy-uat.sh
+
+deploy-sit:
+	./deploy/deploy-sit.sh

@@ -147,6 +147,17 @@ class TicketSummary(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TransferUserOut(BaseModel):
+    """Active users that can be selected as a ticket transfer target."""
+
+    id: int
+    name: str
+    role: str
+    is_active: bool
+
+    model_config = {"from_attributes": True}
+
+
 class AttachmentOut(BaseModel):
     """工单附件（attachments 表行）——前端「工单描述」附件区展示用。
 
@@ -295,6 +306,30 @@ def ticket_quick_stats(
         today=stats.today,
         overdue=stats.overdue,
     )
+
+
+@router.get("/transfer-users", response_model=list[TransferUserOut])
+def list_transfer_users(
+    _user: AuthedUser = Depends(require_user),
+    db: Session = Depends(get_session),
+) -> list[TransferUserOut]:
+    """List active users allowed as manual ticket-transfer targets.
+
+    This is intentionally separate from /api/admin/users: assignees may need
+    to transfer their own tickets, but must not gain access to the admin user
+    management endpoint.
+    """
+    rows = (
+        db.query(User)
+        .filter(
+            User.is_active.is_(True),
+            User.deleted_at.is_(None),
+            User.role.in_(["assignee", "supervisor", "admin"]),
+        )
+        .order_by(User.name.asc(), User.id.asc())
+        .all()
+    )
+    return [TransferUserOut.model_validate(row) for row in rows]
 
 
 @router.get("", response_model=TicketListResponse)

@@ -28,6 +28,14 @@
 
 ## 日常更新
 
+推荐在老仓库 `https://github.com/invagent/ticket-hub.git` 的独立 checkout 中执行：
+
+```bash
+make deploy-sit
+```
+
+该入口会校验仓库归属，拉取老仓库 `main`，重建 SIT 后端/worker/beat 和前端，并校验首页、健康接口及首页引用的 JS/CSS。新仓库的 checkout 会被直接拒绝，不能用于 SIT 部署。
+
 ```bash
 ssh root@43.139.250.182
 cd /data/hub-issue && git pull

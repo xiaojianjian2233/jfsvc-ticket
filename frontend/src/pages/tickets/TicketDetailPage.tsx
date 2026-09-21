@@ -5309,7 +5309,7 @@ function SubTicketList({
   );
 }
 
-// ---- 可搜索单选处理人（自包含，复用 /api/admin/users + MultiUserSelect 搜索弹层视觉） ----
+// ---- 可搜索单选处理人（复用转派候选人接口 + MultiUserSelect 搜索弹层视觉） ----
 function SearchableUserSelect({
   value,
   onChange,
@@ -5320,8 +5320,8 @@ function SearchableUserSelect({
   placeholder?: string;
 }) {
   const q = useQuery({
-    queryKey: ["admin", "users"],
-    queryFn: () => api.get("/api/admin/users"),
+    queryKey: ["ticket-transfer-users"],
+    queryFn: () => api.get("/api/tickets/transfer-users"),
     staleTime: 60_000,
   });
   // 不限角色：真实处理人大量是 member（指派无角色限制），只排除已停用用户。

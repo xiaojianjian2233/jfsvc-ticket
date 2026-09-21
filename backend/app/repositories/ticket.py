@@ -54,11 +54,18 @@ class TicketRepository:
 
     def find_by_source(self, source_code: str, source_ticket_id: str) -> Ticket | None:
         """Idempotency lookup: a webhook may fire multiple times for the same bill."""
-        stmt = select(Ticket).where(
-            Ticket.source_code == source_code,
-            Ticket.source_ticket_id == source_ticket_id,
-            Ticket.deleted_at.is_(None),
+        stmt = (
+            select(Ticket)
+            .where(
+                Ticket.source_code == source_code,
+                Ticket.source_ticket_id == source_ticket_id,
+                Ticket.deleted_at.is_(None),
+            )
+            .order_by(Ticket.id.asc())
+            .limit(1)
         )
+        # ``limit(1)`` also keeps legacy duplicate rows from raising
+        # MultipleResultsFound while the source-specific cleanup is performed.
         return self._db.execute(stmt).scalar_one_or_none()
 
     def add(self, ticket: Ticket) -> Ticket:
@@ -141,14 +148,14 @@ class TicketRepository:
             stmt = stmt.where(Ticket.handler_user_id == visible_to_user_id)
         rows = self._db.execute(stmt).all()
         now = datetime.now(UTC)
-        today = now.astimezone(_BEIJING).date()
+        today_date = now.astimezone(_BEIJING).date()
         green_vip = today_count = overdue = 0
         for ticket, product_sla_hours in rows:
             if self._is_green_vip(ticket.service_level):
                 green_vip += 1
             if (
                 ticket.created_at is not None
-                and self._as_utc(ticket.created_at).astimezone(_BEIJING).date() == today
+                and self._as_utc(ticket.created_at).astimezone(_BEIJING).date() == today_date
             ):
                 today_count += 1
             if self._is_overdue(ticket, product_sla_hours, now):

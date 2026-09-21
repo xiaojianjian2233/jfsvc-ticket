@@ -71,6 +71,7 @@ export const defaultHandlers = [
   http.get("*/api/admin/product-lines", () =>
     HttpResponse.json([{ code: "cloud-erp", name: "云ERP", is_active: true }]),
   ),
+  http.get("*/api/tickets/transfer-users", () => HttpResponse.json([])),
   http.get("*/api/hub-issues/catalog/modules", () =>
     HttpResponse.json(["m1", "m2", "base"]),
   ),

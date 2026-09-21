@@ -133,7 +133,7 @@ def compute_ticket_analytics(
         .exists()
     )
 
-    def count_matching(condition):
+    def count_matching(condition: ColumnElement[bool]) -> int:
         return db.scalar(select(func.count(Ticket.id)).where(flt, condition)) or 0
 
     total = db.execute(select(func.count()).select_from(Ticket).where(flt)).scalar() or 0
