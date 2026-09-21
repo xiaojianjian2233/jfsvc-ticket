@@ -8,7 +8,7 @@ help:
 	@echo "  frontend-test Run frontend type-check + unit"
 	@echo "  test         backend-test + frontend-test"
 	@echo "  eval-routing Run D1 routing replay against tests/eval/routing_v1.jsonl"
-	@echo "  deploy-uat   Build, publish, and verify the UAT frontend"
+	@echo "  deploy-uat   Deploy and verify the complete UAT stack"
 	@echo "  deploy-sit   Pull old-repository code, deploy, and verify SIT"
 	@echo ""
 	@echo "Per-stack: cd backend / frontend / cli and use their own Makefile / npm scripts."

@@ -51,7 +51,8 @@ make deploy-sit
 rsync -av --delete backend/ rnd@106.55.57.40:/data/ticket-hub-uat/backend/ \
   --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' \
   --exclude='.env*' --exclude='htmlcov' --exclude='.pytest_cache' \
-  --exclude='.mypy_cache' --exclude='.ruff_cache'
+  --exclude='.mypy_cache' --exclude='.ruff_cache' --exclude='.coverage' \
+  --exclude='celerybeat-schedule' --exclude='ksm-paused'
 
 # 步骤 2：重启 UAT 容器服务（包含 worker-beat 定时调度）
 ssh rnd@106.55.57.40 "cd /data/ticket-hub-uat/deploy && sudo docker-compose -f docker-compose.uat.yml --profile automation up -d --force-recreate"
@@ -69,7 +70,7 @@ cd frontend && VITE_PUBLIC_BASE=/ticket-hub-uat/ VITE_API_BASE=/ticket-hub-uat n
 rsync -av --delete dist/ rnd@106.55.57.40:/data/ticket-hub-uat/frontend-dist/
 ```
 
-推荐直接使用仓库内的固化流程，它会固定 UAT 路径，并在发布后检查首页、健康接口以及首页引用的全部 JS/CSS：
+推荐直接使用仓库内的固化流程。它会同步后端（保护 `.env` 和运行时目录）、重建 backend/worker/beat、升级所有 Alembic heads、构建并发布前端，最后检查首页、健康接口以及首页引用的全部 JS/CSS：
 
 ```bash
 ./deploy/deploy-uat.sh
@@ -92,7 +93,7 @@ UAT_PUBLIC_ORIGIN=http://dl.piaozone.com:18025 ./deploy/deploy-uat.sh
 当后端增加了新的数据库迁移脚本（`migrations/versions/`）时执行：
 
 ```bash
-ssh rnd@106.55.57.40 "sudo docker exec ticket-hub-uat-backend alembic upgrade head"
+ssh rnd@106.55.57.40 "sudo docker exec ticket-hub-uat-backend alembic upgrade heads"
 ```
 
 ---
