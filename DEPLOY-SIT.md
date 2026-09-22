@@ -10,11 +10,11 @@
 | 服务器 | `root@43.139.250.182`（Ubuntu 22.04）|
 | 访问地址 | http://43.139.250.182/hub-issue/ |
 | 后端端口 | 9095（nginx `/hub-issue/` 反代）|
-| git 部署根 | `/data/hub-issue/`（`invagent/ticket-hub` 的克隆）|
+| git 部署根 | `/data/hub-issue/`（`xiaojianjian2233/jfsvc-ticket` 的克隆）|
 | 配置 | `/data/hub-issue/deploy/.env`（**不提交 git**；含 PG/Redis 口令 + 各密钥）|
 | 数据库 | `106.55.57.40:5432 / ticket_hub_sit`（远程托管，口令见 `deploy/.env`）|
 | Redis | `106.55.57.40:6379/1`（远程；口令见 `deploy/.env`）|
-| GitHub 鉴权 | 服务器只读 deploy key（`~/.ssh/ticket-hub-deploy`，host 别名 `github-ticket-hub`）|
+| GitHub 鉴权 | 服务器部署密钥；发布包由本机 UAT 仓库同步到 SIT|
 
 ## 容器（`deploy/docker-compose.sit.yml`）
 
@@ -28,13 +28,13 @@
 
 ## 日常更新
 
-推荐在老仓库 `https://github.com/invagent/ticket-hub.git` 的独立 checkout 中执行：
+在 UAT 仓库 `https://github.com/xiaojianjian2233/jfsvc-ticket.git` 的独立 checkout 中执行：
 
 ```bash
 make deploy-sit
 ```
 
-该入口会校验仓库归属，拉取老仓库 `main`，重建 SIT 后端/worker/beat 和前端，并校验首页、健康接口及首页引用的 JS/CSS。新仓库的 checkout 会被直接拒绝，不能用于 SIT 部署。
+该入口会校验 UAT 仓库归属，重建 SIT 后端/worker/beat 和前端，并校验首页、健康接口及首页引用的 JS/CSS。
 
 ```bash
 ssh root@43.139.250.182
