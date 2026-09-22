@@ -607,7 +607,7 @@ def suspend_session(
 
     session.status = "pending"
 
-    agent_record = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == user.id).first()
+    agent_record = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == user.user_id).first()
     agent_display_name = agent_record.nickname if (agent_record and agent_record.nickname) else user.name
 
     # 系统自动回复客户
@@ -672,7 +672,7 @@ def close_session(
 @router.post("/workbench/sessions/{session_id}/transfer-ticket")
 def convert_to_ticket(
     session_id: str,
-    body: ConvertTicketBody,
+    body: TransferTicketBody,
     db: Session = Depends(get_session),
     user: AuthedUser = Depends(require_user),
 ) -> dict[str, Any]:
@@ -681,7 +681,7 @@ def convert_to_ticket(
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
 
-    agent_record = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == user.id).first()
+    agent_record = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == user.user_id).first()
     agent_display_name = agent_record.nickname if (agent_record and agent_record.nickname) else user.name
 
     # 生成模拟/关联工单
