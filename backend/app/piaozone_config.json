@@ -1,0 +1,20 @@
+{
+  "_description": "基础平台-RPA订单系统接口配置（按企业名称或税号查询租户信息）",
+  "active_env": "sit",
+  "rpa_platform": {
+    "sit": {
+      "host": "https://api-sit.piaozone.com",
+      "endpoint": "/trdPlatform/tenant/query/by/company",
+      "client_id": "PLT_Xs3NMn3IGxRZm8fUp",
+      "client_secret": "1d62e545ec36419c9a77790c17d59059",
+      "description": "基础平台-RPA订单系统（SIT测试环境，已联调验证通过）"
+    },
+    "prod": {
+      "host": "https://api.piaozone.com",
+      "endpoint": "/trdPlatform/tenant/query/by/company",
+      "client_id": "PLT_ORLoGsiuYFCDFYIbn",
+      "client_secret": "2a57c48a04fa43a691ba3cfe6f142de5",
+      "description": "基础平台-RPA订单系统（PROD生产环境）"
+    }
+  }
+}

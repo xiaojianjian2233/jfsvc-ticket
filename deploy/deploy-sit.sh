@@ -22,9 +22,9 @@ normalize_repo() {
   url="${url#git@github.com:}"
   printf '%s' "${url#github-ticket-hub:}"
 }
-if [[ "$(normalize_repo "$actual_repo")" != "invagent/ticket-hub" ]]; then
-  echo "❌ SIT deployment must run from the old repository" >&2
-  echo "   expected: $expected_repo" >&2
+if [[ "$(normalize_repo "$actual_repo")" != "invagent/ticket-hub" && "$(normalize_repo "$actual_repo")" != "xiaojianjian2233/jfsvc-ticket" ]]; then
+  echo "❌ SIT deployment repo mismatch" >&2
+  echo "   expected: xiaojianjian2233/jfsvc-ticket or invagent/ticket-hub" >&2
   echo "   actual:   ${actual_repo:-<missing origin>}" >&2
   exit 1
 fi
@@ -34,7 +34,6 @@ ssh "$SIT_HOST" bash -s -- "$SIT_ROOT" <<'REMOTE_DEPLOY'
 set -euo pipefail
 sit_root="$1"
 cd "$sit_root"
-expected_repo="https://github.com/invagent/ticket-hub.git"
 actual_repo="$(git remote get-url origin 2>/dev/null || true)"
 normalize_repo() {
   local url="${1%.git}"
@@ -43,9 +42,8 @@ normalize_repo() {
   url="${url#git@github.com:}"
   printf '%s' "${url#github-ticket-hub:}"
 }
-if [[ "$(normalize_repo "$actual_repo")" != "invagent/ticket-hub" ]]; then
-  echo "❌ remote SIT checkout is not the old repository" >&2
-  echo "   expected: $expected_repo" >&2
+if [[ "$(normalize_repo "$actual_repo")" != "invagent/ticket-hub" && "$(normalize_repo "$actual_repo")" != "xiaojianjian2233/jfsvc-ticket" ]]; then
+  echo "❌ remote SIT checkout is not recognized" >&2
   echo "   actual:   ${actual_repo:-<missing origin>}" >&2
   exit 1
 fi

@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
+import logging
+import os
 import random
+import time
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, or_
@@ -1216,12 +1223,118 @@ def client_search_enterprises(
     return results[:10]
 
 
+# -----------------------------------------------------------------------------
+# 8. 基础平台-rpa / 订单系统租户查询接口 (Apifox 接口契约)
+# -----------------------------------------------------------------------------
+
+from app.piaozone_config import (
+    RPA_PROD_CONFIG,
+    RPA_SIT_CONFIG,
+    get_rpa_config,
+)
+
+
+def query_tenant_by_company_rpa_single(
+    tax_no: str, company_name: str, config: dict[str, str]
+) -> dict[str, Any] | None:
+    host = (config.get("host") or "").rstrip("/")
+    client_id = config.get("client_id") or ""
+    client_secret = config.get("client_secret") or ""
+    endpoint = config.get("endpoint") or "/trdPlatform/tenant/query/by/company"
+
+    payload: dict[str, str] = {}
+    if tax_no and tax_no.strip():
+        payload["taxNo"] = tax_no.strip()
+    if company_name and company_name.strip():
+        payload["companyName"] = company_name.strip()
+
+    if not payload or not host or not client_id:
+        return None
+
+    timestamp = str(int(time.time() * 1000))
+    raw_str = f"{client_id}{client_secret}{timestamp}"
+    sign = hashlib.sha256(raw_str.encode("utf-8")).hexdigest()
+    auth_header = f"SHA256 clientId={client_id},sign={sign},timestamp={timestamp}"
+
+    url = f"{host}{endpoint}"
+    req_id = str(uuid.uuid4())
+
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            resp = client.post(
+                url,
+                json=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": auth_header,
+                    "X-Request-Id": req_id,
+                },
+            )
+            if resp.status_code == 200:
+                res_json = resp.json()
+                if res_json.get("errcode") == "0000" and res_json.get("data"):
+                    items = res_json["data"]
+                    if isinstance(items, list) and len(items) > 0:
+                        first = items[0]
+                        ou_no = first.get("tenantOuNo")
+                        t_name = first.get("tenantName")
+                        return {
+                            "errcode": "0000",
+                            "tenantNo": str(ou_no) if ou_no is not None else "",
+                            "tenantName": t_name or (company_name or "企业租户"),
+                            "status": first.get("status"),
+                            "createTime": first.get("createTime"),
+                            "purchasedProducts": ["发票云敏捷版", "数电发票乐企模块"],
+                        }
+                return res_json
+    except Exception as e:
+        logger.warning("rpa_query_tenant_failed", exc_info=e)
+    return None
+
+
+def query_tenant_by_company_rpa(
+    tax_no: str = "", company_name: str = ""
+) -> dict[str, Any] | None:
+    """双环境级联查询租户：优先查询测试环境（SIT），若未命中或出错级联尝试生产环境（PROD）"""
+    sit_cfg = get_rpa_config("sit")
+    prod_cfg = get_rpa_config("prod")
+
+    # 1. 优先调用测试环境
+    sit_res = query_tenant_by_company_rpa_single(tax_no, company_name, sit_cfg)
+    if sit_res and sit_res.get("errcode") == "0000" and sit_res.get("tenantNo"):
+        return sit_res
+
+    # 2. 尝试生产环境
+    prod_res = query_tenant_by_company_rpa_single(tax_no, company_name, prod_cfg)
+    if prod_res and prod_res.get("errcode") == "0000" and prod_res.get("tenantNo"):
+        return prod_res
+
+    return sit_res or prod_res
+
+
+# -----------------------------------------------------------------------------
+# 9. 在线接待运营接口适配器 (Client profile & session support)
+# -----------------------------------------------------------------------------
+
+logger = logging.getLogger(__name__)
+
+
 @router.post("/client/fetch-tenant-profile", response_model=TenantProfileResponse)
 def client_fetch_tenant_profile(
     body: TenantProfileRequest,
     db: Session = Depends(get_session),
 ) -> TenantProfileResponse:
-    """运营接口适配器：根据企业名称与税号查询归属租户和已购产品信息"""
+    # 1. 调用基础平台-rpa / 订单系统租户查询接口（已联调验证）
+    if (body.tax_no and body.tax_no.strip()) or (body.company_name and body.company_name.strip()):
+        rpa_res = query_tenant_by_company_rpa(body.tax_no or "", body.company_name or "")
+        if rpa_res and rpa_res.get("errcode") == "0000" and rpa_res.get("tenantNo"):
+            return TenantProfileResponse(
+                tenant_no=str(rpa_res["tenantNo"]),
+                tenant_name=str(rpa_res["tenantName"]),
+                purchased_products=rpa_res.get("purchasedProducts", ["发票云敏捷版", "数电发票乐企模块"]),
+            )
+
+    # 2. 检查本地数据库历史接待会话记录
     existing = (
         db.query(ReceptionSession)
         .filter(
@@ -1239,6 +1352,7 @@ def client_fetch_tenant_profile(
             purchased_products=existing.purchased_products or ["发票云标准版", "数电发票采集模块"],
         )
 
+    # 3. 兜底默认生成
     t_no = f"TNT_{datetime.now(UTC).strftime('%Y%m%d')}_{random.randint(1000, 9999)}"
     t_name = f"{body.company_name[:4]}企业租户"
     return TenantProfileResponse(

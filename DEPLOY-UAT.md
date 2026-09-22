@@ -25,21 +25,17 @@
 
 ## 二、常用部署流程
 
-### 0. 环境与仓库边界（强制）
+### 0. 环境与部署约定
 
-- UAT 只能从新仓库 `https://github.com/xiaojianjian2233/jfsvc-ticket.git` 部署。
-- SIT 只能从老仓库 `https://github.com/invagent/ticket-hub.git` 部署。
-- 两个部署脚本都会校验当前 checkout 的 `origin`，仓库不匹配时立即退出，不执行远程操作。
-- 本仓库的 `origin` 是新仓库；SIT 部署必须在老仓库的独立 checkout 中执行。
+- **单一代码仓库**：只保留一个仓库即 UAT 仓库（`origin` / `uat`：`https://github.com/xiaojianjian2233/jfsvc-ticket.git`）。
+- **SIT 部署**：目标服务器为 `ssh root@43.139.250.182`（`make deploy-sit`）。
+- **UAT 部署**：目标服务器为 `ssh rnd@106.55.57.40:22`（`make deploy-uat`）。
 
-推荐入口：
+推荐部署入口：
 
 ```bash
-# 新仓库 checkout：部署 UAT
-make deploy-uat
-
-# 老仓库 checkout：部署 SIT
-make deploy-sit
+make deploy-uat   # 部署至 UAT 环境（106.55.57.40）
+make deploy-sit   # 部署至 SIT 环境（43.139.250.182）
 ```
 
 ### 1. 更新后端代码（日常改动）

@@ -28,13 +28,13 @@
 
 ## 日常更新
 
-在 UAT 仓库 `https://github.com/xiaojianjian2233/jfsvc-ticket.git` 的独立 checkout 中执行：
+在仓库中执行：
 
 ```bash
 make deploy-sit
 ```
 
-该入口会校验 UAT 仓库归属，重建 SIT 后端/worker/beat 和前端，并校验首页、健康接口及首页引用的 JS/CSS。
+该入口连接 SIT 主机 `root@43.139.250.182`，更新 `/data/hub-issue`，重建 SIT 后端/worker/beat 和前端，并校验首页、健康接口及静态资源。
 
 ```bash
 ssh root@43.139.250.182

@@ -17,11 +17,13 @@ Monorepo，三个独立子栈：
 - `docs/adr/` — 架构决策记录（已采纳：0001/0002/0005/0012）
 - `docs/spec/` — data_model / api / routing 三份规格草案
 
-## Git 提交与推送规范（核心记忆）
+## Git 仓库与环境部署规范（核心约定）
 
-- **默认推送目标**：后续日常代码提交与推送**默认只推送到 UAT 环境**（`uat`: `https://github.com/xiaojianjian2233/jfsvc-ticket.git`）。
-- **SIT 推送限制**：**严禁默认推送到 SIT 环境**（`sit`: `https://github.com/invagent/ticket-hub.git`）。**除非用户明确发出指令要求推送到 SIT，否则绝不推送至 SIT**。
-- **本地分支追踪**：本地 `main` 分支默认关联并跟踪 `uat/main`。
+- **单一仓库约定**：目前**只保留一个仓库即 UAT 仓库**（`origin` / `uat`：`https://github.com/xiaojianjian2233/jfsvc-ticket.git`）。后续用户直接说**“提交到git仓库”**（或“提交git”、“推送到git”），**一律表示提交并推送到此 UAT 仓库**。
+- **环境划分与部署目标**：
+  - **SIT 环境**：主机为 `ssh root@43.139.250.182`。后续用户直接说**“部署到sit”**（或“部署SIT”），**即指部署到 `43.139.250.182` 机器**。
+  - **UAT 环境**：主机为 `ssh rnd@106.55.57.40:22`。
+- **本地分支追踪**：本地 `main` 分支默认关联并跟踪 `uat/main`（与 `origin/main` 一致）。
 
 ## 2026-09-21 KSM 退回状态对账
 
