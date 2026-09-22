@@ -25,6 +25,23 @@
 
 ## 二、常用部署流程
 
+### 0. 环境与仓库边界（强制）
+
+- UAT 只能从新仓库 `https://github.com/xiaojianjian2233/jfsvc-ticket.git` 部署。
+- SIT 只能从老仓库 `https://github.com/invagent/ticket-hub.git` 部署。
+- 两个部署脚本都会校验当前 checkout 的 `origin`，仓库不匹配时立即退出，不执行远程操作。
+- 本仓库的 `origin` 是新仓库；SIT 部署必须在老仓库的独立 checkout 中执行。
+
+推荐入口：
+
+```bash
+# 新仓库 checkout：部署 UAT
+make deploy-uat
+
+# 老仓库 checkout：部署 SIT
+make deploy-sit
+```
+
 ### 1. 更新后端代码（日常改动）
 
 后端已配置源码挂载卷 `/data/ticket-hub-uat/backend:/app`，同步代码后重启容器即可生效：
@@ -34,7 +51,8 @@
 rsync -av --delete backend/ rnd@106.55.57.40:/data/ticket-hub-uat/backend/ \
   --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' \
   --exclude='.env*' --exclude='htmlcov' --exclude='.pytest_cache' \
-  --exclude='.mypy_cache' --exclude='.ruff_cache'
+  --exclude='.mypy_cache' --exclude='.ruff_cache' --exclude='.coverage' \
+  --exclude='celerybeat-schedule' --exclude='ksm-paused'
 
 # 步骤 2：重启 UAT 容器服务（包含 worker-beat 定时调度）
 ssh rnd@106.55.57.40 "cd /data/ticket-hub-uat/deploy && sudo docker-compose -f docker-compose.uat.yml --profile automation up -d --force-recreate"
@@ -52,6 +70,22 @@ cd frontend && VITE_PUBLIC_BASE=/ticket-hub-uat/ VITE_API_BASE=/ticket-hub-uat n
 rsync -av --delete dist/ rnd@106.55.57.40:/data/ticket-hub-uat/frontend-dist/
 ```
 
+推荐直接使用仓库内的固化流程。它会同步后端（保护 `.env` 和运行时目录）、重建 backend/worker/beat、升级所有 Alembic heads、构建并发布前端，最后检查首页、健康接口以及首页引用的全部 JS/CSS：
+
+```bash
+./deploy/deploy-uat.sh
+# 或
+make deploy-uat
+```
+
+脚本只有在所有检查均返回 HTTP 200 时才会成功退出。若需要从服务器本机以外的地址检查，可指定：
+
+```bash
+UAT_PUBLIC_ORIGIN=http://dl.piaozone.com:18025 ./deploy/deploy-uat.sh
+```
+
+不要使用 `deploy/build-frontend.sh` 部署 UAT；该脚本服务于 SIT 的 `/hub-issue/` 路径。
+
 *（若本地与 UAT 之间通过 SIT 中转，可将 `dist/` 打包传输至 UAT 的 `/data/ticket-hub-uat/frontend-dist/` 解压）*
 
 ### 3. 执行数据库迁移（Alembic）
@@ -59,7 +93,7 @@ rsync -av --delete dist/ rnd@106.55.57.40:/data/ticket-hub-uat/frontend-dist/
 当后端增加了新的数据库迁移脚本（`migrations/versions/`）时执行：
 
 ```bash
-ssh rnd@106.55.57.40 "sudo docker exec ticket-hub-uat-backend alembic upgrade head"
+ssh rnd@106.55.57.40 "sudo docker exec ticket-hub-uat-backend alembic upgrade heads"
 ```
 
 ---

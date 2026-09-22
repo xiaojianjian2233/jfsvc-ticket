@@ -1,5 +1,6 @@
 """Generate review-only answers independently of classification and routing."""
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 
 import redis
@@ -17,13 +18,14 @@ from app.services.knowledge_feedback.service import build_client
 logger = get_logger(__name__)
 
 
-
 @contextmanager
-def _draft_lease(kind: str, subject_id: int):
+def _draft_lease(kind: str, subject_id: int) -> Iterator[Lock | None]:
     """A bounded Redis lease serializes calls without holding a DB connection."""
     settings = get_settings()
     client = redis.Redis.from_url(
-        settings.redis_url, socket_connect_timeout=3, socket_timeout=3,
+        settings.redis_url,
+        socket_connect_timeout=3,
+        socket_timeout=3,
     )
     lock = client.lock(
         f"ai-draft:{kind}:{subject_id}",
@@ -40,7 +42,9 @@ def _draft_lease(kind: str, subject_id: int):
                 try:
                     lock.release()
                 except redis.exceptions.LockNotOwnedError:
-                    logger.warning("ai_draft_lease_expired", subject_type=kind, subject_id=subject_id)
+                    logger.warning(
+                        "ai_draft_lease_expired", subject_type=kind, subject_id=subject_id
+                    )
                 except redis.exceptions.RedisError:
                     logger.exception("ai_draft_lease_release_failed")
         finally:
@@ -66,7 +70,11 @@ def generate_answer_draft(
             if lease is None:
                 return None
             return _generate_answer_draft(
-                db, ticket_id=ticket_id, hub_id=hub_id, initial=initial, lease=lease,
+                db,
+                ticket_id=ticket_id,
+                hub_id=hub_id,
+                initial=initial,
+                lease=lease,
             )
     finally:
         # Also release read transactions on idempotent, deleted and error paths.
@@ -88,7 +96,7 @@ def _generate_answer_draft(
         raise ValueError("ticket_id or hub_id required")
     ticket = db.get(Ticket, ticket_id) if ticket_id is not None else None
     hub = db.get(HubIssue, hub_id) if hub_id is not None else None
-    subject = hub if hub_id is not None else ticket
+    subject: HubIssue | Ticket | None = hub if hub_id is not None else ticket
     if subject is None or subject.deleted_at is not None:
         return None
     if initial:
@@ -106,10 +114,11 @@ def _generate_answer_draft(
     settings = get_settings()
     # A non-persistent hub provides ticket context without graduating or classifying
     # the ticket. A negative id avoids matching unrelated NULL hub attachments.
-    context_hub = (
-        hub
-        if hub is not None
-        else HubIssue(
+    if hub is not None:
+        context_hub = hub
+    else:
+        assert ticket is not None
+        context_hub = HubIssue(
             id=-1,
             ticket_id=ticket.id,
             title=ticket.title,
@@ -117,7 +126,6 @@ def _generate_answer_draft(
             product_line_code=ticket.product_line_code,
             module=ticket.module,
         )
-    )
     question = build_hub_question(db, context_hub, settings=settings)
     # Context is now plain data; return the connection before waiting for the Agent.
     db.commit()
@@ -137,16 +145,26 @@ def _generate_answer_draft(
         return None
     # Reload and lock only for the short write phase. A human reply made during
     # the network call must be observed, including updates from another session.
-    subject = db.scalar(
-        select(HubIssue if hub_id is not None else Ticket)
-        .where((HubIssue.id if hub_id is not None else Ticket.id) == subject_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
+    if hub_id is not None:
+        hub = db.scalar(
+            select(HubIssue)
+            .where(HubIssue.id == subject_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        ticket = None
+        subject = hub
+    else:
+        ticket = db.scalar(
+            select(Ticket)
+            .where(Ticket.id == subject_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        hub = None
+        subject = ticket
     if subject is None:
         return None
-    ticket = subject if hub_id is None else None
-    hub = subject if hub_id is not None else None
     if subject.deleted_at is not None:
         return None
     if ticket is not None:

@@ -473,6 +473,23 @@ def test_list_tickets_filter_assigned_user(app_client: TestClient, world: Sessio
     assert all(it["assigned_user_id"] == 1 for it in r.json()["items"])
 
 
+def test_assignee_can_load_transfer_users_without_admin_user_access(
+    app_client: TestClient, world: Session
+) -> None:
+    world.add(User(id=3, feishu_uid="ou_member", name="member", role="member"))
+    world.add(User(id=4, feishu_uid="ou_supervisor", name="supervisor", role="supervisor"))
+    world.add(
+        User(id=5, feishu_uid="ou_disabled", name="disabled", role="assignee", is_active=False)
+    )
+    world.commit()
+
+    r = app_client.get("/api/tickets/transfer-users", headers=_bearer(1, role="assignee"))
+
+    assert r.status_code == 200
+    assert [row["name"] for row in r.json()] == ["alice", "bob", "supervisor"]
+    assert all(row["role"] != "member" for row in r.json())
+
+
 def test_list_tickets_filter_unassigned_only(app_client: TestClient, world: Session) -> None:
     r = app_client.get("/api/tickets?unassigned_only=true", headers=_bearer())
     assert r.json()["total"] == 1

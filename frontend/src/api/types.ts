@@ -1497,6 +1497,354 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/reception/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Agents
+         * @description 获取坐席列表，支持姓名、昵称、多状态过滤。
+         */
+        get: operations["list_agents_api_reception_agents_get"];
+        put?: never;
+        /**
+         * Create Agent
+         * @description 添加坐席。
+         */
+        post: operations["create_agent_api_reception_agents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/agents/batch-remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Batch Remove Agents
+         * @description 批量移除坐席。
+         */
+        post: operations["batch_remove_agents_api_reception_agents_batch_remove_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/agents/{agent_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Agent
+         * @description 编辑坐席（昵称、接待上限、在线状态）。
+         */
+        put: operations["update_agent_api_reception_agents__agent_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/eligible-users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Eligible Users
+         * @description 获取系统基础配置中处于启用状态的人员（已配置在坐席中的可标记或全量可选）。
+         */
+        get: operations["get_eligible_users_api_reception_eligible_users_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Sessions
+         * @description 获取会话记录列表，支持企业名称、电话、状态多选、起止时间区间、转人工、接待人查询。
+         */
+        get: operations["list_sessions_api_reception_sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Detail
+         * @description 获取会话详情与全部对话记录。
+         */
+        get: operations["get_session_detail_api_reception_sessions__session_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/settings/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Schedule Settings
+         * @description 获取坐席接待时间设置（工作日与节假日时间段）。
+         */
+        get: operations["get_schedule_settings_api_reception_settings_schedule_get"];
+        /**
+         * Update Schedule Settings
+         * @description 保存坐席接待时间设置。
+         */
+        put: operations["update_schedule_settings_api_reception_settings_schedule_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/workbench/assistant-search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Assistant Search
+         * @description 坐席助手多类型快捷搜索（知识库、工单、订单、企业权益）。
+         */
+        get: operations["assistant_search_api_reception_workbench_assistant_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/workbench/auto-dispatch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Auto Dispatch Sessions
+         * @description 根据接待时间区间和在线坐席容量，按先进先出与轮询（Round-Robin）原则自动分配排队会话。
+         */
+        post: operations["auto_dispatch_sessions_api_reception_workbench_auto_dispatch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/workbench/handover-offline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Handover And Offline
+         * @description 当前坐席切换离线时，将其进行中的会话批量转交给选定的在线坐席，并将原坐席状态更新为离线。
+         */
+        post: operations["handover_and_offline_api_reception_workbench_handover_offline_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/workbench/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workbench Sessions
+         * @description 获取当前坐席工作台会话队列（按分类聚合统计与卡片列表）。
+         */
+        get: operations["get_workbench_sessions_api_reception_workbench_sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/workbench/sessions/{session_id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Activate Session
+         * @description 【激活】挂起中的会话：移回进行中列表。
+         */
+        post: operations["activate_session_api_reception_workbench_sessions__session_id__activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/workbench/sessions/{session_id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close Session
+         * @description 【关闭】会话：发送结束通知并标记为已关闭。
+         */
+        post: operations["close_session_api_reception_workbench_sessions__session_id__close_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/workbench/sessions/{session_id}/invite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Invite Session
+         * @description 【邀请】排队中的会话进入进行中（不受坐席接待上限限制）。
+         */
+        post: operations["invite_session_api_reception_workbench_sessions__session_id__invite_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/workbench/sessions/{session_id}/send-message": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Agent Message
+         * @description 坐席在对话框中发送消息。
+         */
+        post: operations["send_agent_message_api_reception_workbench_sessions__session_id__send_message_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/workbench/sessions/{session_id}/suspend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suspend Session
+         * @description 【挂起】进行中的会话：发送系统提示并移入挂起列表。
+         */
+        post: operations["suspend_session_api_reception_workbench_sessions__session_id__suspend_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/workbench/sessions/{session_id}/transfer-ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transfer Session To Ticket
+         * @description 【转工单】：创建工单并给客户自动回复工单编号。
+         */
+        post: operations["transfer_session_to_ticket_api_reception_workbench_sessions__session_id__transfer_ticket_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/supervisor/ai-cs/publish": {
         parameters: {
             query?: never;
@@ -2424,6 +2772,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tickets/transfer-users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Transfer Users
+         * @description List active users allowed as manual ticket-transfer targets.
+         *
+         *     This is intentionally separate from /api/admin/users: assignees may need
+         *     to transfer their own tickets, but must not gain access to the admin user
+         *     management endpoint.
+         */
+        get: operations["list_transfer_users_api_tickets_transfer_users_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tickets/{ticket_id}": {
         parameters: {
             query?: never;
@@ -2821,6 +3193,38 @@ export interface components {
             /** Notification Id */
             notification_id: number;
         };
+        /** AgentListResponse */
+        AgentListResponse: {
+            /** Items */
+            items: components["schemas"]["AgentOut"][];
+            /** Total */
+            total: number;
+        };
+        /** AgentOut */
+        AgentOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Max Concurrent */
+            max_concurrent: number;
+            /** Nickname */
+            nickname: string;
+            /** Status */
+            status: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** User Id */
+            user_id: number;
+            /** User Name */
+            user_name: string;
+        };
         /** AiCsStatusResponse */
         AiCsStatusResponse: {
             /** Configured */
@@ -2951,6 +3355,24 @@ export interface components {
             /** User Id */
             user_id: number;
         };
+        /** AssistantSearchItem */
+        AssistantSearchItem: {
+            /**
+             * Extra
+             * @default {}
+             */
+            extra: {
+                [key: string]: unknown;
+            };
+            /** Id */
+            id: string;
+            /** Snippet */
+            snippet: string;
+            /** Title */
+            title: string;
+            /** Type */
+            type: string;
+        };
         /**
          * AttachmentOut
          * @description 工单附件（attachments 表行）——前端「工单描述」附件区展示用。
@@ -2993,6 +3415,11 @@ export interface components {
             outbox_count: number;
             /** Version */
             version: number;
+        };
+        /** BatchRemoveAgentsBody */
+        BatchRemoveAgentsBody: {
+            /** Agent Ids */
+            agent_ids: number[];
         };
         /** BatchReviewBody */
         BatchReviewBody: {
@@ -3177,6 +3604,18 @@ export interface components {
             tickets_total: number;
             /** Users Total */
             users_total: number;
+        };
+        /** CreateAgentBody */
+        CreateAgentBody: {
+            /**
+             * Max Concurrent
+             * @default 5
+             */
+            max_concurrent: number;
+            /** Nickname */
+            nickname: string;
+            /** User Id */
+            user_id: number;
         };
         /** CreateDraftBody */
         CreateDraftBody: {
@@ -3547,6 +3986,17 @@ export interface components {
             /** Version */
             version: number;
         };
+        /** EligibleUserOut */
+        EligibleUserOut: {
+            /** Email */
+            email?: string | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Role */
+            role: string;
+        };
         /** EscalationContextResponse */
         EscalationContextResponse: {
             /**
@@ -3805,6 +4255,13 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HandoverOfflineBody */
+        HandoverOfflineBody: {
+            /** From Agent Id */
+            from_agent_id: number;
+            /** To Agent Id */
+            to_agent_id: number;
         };
         /**
          * HistoryEvent
@@ -4481,6 +4938,26 @@ export interface components {
             /** Authorize Url */
             authorize_url: string;
         };
+        /** MessageOut */
+        MessageOut: {
+            /** Content */
+            content: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: number;
+            /** Is Read */
+            is_read: boolean;
+            /** Sender Name */
+            sender_name: string;
+            /** Sender Type */
+            sender_type: string;
+            /** Session Id */
+            session_id: string;
+        };
         /** ModuleIn */
         ModuleIn: {
             /** Dev Owners */
@@ -5140,6 +5617,44 @@ export interface components {
             /** Target */
             target: string;
         };
+        /** ScheduleSettings */
+        ScheduleSettings: {
+            /**
+             * Weekday Slots
+             * @default [
+             *       {
+             *         "end": "11:45",
+             *         "start": "09:00"
+             *       },
+             *       {
+             *         "end": "18:00",
+             *         "start": "13:30"
+             *       }
+             *     ]
+             */
+            weekday_slots: components["schemas"]["ScheduleSlot"][];
+            /**
+             * Weekend Slots
+             * @default [
+             *       {
+             *         "end": "11:45",
+             *         "start": "09:00"
+             *       },
+             *       {
+             *         "end": "18:00",
+             *         "start": "13:30"
+             *       }
+             *     ]
+             */
+            weekend_slots: components["schemas"]["ScheduleSlot"][];
+        };
+        /** ScheduleSlot */
+        ScheduleSlot: {
+            /** End */
+            end: string;
+            /** Start */
+            start: string;
+        };
         /** ScopeRowOut */
         ScopeRowOut: {
             /** Feature */
@@ -5177,6 +5692,82 @@ export interface components {
             hub_issue_id: number;
             /** Short Code */
             short_code: string;
+        };
+        /** SendMessageBody */
+        SendMessageBody: {
+            /** Content */
+            content: string;
+        };
+        /** SessionDetailOut */
+        SessionDetailOut: {
+            /** Messages */
+            messages: components["schemas"]["MessageOut"][];
+            session: components["schemas"]["SessionListItemOut"];
+        };
+        /** SessionListItemOut */
+        SessionListItemOut: {
+            /** Agent Name */
+            agent_name: string;
+            /** Agent User Id */
+            agent_user_id?: number | null;
+            /** Closed At */
+            closed_at?: string | null;
+            /** Company Name */
+            company_name: string;
+            /** Contact Name */
+            contact_name?: string | null;
+            /** Contact Phone */
+            contact_phone?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Hotline Status */
+            hotline_status?: string | null;
+            /** Id */
+            id: string;
+            /** Is Human */
+            is_human: boolean;
+            /** Last Message At */
+            last_message_at?: string | null;
+            /** Session Type */
+            session_type: string;
+            /** Status */
+            status: string;
+            /** Summary */
+            summary?: string | null;
+            /** Tax No */
+            tax_no?: string | null;
+            /** Tenant Name */
+            tenant_name?: string | null;
+            /** Tenant No */
+            tenant_no?: string | null;
+            /** Ticket Id */
+            ticket_id?: number | null;
+            /** Ticket Short Code */
+            ticket_short_code?: string | null;
+            /**
+             * Unread Count
+             * @default 0
+             */
+            unread_count: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** SessionListResponse */
+        SessionListResponse: {
+            /** Items */
+            items: components["schemas"]["SessionListItemOut"][];
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Total */
+            total: number;
         };
         /** SkillDetail */
         SkillDetail: {
@@ -5943,6 +6534,38 @@ export interface components {
             /** Question */
             question: string;
         };
+        /** TransferTicketBody */
+        TransferTicketBody: {
+            /** Category */
+            category?: string | null;
+            /** Remark */
+            remark?: string | null;
+            /** Title */
+            title?: string | null;
+        };
+        /**
+         * TransferUserOut
+         * @description Active users that can be selected as a ticket transfer target.
+         */
+        TransferUserOut: {
+            /** Id */
+            id: number;
+            /** Is Active */
+            is_active: boolean;
+            /** Name */
+            name: string;
+            /** Role */
+            role: string;
+        };
+        /** UpdateAgentBody */
+        UpdateAgentBody: {
+            /** Max Concurrent */
+            max_concurrent?: number | null;
+            /** Nickname */
+            nickname?: string | null;
+            /** Status */
+            status?: string | null;
+        };
         /** UpdateAttributesBody */
         UpdateAttributesBody: {
             /** Module */
@@ -6170,6 +6793,89 @@ export interface components {
             /** Window Hours */
             window_hours: number;
         };
+        /** WorkbenchCardOut */
+        WorkbenchCardOut: {
+            /** Agent Name */
+            agent_name: string;
+            /** Company Name */
+            company_name: string;
+            /** Contact Name */
+            contact_name?: string | null;
+            /** Contact Phone */
+            contact_phone?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Is Human */
+            is_human: boolean;
+            /**
+             * Is In Service
+             * @default 是（服务期内）
+             */
+            is_in_service: string;
+            /** Last Message */
+            last_message?: string | null;
+            /** Last Message At */
+            last_message_at?: string | null;
+            /**
+             * Purchased Products
+             * @default [
+             *       "发票云敏捷版",
+             *       "数电发票乐企模块"
+             *     ]
+             */
+            purchased_products: string[];
+            /** Status */
+            status: string;
+            /** Tax No */
+            tax_no?: string | null;
+            /** Tenant Name */
+            tenant_name?: string | null;
+            /** Tenant No */
+            tenant_no?: string | null;
+            /**
+             * Unread Count
+             * @default 0
+             */
+            unread_count: number;
+        };
+        /** WorkbenchCounts */
+        WorkbenchCounts: {
+            /**
+             * Hotline Answered
+             * @default 0
+             */
+            hotline_answered: number;
+            /**
+             * Hotline Missed
+             * @default 0
+             */
+            hotline_missed: number;
+            /**
+             * Online Closed
+             * @default 0
+             */
+            online_closed: number;
+            /**
+             * Online In Progress
+             * @default 0
+             */
+            online_in_progress: number;
+            /**
+             * Online Pending
+             * @default 0
+             */
+            online_pending: number;
+            /**
+             * Online Queue
+             * @default 0
+             */
+            online_queue: number;
+        };
         /** WorkbenchOut */
         WorkbenchOut: {
             funnel: components["schemas"]["FunnelOut"];
@@ -6190,6 +6896,14 @@ export interface components {
             /** Sources */
             sources: {
                 [key: string]: number;
+            };
+        };
+        /** WorkbenchQueueResponse */
+        WorkbenchQueueResponse: {
+            counts: components["schemas"]["WorkbenchCounts"];
+            /** Sessions */
+            sessions: {
+                [key: string]: components["schemas"]["WorkbenchCardOut"][];
             };
         };
         /** SupervisorOut */
@@ -9320,6 +10034,610 @@ export interface operations {
             };
         };
     };
+    list_agents_api_reception_agents_get: {
+        parameters: {
+            query?: {
+                /** @description 姓名模糊搜索 */
+                name?: string | null;
+                /** @description 昵称模糊搜索 */
+                nickname?: string | null;
+                /** @description 逗号分隔的状态过滤: online,busy,offline */
+                statuses?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_agent_api_reception_agents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAgentBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    batch_remove_agents_api_reception_agents_batch_remove_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchRemoveAgentsBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_agent_api_reception_agents__agent_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAgentBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_eligible_users_api_reception_eligible_users_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EligibleUserOut"][];
+                };
+            };
+        };
+    };
+    list_sessions_api_reception_sessions_get: {
+        parameters: {
+            query?: {
+                /** @description 咨询企业 */
+                company_name?: string | null;
+                /** @description 联系人电话 */
+                contact_phone?: string | null;
+                /** @description 逗号分隔的会话状态 */
+                statuses?: string | null;
+                /** @description 创建时间起: YYYY-MM-DD HH:mm */
+                start_time?: string | null;
+                /** @description 创建时间止: YYYY-MM-DD HH:mm */
+                end_time?: string | null;
+                /** @description 是否转人工: 不限|是|否 */
+                is_human?: string | null;
+                /** @description 最后接待人姓名 */
+                agent_name?: string | null;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_detail_api_reception_sessions__session_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_schedule_settings_api_reception_settings_schedule_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleSettings"];
+                };
+            };
+        };
+    };
+    update_schedule_settings_api_reception_settings_schedule_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleSettings"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleSettings"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    assistant_search_api_reception_workbench_assistant_search_get: {
+        parameters: {
+            query?: {
+                /** @description knowledge|ticket|order|benefit */
+                type?: string;
+                /** @description 查询关键字 */
+                query?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantSearchItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    auto_dispatch_sessions_api_reception_workbench_auto_dispatch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    handover_and_offline_api_reception_workbench_handover_offline_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HandoverOfflineBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workbench_sessions_api_reception_workbench_sessions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkbenchQueueResponse"];
+                };
+            };
+        };
+    };
+    activate_session_api_reception_workbench_sessions__session_id__activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    close_session_api_reception_workbench_sessions__session_id__close_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    invite_session_api_reception_workbench_sessions__session_id__invite_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_agent_message_api_reception_workbench_sessions__session_id__send_message_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendMessageBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    suspend_session_api_reception_workbench_sessions__session_id__suspend_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    transfer_session_to_ticket_api_reception_workbench_sessions__session_id__transfer_ticket_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransferTicketBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     ai_cs_publish_endpoint_api_supervisor_ai_cs_publish_post: {
         parameters: {
             query?: never;
@@ -10666,6 +11984,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TicketQuickStatsResponse"];
+                };
+            };
+        };
+    };
+    list_transfer_users_api_tickets_transfer_users_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransferUserOut"][];
                 };
             };
         };

@@ -11,6 +11,22 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${1:-/data/hub-issue/frontend-dist}"
 
+expected_repo="https://github.com/invagent/ticket-hub.git"
+actual_repo="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || true)"
+normalize_repo() {
+  local url="${1%.git}"
+  url="${url#https://github.com/}"
+  url="${url#ssh://git@github.com/}"
+  url="${url#git@github.com:}"
+  printf '%s' "${url#github-ticket-hub:}"
+}
+if [[ "$(normalize_repo "$actual_repo")" != "invagent/ticket-hub" ]]; then
+  echo "❌ SIT frontend build must run from the old repository" >&2
+  echo "   expected: $expected_repo" >&2
+  echo "   actual:   ${actual_repo:-<missing origin>}" >&2
+  exit 1
+fi
+
 echo "==> building frontend (VITE_PUBLIC_BASE=/hub-issue/) ..."
 docker run --rm \
   -v "$REPO_ROOT/frontend:/app" \

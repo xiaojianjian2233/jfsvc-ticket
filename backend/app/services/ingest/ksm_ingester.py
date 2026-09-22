@@ -19,9 +19,11 @@ lands in D3 along with Agent integration.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -41,6 +43,7 @@ from app.services.hub_issues.op_status import (
 )
 from app.services.identity.resolver import IdentityInput, IdentityResolver
 from app.services.ingest.content_refresh import apply_content_refresh
+from app.services.ksm.return_state import apply_ksm_returned
 
 logger = get_logger(__name__)
 
@@ -70,6 +73,55 @@ _KSM_SLA_FALLBACK: dict[str, str] = {
     "52": "高级成功服务（仅工单）",
     "10": "服务期外",
 }
+
+_KSM_TIMEZONE = ZoneInfo("Asia/Shanghai")
+
+
+def parse_ksm_create_datetime(value: Any) -> datetime | None:
+    """Parse KSM ``createDateTime`` into the timezone-aware received_at value.
+
+    KSM returns local Beijing time as ``yyyy-MM-dd HH:mm:ss``. Invalid or
+    missing values deliberately return None so the database default remains
+    the fallback for malformed payloads.
+    """
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=_KSM_TIMEZONE)
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    try:
+        parsed = datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            logger.warning("invalid_ksm_create_datetime", value=text)
+            return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=_KSM_TIMEZONE)
+
+
+def apply_ksm_received_at(ticket: Ticket, payload: dict[str, Any]) -> None:
+    """Apply KSM createDateTime without allowing a re-push to move it forward.
+
+    Some KSM re-push detail responses contain a createDateTime later than the
+    time this ticket first entered ticket-hub. That value cannot be the
+    original submit time, so retain the system creation time in that case.
+    """
+    ksm_created_at = parse_ksm_create_datetime(payload.get("createDateTime"))
+    if ksm_created_at is None:
+        return
+    ticket_created_at = ticket.created_at
+    if ticket_created_at is not None and ticket_created_at.tzinfo is None:
+        ticket_created_at = ticket_created_at.replace(tzinfo=_KSM_TIMEZONE)
+    if ticket_created_at is not None and ksm_created_at > ticket_created_at:
+        logger.warning(
+            "ksm_create_datetime_after_ticket_created_at",
+            ticket_id=ticket.id,
+            ksm_created_at=ksm_created_at.isoformat(),
+            ticket_created_at=ticket_created_at.isoformat(),
+        )
+        return
+    ticket.received_at = ksm_created_at
 
 
 class KSMIngester:
@@ -125,6 +177,11 @@ class KSMIngester:
     def ingest(self, payload: dict[str, Any]) -> IngestResult:
         bill_id = self._require_str(payload, "billId")
 
+        # Serialize concurrent callbacks for the same KSM bill. The webhook
+        # intentionally schedules background fetches, so two duplicate notices
+        # can otherwise pass the read-before-insert check at the same time.
+        self._lock_source_ticket("ksm", bill_id)
+
         # 1. Idempotency: skip if already ingested
         existing = self._tickets.find_by_source("ksm", bill_id)
         if existing is not None:
@@ -141,6 +198,25 @@ class KSMIngester:
             if is_ksm_closed:
                 logger.info(
                     "ksm_ingest_closed_sync", bill_id=bill_id, existing_ticket_id=existing.id
+                )
+                return self._dedup_result(existing)
+
+            # KSM status=6 是“已退回”的权威状态。无论退回是由本系统调用、KSM
+            # 人工操作，还是上游其它流程完成，都必须把本地 ticket/hub 收敛到
+            # transferred_return/returned，并终止仍在重试的 return outbox。
+            is_ksm_returned = str(payload.get("sourceStatus") or payload.get("status") or "") == "6"
+            if is_ksm_returned:
+                apply_ksm_returned(
+                    self._db,
+                    existing,
+                    changed_by="system:ksm_ingest",
+                    reason="KSM 状态回推确认已退回（status=6）",
+                    reconcile_return_outbox=True,
+                )
+                logger.info(
+                    "ksm_ingest_returned_sync",
+                    bill_id=bill_id,
+                    existing_ticket_id=existing.id,
                 )
                 return self._dedup_result(existing)
 
@@ -394,10 +470,18 @@ class KSMIngester:
 
     # ---- internal ------------------------------------------------------
 
+    def _lock_source_ticket(self, source_code: str, source_ticket_id: str) -> None:
+        """Take a transaction-scoped lock for one source ticket on PostgreSQL."""
+        bind = self._db.get_bind()
+        if bind.dialect.name == "postgresql":
+            lock_key = f"{source_code}:{source_ticket_id}"
+            self._db.execute(select(func.pg_advisory_xact_lock(func.hashtext(lock_key))))
+
     def _sync_ksm_fields(self, ticket: Ticket, payload: dict[str, Any]) -> None:
         """把 KSM 重推payload 里的状态类字段刷到已存在 ticket——接收状态/关单节点
         随工单流转变化，每次重推都要跟最新值同步，不止首次入库写一次。"""
         ticket.source_status = payload.get("sourceStatus")
+        apply_ksm_received_at(ticket, payload)
         ticket.ksm_reporter_product_line = payload.get("reporterProductLine")
         ticket.ksm_reporter_module = payload.get("reporterModule")
         ticket.ksm_main_product_name = payload.get("ksmMainProductName")

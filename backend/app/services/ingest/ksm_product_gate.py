@@ -1,4 +1,5 @@
 """Accept KSM tickets only when either original product identifier matches."""
+
 from typing import Any
 
 from app.core.logging import get_logger

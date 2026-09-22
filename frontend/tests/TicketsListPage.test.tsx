@@ -41,6 +41,28 @@ const baseTicket = {
 };
 
 describe("TicketsListPage", () => {
+  it("default status filter excludes supplementing until explicitly selected", async () => {
+    let lastQuery: URLSearchParams | null = null;
+    server.use(
+      http.get("*/api/tickets", ({ request }) => {
+        lastQuery = new URL(request.url).searchParams;
+        return HttpResponse.json({
+          items: [],
+          total: 0,
+          page: 1,
+          page_size: 20,
+          has_more: false,
+        });
+      }),
+    );
+
+    renderPage();
+
+    await waitFor(() => expect(lastQuery).not.toBeNull());
+    expect(lastQuery!.getAll("op_statuses")).toEqual(["processing", "reviewing"]);
+    expect(lastQuery!.getAll("op_statuses")).not.toContain("supplementing");
+  });
+
   it("renders rows from /api/tickets and shows total / paging", async () => {
     server.use(
       http.get("*/api/tickets", () =>

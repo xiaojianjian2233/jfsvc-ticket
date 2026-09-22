@@ -207,7 +207,9 @@ def _reason_matched_counts(
     return len(tickets), by_handler
 
 
-def _dev_transfer_counts(db: Session, start: datetime, end: datetime):
+def _dev_transfer_counts(
+    db: Session, start: datetime, end: datetime
+) -> tuple[int, dict[int | None, int]]:
     hub_ids = set(
         db.scalars(
             select(StatusHistory.entity_id).where(
@@ -223,7 +225,7 @@ def _dev_transfer_counts(db: Session, start: datetime, end: datetime):
         )
     )
     tickets = _tickets_for_hub_ids(db, hub_ids)
-    by_handler = {}
+    by_handler: dict[int | None, int] = {}
     for ticket in tickets:
         by_handler[ticket.handler_user_id] = by_handler.get(ticket.handler_user_id, 0) + 1
     return len(tickets), by_handler

@@ -23,6 +23,17 @@ Monorepo，三个独立子栈：
 - **SIT 推送限制**：**严禁默认推送到 SIT 环境**（`sit`: `https://github.com/invagent/ticket-hub.git`）。**除非用户明确发出指令要求推送到 SIT，否则绝不推送至 SIT**。
 - **本地分支追踪**：本地 `main` 分支默认关联并跟踪 `uat/main`。
 
+## 2026-09-21 KSM 退回状态对账
+
+- KSM `status=6` 是“已退回”的权威状态；入站重推必须将本地 ticket 收敛为 `transferred_return`、Hub 收敛为 `returned`，并清除 KSM 接管状态。
+- 我方 `returnKsmOrder` 成功与 KSM `status=6` 回推共用 `services/ksm/return_state.py::apply_ksm_returned`，避免双路径状态漂移。
+- KSM 已确认外部退回时，仍处于 pending/failed 的 return outbox 标记为无需继续执行，防止重复退回。
+
+## 2026-09-21 工单列表处理状态默认筛选
+
+- 工单列表默认处理状态仅为 `processing`（处理中）和 `reviewing`（待审核）。
+- `supplementing`（补充资料）是独立等待态，只有用户明确勾选时才进入列表；不得隐式加入默认筛选。
+
 ## 提示词记录维护规范（核心记忆）
 
 - **更新时机**：日常交互或修改过程中**不用每次都写入提示词记录**。

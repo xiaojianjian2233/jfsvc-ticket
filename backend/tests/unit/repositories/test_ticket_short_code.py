@@ -32,4 +32,3 @@ def test_next_short_code_uses_highest_existing_number_not_row_count(
     db_session.commit()
 
     assert TicketRepository(db_session).next_short_code() == "TKT-010770"
-

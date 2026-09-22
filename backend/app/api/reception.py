@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
 import random
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -19,7 +19,6 @@ from app.models import (
     ReceptionMessage,
     ReceptionSession,
     SystemSetting,
-    Ticket,
     User,
 )
 
@@ -242,7 +241,7 @@ class AssistantSearchItem(BaseModel):
 
 
 def generate_session_id(db: Session) -> str:
-    today_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+    today_str = datetime.now(UTC).strftime("%Y%m%d")
     prefix = f"ZXHH{today_str}"
     last_session = (
         db.query(ReceptionSession.id)
@@ -321,7 +320,9 @@ def create_agent(
 
     existing = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == body.user_id).first()
     if existing:
-        raise HTTPException(status_code=409, detail=f"用户【{target_user.name}】已是坐席，请直接编辑")
+        raise HTTPException(
+            status_code=409, detail=f"用户【{target_user.name}】已是坐席，请直接编辑"
+        )
 
     agent = ReceptionAgent(
         user_id=target_user.id,
@@ -492,9 +493,7 @@ def get_workbench_sessions(
     user: AuthedUser = Depends(require_user),
 ) -> WorkbenchQueueResponse:
     """获取当前坐席工作台会话队列（按分类聚合统计与卡片列表）。"""
-    all_sessions = (
-        db.query(ReceptionSession).order_by(desc(ReceptionSession.last_message_at)).all()
-    )
+    all_sessions = db.query(ReceptionSession).order_by(desc(ReceptionSession.last_message_at)).all()
 
     # 统计数量
     counts = WorkbenchCounts()
@@ -575,12 +574,12 @@ def invite_session(
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
 
-    agent_record = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == user.id).first()
+    agent_record = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == user.user_id).first()
     agent_display_name = agent_record.nickname if (agent_record and agent_record.nickname) else user.name
 
     session.status = "in_progress"
     session.is_human = True
-    session.agent_user_id = user.id
+    session.agent_user_id = user.user_id
     session.agent_name = agent_display_name
 
     sys_msg = ReceptionMessage(
@@ -636,7 +635,7 @@ def activate_session(
         raise HTTPException(status_code=404, detail="会话不存在")
 
     session.status = "in_progress"
-    session.updated_at = datetime.now(timezone.utc)
+    session.updated_at = datetime.now(UTC)
     db.commit()
     return {"ok": True, "status": "in_progress"}
 
@@ -652,7 +651,7 @@ def close_session(
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     session.status = "closed"
     session.closed_at = now
     session.updated_at = now
@@ -715,10 +714,10 @@ def send_agent_message(
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
 
-    agent_record = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == user.id).first()
+    agent_record = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == user.user_id).first()
     agent_display_name = agent_record.nickname if (agent_record and agent_record.nickname) else user.name
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     msg = ReceptionMessage(
         session_id=session.id,
         sender_type="agent",
@@ -729,7 +728,7 @@ def send_agent_message(
     )
     session.last_message_at = now
     session.agent_last_replied_at = now
-    session.agent_user_id = user.id
+    session.agent_user_id = user.user_id
     session.agent_name = agent_display_name
     db.add(msg)
     db.commit()
@@ -813,9 +812,7 @@ def assistant_search(
         ]
         for oid, title, snip in order_items:
             if not q or q in title or q in snip:
-                results.append(
-                    AssistantSearchItem(id=oid, title=title, snippet=snip, type="order")
-                )
+                results.append(AssistantSearchItem(id=oid, title=title, snippet=snip, type="order"))
 
     elif type == "benefit":
         benefit_items = [
@@ -864,12 +861,12 @@ def update_schedule_settings(
     json_val = json.dumps(body.model_dump())
     if setting:
         setting.value = json_val
-        setting.updated_by = user.id
+        setting.updated_by = user.user_id
     else:
         setting = SystemSetting(
             key=SETTING_KEY_SCHEDULE,
             value=json_val,
-            updated_by=user.id,
+            updated_by=user.user_id,
         )
         db.add(setting)
     db.commit()
@@ -914,7 +911,7 @@ def handover_and_offline(
 
     from_name = from_agent.nickname or from_agent.user_name
     to_name = to_agent.nickname or to_agent.user_name
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for s in in_prog_sessions:
         s.agent_user_id = to_agent.user_id
         s.agent_name = to_name
@@ -1000,7 +997,7 @@ def dispatch_online_sessions_internal(db: Session) -> dict[str, Any]:
 
     # 4. 轮询分发
     dispatched_count = 0
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     agent_idx = 0
 
     for s in queue_sessions:
@@ -1242,7 +1239,7 @@ def client_fetch_tenant_profile(
             purchased_products=existing.purchased_products or ["发票云标准版", "数电发票采集模块"],
         )
 
-    t_no = f"TNT_{datetime.now(timezone.utc).strftime('%Y%m%d')}_{random.randint(1000, 9999)}"
+    t_no = f"TNT_{datetime.now(UTC).strftime('%Y%m%d')}_{random.randint(1000, 9999)}"
     t_name = f"{body.company_name[:4]}企业租户"
     return TenantProfileResponse(
         tenant_no=t_no,
@@ -1277,7 +1274,7 @@ def client_init_session(
             contact_name = f"客户_{phone[-4:]}"
 
     session_id = generate_session_id(db)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     tenant_name = body.tenant_name
     tenant_no = body.tenant_no
@@ -1354,7 +1351,7 @@ def client_get_sessions(
         .order_by(desc(ReceptionSession.created_at))
         .all()
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     recent_open: list[ReceptionSession] = []
     closed: list[ReceptionSession] = []
 
@@ -1364,7 +1361,7 @@ def client_get_sessions(
         else:
             created_at = s.created_at
             if created_at.tzinfo is None:
-                created_at = created_at.replace(tzinfo=timezone.utc)
+                created_at = created_at.replace(tzinfo=UTC)
             delta = now - created_at
             if delta.total_seconds() <= 24 * 3600:
                 recent_open.append(s)
@@ -1405,7 +1402,7 @@ def client_send_message(
     if session.status in ("closed", "converted"):
         raise HTTPException(status_code=400, detail="当前会话已结束，不可继续发送消息")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     msg = ReceptionMessage(
         session_id=session_id,
         sender_type="customer",
@@ -1435,7 +1432,7 @@ def client_close_session(
     session = db.query(ReceptionSession).filter(ReceptionSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     session.status = "closed"
     session.closed_at = now
     session.updated_at = now
@@ -1463,7 +1460,7 @@ def client_evaluate_session(
     session = db.query(ReceptionSession).filter(ReceptionSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     eval_text = (
         f"【客户服务评价】评分：{body.score}星 | "
         f"标签：{', '.join(body.tags) if body.tags else '无'} | "
@@ -1533,6 +1530,3 @@ def client_get_notices() -> list[ClientNoticeOut]:
             category="产品动态",
         ),
     ]
-
-
-

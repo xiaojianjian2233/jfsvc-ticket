@@ -642,6 +642,7 @@ export function TicketDetailPage() {
   // 外部/研发人员访问时，后端返回 can_operate=false，前端进入只读视图，隐藏所有操作按钮。
   const isPrivileged = isSupervisor();
   const isHandler = d?.handler_user_id != null && currentUserId() === d.handler_user_id;
+  const canTransfer = isPrivileged || (currentRole() === "assignee" && isHandler);
   const hasOperatePermission =
     (d as any)?.can_operate !== undefined
       ? Boolean((d as any).can_operate)
@@ -1086,7 +1087,7 @@ export function TicketDetailPage() {
                       </button>
 
                       {/* 3. 转派 */}
-                      {isSupervisor() && (
+                      {canTransfer && (
                         <button
                           type="button"
                           onClick={() => setTransferOpen(true)}
@@ -5308,7 +5309,7 @@ function SubTicketList({
   );
 }
 
-// ---- 可搜索单选处理人（自包含，复用 /api/admin/users + MultiUserSelect 搜索弹层视觉） ----
+// ---- 可搜索单选处理人（复用转派候选人接口 + MultiUserSelect 搜索弹层视觉） ----
 function SearchableUserSelect({
   value,
   onChange,
@@ -5319,8 +5320,8 @@ function SearchableUserSelect({
   placeholder?: string;
 }) {
   const q = useQuery({
-    queryKey: ["admin", "users"],
-    queryFn: () => api.get("/api/admin/users"),
+    queryKey: ["ticket-transfer-users"],
+    queryFn: () => api.get("/api/tickets/transfer-users"),
     staleTime: 60_000,
   });
   // 不限角色：真实处理人大量是 member（指派无角色限制），只排除已停用用户。

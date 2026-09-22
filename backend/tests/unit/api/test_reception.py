@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.api.auth import issue_jwt
 from app.api.reception import generate_session_id
-from app.models import ReceptionAgent, ReceptionMessage, ReceptionSession, User
+from app.models import ReceptionMessage, ReceptionSession, User
 
 
 def _bearer(uid: int = 1, *, name: str = "alice", role: str = "admin") -> dict[str, str]:
@@ -21,7 +21,7 @@ def test_generate_session_id_format(db_session: Session) -> None:
     assert len(sid) == 16  # ZXHH (4) + YYYYMMDD (8) + 0001 (4)
 
 
-def test_agents_crud(client: TestClient, db_session: Session) -> None:
+def test_agents_crud(app_client: TestClient, db_session: Session) -> None:
     # 1. 准备用户
     u1 = User(id=101, feishu_uid="ou_101", name="坐席小李", role="assignee", is_active=True)
     u2 = User(id=102, feishu_uid="ou_102", name="坐席小张", role="assignee", is_active=True)
@@ -31,13 +31,13 @@ def test_agents_crud(client: TestClient, db_session: Session) -> None:
     headers = _bearer(101, name="坐席小李")
 
     # 2. 获取可用用户
-    r = client.get("/api/reception/eligible-users", headers=headers)
+    r = app_client.get("/api/reception/eligible-users", headers=headers)
     assert r.status_code == 200
     user_names = [u["name"] for u in r.json()]
     assert "坐席小李" in user_names
 
     # 3. 添加坐席
-    r = client.post(
+    r = app_client.post(
         "/api/reception/agents",
         json={"user_id": 101, "nickname": "小李客服", "max_concurrent": 8},
         headers=headers,
@@ -49,7 +49,7 @@ def test_agents_crud(client: TestClient, db_session: Session) -> None:
     assert agent1["status"] == "offline"
 
     # 4. 再次添加相同用户应报错 409
-    r_dup = client.post(
+    r_dup = app_client.post(
         "/api/reception/agents",
         json={"user_id": 101, "nickname": "小李2", "max_concurrent": 5},
         headers=headers,
@@ -57,7 +57,7 @@ def test_agents_crud(client: TestClient, db_session: Session) -> None:
     assert r_dup.status_code == 409
 
     # 5. 编辑坐席
-    r_update = client.put(
+    r_update = app_client.put(
         f"/api/reception/agents/{agent1['id']}",
         json={"nickname": "资深客服小李", "max_concurrent": 10, "status": "online"},
         headers=headers,
@@ -67,12 +67,12 @@ def test_agents_crud(client: TestClient, db_session: Session) -> None:
     assert r_update.json()["status"] == "online"
 
     # 6. 查询列表
-    r_list = client.get("/api/reception/agents?name=小李&statuses=online", headers=headers)
+    r_list = app_client.get("/api/reception/agents?name=小李&statuses=online", headers=headers)
     assert r_list.status_code == 200
     assert r_list.json()["total"] == 1
 
     # 7. 批量删除
-    r_del = client.post(
+    r_del = app_client.post(
         "/api/reception/agents/batch-remove",
         json={"agent_ids": [agent1["id"]]},
         headers=headers,
@@ -81,7 +81,7 @@ def test_agents_crud(client: TestClient, db_session: Session) -> None:
     assert r_del.json()["removed_count"] == 1
 
 
-def test_session_list_and_detail(client: TestClient, db_session: Session) -> None:
+def test_session_list_and_detail(app_client: TestClient, db_session: Session) -> None:
     headers = _bearer(1, name="admin", role="admin")
 
     s1 = ReceptionSession(
@@ -114,7 +114,7 @@ def test_session_list_and_detail(client: TestClient, db_session: Session) -> Non
     db_session.commit()
 
     # 1. 列表筛选
-    r = client.get("/api/reception/sessions?company_name=腾讯&is_human=是", headers=headers)
+    r = app_client.get("/api/reception/sessions?company_name=腾讯&is_human=是", headers=headers)
     assert r.status_code == 200
     data = r.json()
     assert data["total"] == 1
@@ -123,7 +123,7 @@ def test_session_list_and_detail(client: TestClient, db_session: Session) -> Non
     assert data["items"][0]["tenant_name"] == "腾讯集团总租户"
 
     # 2. 详情与消息
-    r_detail = client.get("/api/reception/sessions/ZXHH202609180001", headers=headers)
+    r_detail = app_client.get("/api/reception/sessions/ZXHH202609180001", headers=headers)
     assert r_detail.status_code == 200
     d = r_detail.json()
     assert d["session"]["company_name"] == "腾讯科技（深圳）有限公司"
@@ -131,7 +131,7 @@ def test_session_list_and_detail(client: TestClient, db_session: Session) -> Non
     assert d["messages"][0]["sender_type"] == "customer"
 
 
-def test_workbench_flow(client: TestClient, db_session: Session) -> None:
+def test_workbench_flow(app_client: TestClient, db_session: Session) -> None:
     headers = _bearer(35, name="杨慧莉", role="admin")
 
     s_queue = ReceptionSession(
@@ -150,33 +150,35 @@ def test_workbench_flow(client: TestClient, db_session: Session) -> None:
     db_session.commit()
 
     # 1. 查询工作台队列与数量
-    r = client.get("/api/reception/workbench/sessions", headers=headers)
+    r = app_client.get("/api/reception/workbench/sessions", headers=headers)
     assert r.status_code == 200
     q_data = r.json()
     assert q_data["counts"]["online_queue"] >= 1
     assert q_data["counts"]["online_in_progress"] >= 1
 
     # 2. 邀请排队进入进行中
-    r_inv = client.post("/api/reception/workbench/sessions/ZXHH202609180002/invite", headers=headers)
+    r_inv = app_client.post(
+        "/api/reception/workbench/sessions/ZXHH202609180002/invite", headers=headers
+    )
     assert r_inv.status_code == 200
     assert r_inv.json()["status"] == "in_progress"
 
     # 3. 挂起会话
-    r_sus = client.post(
+    r_sus = app_client.post(
         "/api/reception/workbench/sessions/ZXHH202609180002/suspend", headers=headers
     )
     assert r_sus.status_code == 200
     assert r_sus.json()["status"] == "pending"
 
     # 4. 重新激活会话
-    r_act = client.post(
+    r_act = app_client.post(
         "/api/reception/workbench/sessions/ZXHH202609180002/activate", headers=headers
     )
     assert r_act.status_code == 200
     assert r_act.json()["status"] == "in_progress"
 
     # 5. 发送消息
-    r_send = client.post(
+    r_send = app_client.post(
         "/api/reception/workbench/sessions/ZXHH202609180002/send-message",
         json={"content": "您的问题我们正在跟进中。"},
         headers=headers,
@@ -185,7 +187,7 @@ def test_workbench_flow(client: TestClient, db_session: Session) -> None:
     assert r_send.json()["content"] == "您的问题我们正在跟进中。"
 
     # 6. 转工单
-    r_trans = client.post(
+    r_trans = app_client.post(
         "/api/reception/workbench/sessions/ZXHH202609180002/transfer-ticket",
         json={"title": "转研发处理"},
         headers=headers,
@@ -195,14 +197,14 @@ def test_workbench_flow(client: TestClient, db_session: Session) -> None:
     assert "TKT-" in r_trans.json()["ticket_short_code"]
 
     # 7. 关闭会话
-    r_close = client.post(
+    r_close = app_client.post(
         "/api/reception/workbench/sessions/ZXHH202609180003/close", headers=headers
     )
     assert r_close.status_code == 200
     assert r_close.json()["status"] == "closed"
 
     # 8. 坐席助手搜索
-    r_search = client.get(
+    r_search = app_client.get(
         "/api/reception/workbench/assistant-search?type=knowledge&query=数电", headers=headers
     )
     assert r_search.status_code == 200

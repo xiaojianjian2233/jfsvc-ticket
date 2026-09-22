@@ -124,6 +124,7 @@ def from_subscribe_callback(data: dict[str, Any]) -> dict[str, Any]:
         # Identity / dedupe key
         "billId": data.get("billId") or data.get("id"),
         "billNumber": data.get("billNumber"),  # 来源工单编号（展示/搜索用）
+        "createDateTime": data.get("createDateTime"),  # KSM 工单创建时间（提单时间）
         # Ticket metadata
         "title": data.get("title"),
         "content": data.get("problem"),

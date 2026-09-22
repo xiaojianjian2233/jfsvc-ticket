@@ -112,6 +112,7 @@ def test_full_field_mapping_from_doc_example() -> None:
     customer number comes from customerInfo (mapping fixed 2026-05-14)."""
     data = {
         "billId": "R20240101-0001",
+        "createDateTime": "2026-09-18 10:20:30",
         "title": "工单主题",
         "problem": "问题描述内容",
         "version": {"mainproductname": "金蝶云星空"},
@@ -127,6 +128,7 @@ def test_full_field_mapping_from_doc_example() -> None:
     }
     out = from_subscribe_callback(data)
     assert out["billId"] == "R20240101-0001"
+    assert out["createDateTime"] == "2026-09-18 10:20:30"
     assert out["title"] == "工单主题"
     assert out["content"] == "问题描述内容"
     assert out["productLineCode"] == "cloud-erp-star"
