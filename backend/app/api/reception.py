@@ -1242,53 +1242,61 @@ def query_tenant_by_company_rpa_single(
     client_secret = config.get("client_secret") or ""
     endpoint = config.get("endpoint") or "/trdPlatform/tenant/query/by/company"
 
-    payload: dict[str, str] = {}
-    if tax_no and tax_no.strip():
-        payload["taxNo"] = tax_no.strip()
-    if company_name and company_name.strip():
-        payload["companyName"] = company_name.strip()
-
-    if not payload or not host or not client_id:
+    if not host or not client_id:
         return None
 
-    timestamp = str(int(time.time() * 1000))
-    raw_str = f"{client_id}{client_secret}{timestamp}"
-    sign = hashlib.sha256(raw_str.encode("utf-8")).hexdigest()
-    auth_header = f"SHA256 clientId={client_id},sign={sign},timestamp={timestamp}"
+    def _do_query(payload: dict[str, str]) -> dict[str, Any] | None:
+        timestamp = str(int(time.time() * 1000))
+        raw_str = f"{client_id}{client_secret}{timestamp}"
+        sign = hashlib.sha256(raw_str.encode("utf-8")).hexdigest()
+        auth_header = f"SHA256 clientId={client_id},sign={sign},timestamp={timestamp}"
+        url = f"{host}{endpoint}"
+        req_id = str(uuid.uuid4())
 
-    url = f"{host}{endpoint}"
-    req_id = str(uuid.uuid4())
+        try:
+            with httpx.Client(timeout=5.0) as client:
+                resp = client.post(
+                    url,
+                    json=payload,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": auth_header,
+                        "X-Request-Id": req_id,
+                    },
+                )
+                if resp.status_code == 200:
+                    res_json = resp.json()
+                    if res_json.get("errcode") == "0000" and res_json.get("data"):
+                        items = res_json["data"]
+                        if isinstance(items, list) and len(items) > 0:
+                            first = items[0]
+                            ou_no = first.get("tenantOuNo")
+                            t_name = first.get("tenantName")
+                            return {
+                                "errcode": "0000",
+                                "tenantNo": str(ou_no) if ou_no is not None else "",
+                                "tenantName": t_name or (company_name or "企业租户"),
+                                "status": first.get("status"),
+                                "createTime": first.get("createTime"),
+                                "purchasedProducts": ["发票云敏捷版", "数电发票乐企模块"],
+                            }
+                    return res_json
+        except Exception as e:
+            logger.warning("rpa_query_tenant_failed", exc_info=e)
+        return None
 
-    try:
-        with httpx.Client(timeout=5.0) as client:
-            resp = client.post(
-                url,
-                json=payload,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": auth_header,
-                    "X-Request-Id": req_id,
-                },
-            )
-            if resp.status_code == 200:
-                res_json = resp.json()
-                if res_json.get("errcode") == "0000" and res_json.get("data"):
-                    items = res_json["data"]
-                    if isinstance(items, list) and len(items) > 0:
-                        first = items[0]
-                        ou_no = first.get("tenantOuNo")
-                        t_name = first.get("tenantName")
-                        return {
-                            "errcode": "0000",
-                            "tenantNo": str(ou_no) if ou_no is not None else "",
-                            "tenantName": t_name or (company_name or "企业租户"),
-                            "status": first.get("status"),
-                            "createTime": first.get("createTime"),
-                            "purchasedProducts": ["发票云敏捷版", "数电发票乐企模块"],
-                        }
-                return res_json
-    except Exception as e:
-        logger.warning("rpa_query_tenant_failed", exc_info=e)
+    # 1. 优先按税号精准查询（税号通常具有唯一性）
+    if tax_no and tax_no.strip():
+        res = _do_query({"taxNo": tax_no.strip()})
+        if res and res.get("errcode") == "0000" and res.get("tenantNo"):
+            return res
+
+    # 2. 其次按企业名称查询
+    if company_name and company_name.strip():
+        res = _do_query({"companyName": company_name.strip()})
+        if res and res.get("errcode") == "0000" and res.get("tenantNo"):
+            return res
+
     return None
 
 
