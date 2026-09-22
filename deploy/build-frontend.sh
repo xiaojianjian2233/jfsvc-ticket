@@ -19,6 +19,7 @@ normalize_repo() {
   url="${url#ssh://git@github.com/}"
   url="${url#git@github.com:}"
   url="${url#github-ticket-hub:}"
+  url="${url#git@github-xiaojianjian:}"
   printf '%s' "${url#github-xiaojianjian:}"
 }
 if [[ "$(normalize_repo "$actual_repo")" != "xiaojianjian2233/jfsvc-ticket" ]]; then
