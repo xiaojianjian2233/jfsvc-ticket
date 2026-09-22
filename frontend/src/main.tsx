@@ -56,6 +56,7 @@ consumeSsoFragment();
 
 import { Layout } from "./components/Layout";
 import { LoginPage } from "./pages/login/LoginPage";
+import { CustomerClientApp } from "./pages/reception/client/CustomerClientApp";
 
 // 当前浏览器 URL 去掉 SPA basename 后的应用内路径（含 search），供 tabs 初始化。
 function currentAppPath(): string {
@@ -64,8 +65,8 @@ function currentAppPath(): string {
   if (base && p.startsWith(base)) p = p.slice(base.length);
   if (!p.startsWith("/")) p = "/" + p;
   const search = window.location.search;
-  // 登录页不作为 tab 初始路径
-  if (p === "/login") return "/";
+  // 登录页与客户在线支持端不作为管理后台 tab 初始路径
+  if (p === "/login" || p.startsWith("/client") || p.startsWith("/reception/client")) return "/";
   return p + search;
 }
 
@@ -120,6 +121,9 @@ createRoot(document.getElementById("root")!).render(
       <BrowserRouter basename={import.meta.env.BASE_URL}>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          {/* 客户在线支持端（H5 / 独立免登录公网页面） */}
+          <Route path="/client/*" element={<CustomerClientApp />} />
+          <Route path="/reception/client/*" element={<CustomerClientApp />} />
           {/* 认证区：Layout 内部用多标签 keep-alive 渲染具体页面（见 Layout + appRoutes）。
               catch-all 让所有子路径都进 Layout，由 TabsContext + 每 tab 的 <Routes> 分发。 */}
           <Route

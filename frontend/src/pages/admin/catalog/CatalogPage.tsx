@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as XLSX from "xlsx";
 import { ApiError, api, rawRequest } from "@/api/client";
+import { DateTimeRangePicker } from "@/components/DateTimeRangePicker";
 import { AdminTabs } from "../AdminTabs";
 
 // ---- 在岗用户 hook -------------------------------------------------------
@@ -44,6 +45,7 @@ function OwnerInput({
   const [open, setOpen] = useState(false);
   const [kw, setKw] = useState("");
   const boxRef = useRef<HTMLDivElement>(null);
+  const [dropUp, setDropUp] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -52,6 +54,18 @@ function OwnerInput({
     }
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  useEffect(() => {
+    if (open && boxRef.current) {
+      const rect = boxRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      if (spaceBelow < 240 && rect.top > 240) {
+        setDropUp(true);
+      } else {
+        setDropUp(false);
+      }
+    }
   }, [open]);
 
   const opts = (users.data ?? []).filter((u) =>
@@ -84,7 +98,11 @@ function OwnerInput({
         </button>
       </div>
       {open && (
-        <div className="absolute z-50 top-full left-0 mt-1 w-full bg-white border border-hub-border rounded-[8px] shadow-lg">
+        <div
+          className={`absolute z-50 ${
+            dropUp ? "bottom-full mb-1" : "top-full mt-1"
+          } left-0 min-w-[220px] w-full bg-white border border-hub-border rounded-[8px] shadow-lg`}
+        >
           <div className="p-1.5 border-b border-hub-border">
             <input
               autoFocus
@@ -94,7 +112,7 @@ function OwnerInput({
               className="w-full text-[12px] px-2 py-1 border border-hub-border rounded-[5px] outline-none focus:border-hub-teal"
             />
           </div>
-          <div className="max-h-[480px] overflow-y-auto">
+          <div className="max-h-[240px] overflow-y-auto">
             {opts.length === 0 ? (
               <div className="p-2 text-[11.5px] text-hub-textFaint text-center">无匹配</div>
             ) : (
@@ -125,9 +143,9 @@ const INPUT_CLS =
 const ADD_FORM_CLS =
   "flex gap-2 items-start p-3 border border-dashed border-hub-teal-border bg-hub-teal-light/50 rounded-[10px] flex-wrap";
 const PRIMARY_BTN =
-  "px-3.5 py-1.5 text-[12.5px] font-semibold bg-hub-teal text-white rounded-md disabled:opacity-50 hover:brightness-95";
+  "px-3.5 py-1.5 text-[12.5px] font-semibold bg-[rgb(102,139,221)] text-white rounded-md disabled:opacity-50 hover:opacity-90";
 const GHOST_BTN =
-  "px-3 py-1.5 text-[12px] font-semibold border border-hub-border rounded-md text-hub-textSecondary hover:bg-hub-panel disabled:opacity-50";
+  "px-3 py-1.5 text-[12px] font-semibold bg-[rgb(255,255,255)] border border-[rgb(161,168,177)] rounded-md text-slate-600 hover:bg-slate-50 disabled:opacity-50";
 
 const PL_QK = ["admin", "product-lines"] as const;
 const MOD_QK = ["admin", "modules", "all"] as const;
@@ -219,7 +237,7 @@ function ProductLineModulesSection() {
         </p>
       )}
       {modules.data && (
-        <ModuleTable modules={modules.data} onChanged={invalidate} />
+        <ModuleTable modules={modules.data} productLines={lines.data ?? []} onChanged={invalidate} />
       )}
 
       {/* 产品线列表弹窗 */}
@@ -831,6 +849,20 @@ function ModuleAddForm({
         <button type="submit" disabled={add.isPending} className={`${PRIMARY_BTN} self-start flex-none`}>
           {add.isPending ? "提交中…" : "添加"}
         </button>
+        <button
+          type="button"
+          onClick={() => {
+            setPl("");
+            setName("");
+            setProductOwner("");
+            setDevOwners("");
+            setError(null);
+            setDupModules([]);
+          }}
+          className={`${GHOST_BTN} self-start flex-none`}
+        >
+          清空
+        </button>
       </form>
       {error && <p className="text-[11px] text-hub-rose">{error}</p>}
       {dupModules.length > 0 && (
@@ -926,6 +958,234 @@ function FilterPopover({
   );
 }
 
+function formatDateTime(s: string | null | undefined): string {
+  if (!s) return "—";
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return "—";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const year = d.getFullYear();
+  const month = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const hours = pad(d.getHours());
+  const minutes = pad(d.getMinutes());
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
+}
+
+function isWithinTimeRange(itemDateStr: string | null | undefined, from: string, to: string): boolean {
+  if (!from && !to) return true;
+  if (!itemDateStr) return false;
+  const itemTime = new Date(itemDateStr).getTime();
+  if (isNaN(itemTime)) return false;
+
+  if (from) {
+    const fromIso = from.includes("T") ? from : from.replace(" ", "T");
+    const fromTime = new Date(fromIso).getTime();
+    if (!isNaN(fromTime) && itemTime < fromTime) return false;
+  }
+
+  if (to) {
+    let toIso = to.includes("T") ? to : to.replace(" ", "T");
+    if (toIso.length === 16) {
+      toIso += ":59";
+    } else if (toIso.length === 10) {
+      toIso += "T23:59:59";
+    }
+    const toTime = new Date(toIso).getTime();
+    if (!isNaN(toTime) && itemTime > toTime) return false;
+  }
+
+  return true;
+}
+
+interface DropdownOption {
+  code: string;
+  name: string;
+  subText?: string;
+}
+
+function MultiSelectSearchDropdown({
+  placeholder,
+  options,
+  selectedCodes,
+  onChange,
+  className = "",
+}: {
+  placeholder?: string;
+  options: DropdownOption[];
+  selectedCodes: string[];
+  onChange: (codes: string[]) => void;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [searchKw, setSearchKw] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const filteredOptions = useMemo(() => {
+    if (!searchKw.trim()) return options;
+    const kw = searchKw.toLowerCase();
+    return options.filter(
+      (o) =>
+        o.name.toLowerCase().includes(kw) ||
+        o.code.toLowerCase().includes(kw) ||
+        (o.subText && o.subText.toLowerCase().includes(kw))
+    );
+  }, [options, searchKw]);
+
+  const toggleOption = (code: string) => {
+    if (selectedCodes.includes(code)) {
+      onChange(selectedCodes.filter((c) => c !== code));
+    } else {
+      onChange([...selectedCodes, code]);
+    }
+  };
+
+  const selectAll = () => {
+    onChange(filteredOptions.map((o) => o.code));
+  };
+
+  const clearAll = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    onChange([]);
+  };
+
+  const displayText = useMemo(() => {
+    if (selectedCodes.length === 0) return placeholder || "全部";
+    const selectedNames = selectedCodes
+      .map((code) => options.find((o) => o.code === code)?.name ?? code)
+      .filter(Boolean);
+    if (selectedNames.length <= 2) {
+      return selectedNames.join("、");
+    }
+    return `${selectedNames.slice(0, 2).join("、")} 等${selectedNames.length}项`;
+  }, [selectedCodes, options, placeholder]);
+
+  return (
+    <div ref={containerRef} className={`relative w-full ${className}`}>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen((prev) => !prev)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen((prev) => !prev);
+          }
+        }}
+        className={`h-[25px] w-full border rounded-[5px] bg-white px-2 flex items-center justify-between cursor-pointer transition-colors text-[12px] ${
+          open
+            ? "border-[rgb(99,136,226)] ring-1 ring-[rgb(99,136,226)]/20"
+            : "border-slate-200 hover:border-slate-300"
+        }`}
+      >
+        <span
+          className={`truncate flex-1 mr-1 ${
+            selectedCodes.length === 0 ? "text-slate-400" : "text-slate-800 font-medium"
+          }`}
+          title={selectedCodes.length === 0 ? "" : displayText}
+        >
+          {displayText}
+        </span>
+        <div className="flex items-center gap-1.5 flex-none text-slate-400">
+          {selectedCodes.length > 0 && (
+            <button
+              type="button"
+              onClick={clearAll}
+              className="hover:text-rose-500 text-[13px] leading-none px-0.5 cursor-pointer"
+              title="清空已选"
+            >
+              ×
+            </button>
+          )}
+          <span className="text-[10px] select-none">▾</span>
+        </div>
+      </div>
+
+      {open && (
+        <div
+          className="absolute z-[60] left-0 mt-1 w-[300px] bg-white border border-slate-200 rounded-[8px] shadow-xl p-2 max-h-[300px] flex flex-col text-[12px] animate-in fade-in zoom-in-95 duration-100"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="mb-1.5">
+            <input
+              type="text"
+              autoFocus
+              value={searchKw}
+              onChange={(e) => setSearchKw(e.target.value)}
+              placeholder="快速搜索定位..."
+              className="w-full h-[28px] px-2 text-[12px] border border-slate-200 rounded-[5px] outline-none focus:border-[rgb(99,136,226)] bg-slate-50/50"
+            />
+          </div>
+
+          <div className="flex items-center justify-between px-1 py-1 mb-1 border-b border-slate-100 text-[11px] text-slate-400">
+            <span>
+              共 {filteredOptions.length} 项（已选 {selectedCodes.length} 项）
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={selectAll}
+                className="text-[rgb(99,136,226)] hover:underline cursor-pointer"
+              >
+                全选
+              </button>
+              <button
+                type="button"
+                onClick={() => onChange([])}
+                className="text-slate-400 hover:text-rose-500 cursor-pointer"
+              >
+                清空
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-0.5 max-h-[190px] overflow-y-auto flex-1">
+            {filteredOptions.length === 0 ? (
+              <div className="py-3 text-center text-slate-400 text-[11.5px]">暂无匹配选项</div>
+            ) : (
+              filteredOptions.map((opt) => {
+                const checked = selectedCodes.includes(opt.code);
+                return (
+                  <label
+                    key={opt.code}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-[5px] hover:bg-slate-50 cursor-pointer select-none text-slate-700 text-[12px] transition-colors"
+                  >
+                    <input
+                      type="checkbox"
+                      aria-label={opt.name}
+                      checked={checked}
+                      onChange={() => toggleOption(opt.code)}
+                      className="rounded border-slate-300 text-[rgb(99,136,226)] focus:ring-0 cursor-pointer"
+                    />
+                    <span className="truncate flex-1" title={opt.name}>
+                      {opt.name}
+                    </span>
+                    {opt.subText && (
+                      <span className="text-[10px] text-slate-400 shrink-0 font-mono">
+                        {opt.subText}
+                      </span>
+                    )}
+                  </label>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 type ColKey = "product_line_code" | "product_line_name" | "product_line_category" | "name" | "status" | "product_owner" | "dev_owners" | "updated_by" | "updated_at";
 
 const COL_HEADERS: { key: ColKey; label: string; width: number; sticky?: boolean }[] = [
@@ -936,11 +1196,26 @@ const COL_HEADERS: { key: ColKey; label: string; width: number; sticky?: boolean
   { key: "status", label: "状态", width: 72 },
   { key: "dev_owners", label: "研发责任人", width: 180 },
   { key: "product_owner", label: "产品责任人", width: 140 },
-  { key: "updated_at", label: "最后操作时间", width: 140 },
+  { key: "updated_at", label: "最后操作时间", width: 150 },
   { key: "updated_by", label: "最后操作人", width: 110 },
 ];
 
-function ModuleTable({ modules, onChanged }: { modules: Module[]; onChanged: () => void }) {
+function ModuleTable({
+  modules,
+  productLines = [],
+  onChanged,
+}: {
+  modules: Module[];
+  productLines?: ProductLine[];
+  onChanged: () => void;
+}) {
+  // 顶部搜索条件状态
+  const [selectedProductLines, setSelectedProductLines] = useState<string[]>([]);
+  const [selectedModules, setSelectedModules] = useState<string[]>([]);
+  const [devOwnerFilter, setDevOwnerFilter] = useState("");
+  const [updatedAtFrom, setUpdatedAtFrom] = useState("");
+  const [updatedAtTo, setUpdatedAtTo] = useState("");
+
   const [filters, setFilters] = useState<Partial<Record<ColKey, ColFilter>>>({
     status: { op: "eq", value: "启用" },
   });
@@ -958,6 +1233,53 @@ function ModuleTable({ modules, onChanged }: { modules: Module[]; onChanged: () 
     return () => document.removeEventListener("mousedown", onDoc);
   }, [openFilter]);
 
+  // 产品线选项（包含所有状态）
+  const productLineOptions = useMemo(() => {
+    return productLines.map((p) => ({
+      code: p.code,
+      name: p.name,
+      subText: p.code + (p.is_active === false ? " (已停用)" : ""),
+    }));
+  }, [productLines]);
+
+  // 模块选项（与所选产品线联动）
+  const moduleOptions = useMemo(() => {
+    const relevantModules = selectedProductLines.length > 0
+      ? modules.filter((m) => selectedProductLines.includes(m.product_line_code))
+      : modules;
+
+    const seen = new Set<string>();
+    const opts: DropdownOption[] = [];
+    for (const m of relevantModules) {
+      if (!m.name || seen.has(m.name)) continue;
+      seen.add(m.name);
+      opts.push({
+        code: m.name,
+        name: m.name,
+        subText: m.product_line_name || m.product_line_code,
+      });
+    }
+    return opts;
+  }, [modules, selectedProductLines]);
+
+  // 当产品线改变时，剔除已选模块中不属于当前产品线的项
+  useEffect(() => {
+    if (selectedProductLines.length === 0) return;
+    const validModuleNames = new Set(moduleOptions.map((o) => o.code));
+    setSelectedModules((prev) => {
+      const next = prev.filter((name) => validModuleNames.has(name));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [selectedProductLines, moduleOptions]);
+
+  function handleReset() {
+    setSelectedProductLines([]);
+    setSelectedModules([]);
+    setDevOwnerFilter("");
+    setUpdatedAtFrom("");
+    setUpdatedAtTo("");
+  }
+
   function getCellVal(m: Module, key: ColKey): string {
     switch (key) {
       case "product_line_code": return m.product_line_code ?? "";
@@ -968,20 +1290,56 @@ function ModuleTable({ modules, onChanged }: { modules: Module[]; onChanged: () 
       case "product_owner": return m.product_owner ?? "";
       case "dev_owners": return m.dev_owners ?? "";
       case "updated_by": return m.updated_by ?? "";
-      case "updated_at": { if (!m.updated_at) return ""; const d = new Date(m.updated_at); const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+      case "updated_at": return formatDateTime(m.updated_at);
     }
   }
 
   const filtered = useMemo(() => {
-    return modules.filter((m) =>
-      (Object.keys(filters) as ColKey[]).every((k) => {
+    return modules.filter((m) => {
+      // 1. 顶部产品线筛选（多选）
+      if (
+        selectedProductLines.length > 0 &&
+        !selectedProductLines.includes(m.product_line_code)
+      ) {
+        return false;
+      }
+      // 2. 顶部模块筛选（多选，联动产品线）
+      if (
+        selectedModules.length > 0 &&
+        !selectedModules.includes(m.name)
+      ) {
+        return false;
+      }
+      // 3. 顶部研发责任人筛选（模糊匹配）
+      if (
+        devOwnerFilter.trim() &&
+        !(m.dev_owners?.toLowerCase().includes(devOwnerFilter.trim().toLowerCase()))
+      ) {
+        return false;
+      }
+      // 4. 顶部最后操作时间范围筛选
+      if (
+        !isWithinTimeRange(m.updated_at, updatedAtFrom, updatedAtTo)
+      ) {
+        return false;
+      }
+      // 5. 列头筛选（如有）
+      return (Object.keys(filters) as ColKey[]).every((k) => {
         const f = filters[k];
         if (!f || !f.value) return true;
         return applyFilter(getCellVal(m, k), f);
-      })
-    );
+      });
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modules, filters]);
+  }, [
+    modules,
+    selectedProductLines,
+    selectedModules,
+    devOwnerFilter,
+    updatedAtFrom,
+    updatedAtTo,
+    filters,
+  ]);
 
   // sticky left offsets（序号列固定在最左，占48px，后续 sticky 列偏移从48开始）
   const stickyKeys = COL_HEADERS.filter((c) => c.sticky).map((c) => c.key);
@@ -1004,14 +1362,90 @@ function ModuleTable({ modules, onChanged }: { modules: Module[]; onChanged: () 
             {filtered.length !== modules.length ? `${filtered.length} / ${modules.length} 条` : `${modules.length} 条`}
           </span>
         </span>
-        {Object.values(filters).some((f) => f?.value) && (
-          <button onClick={() => setFilters({ status: { op: "eq", value: "启用" } })} className="text-[11.5px] text-hub-rose hover:underline">
-            重置筛选
+        {(Object.values(filters).some((f) => f?.value) || selectedProductLines.length > 0 || selectedModules.length > 0 || devOwnerFilter || updatedAtFrom || updatedAtTo) && (
+          <button
+            onClick={() => {
+              setFilters({ status: { op: "eq", value: "启用" } });
+              handleReset();
+            }}
+            className="text-[11.5px] text-hub-rose hover:underline cursor-pointer"
+          >
+            重置全部筛选
           </button>
         )}
       </div>
-      <div className="bg-white border border-hub-border rounded-[10px] overflow-hidden">
-        <div className="overflow-x-auto">
+
+      {/* 上方搜查查询条件区 */}
+      <div className="flex items-center gap-[5px] mb-3 relative z-30">
+        {/* 筛选框底层矩形 */}
+        <div className="bg-white border border-hub-border rounded-[10px] p-2.5 shadow-xs flex-1">
+          <div className="flex items-center justify-between gap-3 text-[12px]">
+            {/* 产品线 */}
+            <div className="w-[300px] flex-none">
+              <MultiSelectSearchDropdown
+                placeholder="产品线"
+                options={productLineOptions}
+                selectedCodes={selectedProductLines}
+                onChange={setSelectedProductLines}
+              />
+            </div>
+
+            {/* 模块（与产品线联动） */}
+            <div className="w-[300px] flex-none">
+              <MultiSelectSearchDropdown
+                placeholder="模块"
+                options={moduleOptions}
+                selectedCodes={selectedModules}
+                onChange={setSelectedModules}
+              />
+            </div>
+
+            {/* 研发责任人 */}
+            <input
+              type="text"
+              value={devOwnerFilter}
+              onChange={(e) => setDevOwnerFilter(e.target.value)}
+              placeholder="研发责任人"
+              className="h-[25px] w-[300px] px-2.5 border border-slate-200 rounded-[5px] text-[12px] outline-none focus:border-[rgb(99,136,226)] bg-white placeholder:text-slate-400 flex-none"
+            />
+
+            {/* 最后操作时间 */}
+            <div className="w-[300px] flex-none" title="最后操作时间">
+              <DateTimeRangePicker
+                fromValue={updatedAtFrom}
+                toValue={updatedAtTo}
+                onChange={(from, to) => {
+                  setUpdatedAtFrom(from);
+                  setUpdatedAtTo(to);
+                }}
+                className="!h-[25px] !w-[300px] !rounded-[5px] !text-[12px] !border-slate-200"
+                placeholderFrom="开始时间"
+                placeholderTo="结束时间"
+                includeTime={true}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* 查询与重置操作按钮组合 */}
+        <div className="flex items-center gap-2 flex-none">
+          <button
+            type="button"
+            className="h-[25px] px-3.5 bg-[rgb(99,136,226)] text-white rounded-[5px] text-[12.5px] font-medium hover:opacity-90 transition cursor-pointer flex items-center justify-center shadow-xs"
+          >
+            查询
+          </button>
+          <button
+            type="button"
+            onClick={handleReset}
+            className="h-[25px] px-3 border border-slate-200 text-slate-600 rounded-[5px] text-[12.5px] hover:bg-slate-50 transition cursor-pointer flex items-center justify-center"
+          >
+            重置
+          </button>
+        </div>
+      </div>
+      <div className="bg-white border border-hub-border rounded-[10px] overflow-hidden min-h-[560px] flex flex-col shadow-sm">
+        <div className="overflow-x-auto flex-1 min-h-[560px]">
           <table className="border-collapse w-full text-[12.5px]" style={{ minWidth: COL_HEADERS.reduce((s, c) => s + c.width, 0) + 140 + 48 }}>
             <thead>
               <tr className="bg-hub-panel border-b border-hub-border">
@@ -1129,11 +1563,6 @@ function ModuleRow({
     });
   }
 
-  function fmtDate(s: string | null | undefined) {
-    if (!s) return "—";
-    return new Date(s).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
-  }
-
   const cells: Record<ColKey, React.ReactNode> = {
     product_line_code: <span className="font-mono text-[11px] text-hub-textMuted">{m.product_line_code}</span>,
     product_line_name: <span className="font-semibold">{m.product_line_name ?? "—"}</span>,
@@ -1153,22 +1582,26 @@ function ModuleRow({
       </span>
     ),
     product_owner: editing ? (
-      <OwnerInput
-        value={productOwner}
-        onChange={setProductOwner}
-        placeholder="产品责任人"
-        className="w-full"
-      />
+      <div className="relative z-20">
+        <OwnerInput
+          value={productOwner}
+          onChange={setProductOwner}
+          placeholder="产品责任人"
+          className="w-full"
+        />
+      </div>
     ) : <span className="text-hub-textSecondary">{m.product_owner || "—"}</span>,
     dev_owners: editing ? (
-      <OwnerInput
-        value={devOwners}
-        onChange={setDevOwners}
-        placeholder="多人逗号分隔"
-        className="w-full"
-      />
+      <div className="relative z-20">
+        <OwnerInput
+          value={devOwners}
+          onChange={setDevOwners}
+          placeholder="多人逗号分隔"
+          className="w-full"
+        />
+      </div>
     ) : <span className="text-hub-textSecondary">{m.dev_owners || "—"}</span>,
-    updated_at: <span className="font-mono text-[11px] text-hub-textFaint">{fmtDate(m.updated_at)}</span>,
+    updated_at: <span className="font-mono text-[11px] text-hub-textFaint">{formatDateTime(m.updated_at)}</span>,
     updated_by: <span className="text-hub-textSecondary">{m.updated_by || "—"}</span>,
   };
 

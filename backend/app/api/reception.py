@@ -575,16 +575,19 @@ def invite_session(
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
 
+    agent_record = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == user.id).first()
+    agent_display_name = agent_record.nickname if (agent_record and agent_record.nickname) else user.name
+
     session.status = "in_progress"
     session.is_human = True
     session.agent_user_id = user.id
-    session.agent_name = user.name
+    session.agent_name = agent_display_name
 
     sys_msg = ReceptionMessage(
         session_id=session.id,
         sender_type="system",
         sender_name="系统通知",
-        content=f"坐席【{user.name}】已接入本次会话，正在为您提供服务。",
+        content=f"已为您分配在线坐席【{agent_display_name}】，正在接入会话...",
         is_read=True,
     )
     db.add(sys_msg)
@@ -605,11 +608,14 @@ def suspend_session(
 
     session.status = "pending"
 
+    agent_record = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == user.id).first()
+    agent_display_name = agent_record.nickname if (agent_record and agent_record.nickname) else user.name
+
     # 系统自动回复客户
     auto_reply = ReceptionMessage(
         session_id=session.id,
         sender_type="agent",
-        sender_name=user.name,
+        sender_name=agent_display_name,
         content="你的问题，技术人员正在分析处理中，需要点时间定位问题，收到结论后同步给你。",
         is_read=True,
     )
@@ -630,14 +636,7 @@ def activate_session(
         raise HTTPException(status_code=404, detail="会话不存在")
 
     session.status = "in_progress"
-    sys_msg = ReceptionMessage(
-        session_id=session.id,
-        sender_type="system",
-        sender_name="系统通知",
-        content=f"会话已被坐席【{user.name}】重新激活。",
-        is_read=True,
-    )
-    db.add(sys_msg)
+    session.updated_at = datetime.now(timezone.utc)
     db.commit()
     return {"ok": True, "status": "in_progress"}
 
@@ -646,39 +645,45 @@ def activate_session(
 def close_session(
     session_id: str,
     db: Session = Depends(get_session),
-    user: AuthedUser = Depends(require_user),
+    _user: AuthedUser = Depends(require_user),
 ) -> dict[str, Any]:
-    """【关闭】会话：发送结束通知并标记为已关闭。"""
+    """【结束】会话。"""
     session = db.query(ReceptionSession).filter(ReceptionSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
 
+    now = datetime.now(timezone.utc)
     session.status = "closed"
-    session.closed_at = datetime.now(timezone.utc)
+    session.closed_at = now
+    session.updated_at = now
 
-    auto_msg = ReceptionMessage(
+    sys_msg = ReceptionMessage(
         session_id=session.id,
         sender_type="system",
         sender_name="系统通知",
         content="您的问题已解决，本次会话已结束，后续如有其他使用问题，可发起新的会话咨询。",
         is_read=True,
+        created_at=now,
     )
-    db.add(auto_msg)
+    db.add(sys_msg)
     db.commit()
     return {"ok": True, "status": "closed"}
 
 
 @router.post("/workbench/sessions/{session_id}/transfer-ticket")
-def transfer_session_to_ticket(
+def convert_to_ticket(
     session_id: str,
-    body: TransferTicketBody,
+    body: ConvertTicketBody,
     db: Session = Depends(get_session),
     user: AuthedUser = Depends(require_user),
 ) -> dict[str, Any]:
-    """【转工单】：创建工单并给客户自动回复工单编号。"""
+    """【转工单】创建/关联工单并完成会话转换。"""
     session = db.query(ReceptionSession).filter(ReceptionSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
+
+    agent_record = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == user.id).first()
+    agent_display_name = agent_record.nickname if (agent_record and agent_record.nickname) else user.name
 
     # 生成模拟/关联工单
     random_num = random.randint(5000, 9999)
@@ -689,7 +694,7 @@ def transfer_session_to_ticket(
     auto_msg = ReceptionMessage(
         session_id=session.id,
         sender_type="agent",
-        sender_name=user.name,
+        sender_name=agent_display_name,
         content=f"您的问题需要转工单推送到产研修复，已经帮您创建工单，工单号 {ticket_code}，后续工单进度会通过短信通知。",
         is_read=True,
     )
@@ -710,11 +715,14 @@ def send_agent_message(
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
 
+    agent_record = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == user.id).first()
+    agent_display_name = agent_record.nickname if (agent_record and agent_record.nickname) else user.name
+
     now = datetime.now(timezone.utc)
     msg = ReceptionMessage(
         session_id=session.id,
         sender_type="agent",
-        sender_name=user.name,
+        sender_name=agent_display_name,
         content=body.content.strip(),
         is_read=True,
         created_at=now,
@@ -722,7 +730,7 @@ def send_agent_message(
     session.last_message_at = now
     session.agent_last_replied_at = now
     session.agent_user_id = user.id
-    session.agent_name = user.name
+    session.agent_name = agent_display_name
     db.add(msg)
     db.commit()
     db.refresh(msg)
@@ -904,17 +912,19 @@ def handover_and_offline(
         .all()
     )
 
+    from_name = from_agent.nickname or from_agent.user_name
+    to_name = to_agent.nickname or to_agent.user_name
     now = datetime.now(timezone.utc)
     for s in in_prog_sessions:
         s.agent_user_id = to_agent.user_id
-        s.agent_name = to_agent.user_name
+        s.agent_name = to_name
         s.updated_at = now
         # 写入系统转交提示
         sys_msg = ReceptionMessage(
             session_id=s.id,
             sender_type="system",
             sender_name="系统通知",
-            content=f"会话已由坐席【{from_agent.user_name}】转交给【{to_agent.user_name}】继续为您服务。",
+            content=f"会话已由坐席【{from_name}】转交给【{to_name}】继续为您服务。",
             is_read=True,
             created_at=now,
         )
@@ -928,8 +938,8 @@ def handover_and_offline(
     return {
         "ok": True,
         "transferred_count": len(in_prog_sessions),
-        "from_agent": from_agent.user_name,
-        "to_agent": to_agent.user_name,
+        "from_agent": from_name,
+        "to_agent": to_name,
     }
 
 
@@ -938,12 +948,8 @@ def handover_and_offline(
 # -----------------------------------------------------------------------------
 
 
-@router.post("/workbench/auto-dispatch")
-def auto_dispatch_sessions(
-    db: Session = Depends(get_session),
-    _user: AuthedUser = Depends(require_user),
-) -> dict[str, Any]:
-    """根据接待时间区间和在线坐席容量，按先进先出与轮询（Round-Robin）原则自动分配排队会话。"""
+def dispatch_online_sessions_internal(db: Session) -> dict[str, Any]:
+    """根据在线坐席容量，按先进先出与轮询（Round-Robin）原则自动分配排队会话。"""
     # 1. 查询在线坐席
     online_agents = (
         db.query(ReceptionAgent)
@@ -965,6 +971,7 @@ def auto_dispatch_sessions(
                 or_(
                     ReceptionSession.agent_user_id == ag.user_id,
                     ReceptionSession.agent_name == ag.user_name,
+                    ReceptionSession.agent_name == ag.nickname,
                 ),
             )
             .scalar()
@@ -997,9 +1004,7 @@ def auto_dispatch_sessions(
     agent_idx = 0
 
     for s in queue_sessions:
-        # 寻找下一个还有剩余容量的坐席
         found = False
-        start_search = agent_idx
         for _ in range(len(agent_capacities)):
             curr = agent_capacities[agent_idx % len(agent_capacities)]
             agent_idx += 1
@@ -1007,18 +1012,19 @@ def auto_dispatch_sessions(
                 target_agent = curr["agent"]
                 curr["remaining"] -= 1
 
-                # 分配会话
+                # 分配会话：使用坐席昵称（nickname），隐藏真实姓名
+                agent_display_name = target_agent.nickname or target_agent.user_name
                 s.status = "in_progress"
                 s.is_human = True
                 s.agent_user_id = target_agent.user_id
-                s.agent_name = target_agent.user_name
+                s.agent_name = agent_display_name
                 s.updated_at = now
 
                 sys_msg = ReceptionMessage(
                     session_id=s.id,
                     sender_type="system",
                     sender_name="系统通知",
-                    content=f"已为您分配在线坐席【{target_agent.user_name}】，正在接入会话...",
+                    content=f"已为您分配在线坐席【{agent_display_name}】，正在接入会话...",
                     is_read=True,
                     created_at=now,
                 )
@@ -1028,9 +1034,505 @@ def auto_dispatch_sessions(
                 break
 
         if not found:
-            # 所有在线坐席容量均已用尽，剩余会话继续排队
             break
 
     db.commit()
     return {"dispatched": dispatched_count}
+
+
+@router.post("/workbench/auto-dispatch")
+def auto_dispatch_sessions(
+    db: Session = Depends(get_session),
+    _user: AuthedUser = Depends(require_user),
+) -> dict[str, Any]:
+    """根据接待时间区间和在线坐席容量，按先进先出与轮询（Round-Robin）原则自动分配排队会话。"""
+    return dispatch_online_sessions_internal(db)
+
+
+# -----------------------------------------------------------------------------
+# 7. 在线接待客户端 API (Customer Client Public Endpoints)
+# -----------------------------------------------------------------------------
+
+
+class ClientLookupCompany(BaseModel):
+    company_name: str
+    tax_no: str
+    tenant_name: str | None = None
+    tenant_no: str | None = None
+    purchased_products: list[str] = []
+    contact_name: str | None = None
+
+
+class ClientLookupPhoneResponse(BaseModel):
+    phone: str
+    exists: bool
+    count: int
+    items: list[ClientLookupCompany]
+
+
+class EnterpriseSearchResult(BaseModel):
+    company_name: str
+    tax_no: str
+    status: str = "存续"
+    legal_person: str = ""
+
+
+class TenantProfileRequest(BaseModel):
+    company_name: str
+    tax_no: str
+
+
+class TenantProfileResponse(BaseModel):
+    tenant_no: str
+    tenant_name: str
+    purchased_products: list[str]
+
+
+class ClientInitSessionRequest(BaseModel):
+    contact_name: str | None = None
+    contact_phone: str
+    company_name: str
+    tax_no: str
+    tenant_name: str | None = None
+    tenant_no: str | None = None
+    purchased_products: list[str] = []
+    is_historical: bool = False
+
+
+class ClientSendMessageRequest(BaseModel):
+    content: str
+    sender_name: str = "客户"
+
+
+class ClientEvaluateRequest(BaseModel):
+    score: int
+    tags: list[str] = []
+    comment: str = ""
+
+
+MOCK_ENTERPRISES = [
+    {"company_name": "腾讯科技（深圳）有限公司", "tax_no": "91440300708461136T", "status": "存续", "legal_person": "马化腾"},
+    {"company_name": "阿里巴巴（中国）网络技术有限公司", "tax_no": "91330100716105852F", "status": "存续", "legal_person": "蒋芳"},
+    {"company_name": "北京百度网讯科技有限公司", "tax_no": "91110000802100433B", "status": "存续", "legal_person": "梁志祥"},
+    {"company_name": "华为技术有限公司", "tax_no": "914403001922038216", "status": "存续", "legal_person": "赵明路"},
+    {"company_name": "比亚迪股份有限公司", "tax_no": "91440300192317458F", "status": "存续", "legal_person": "王传福"},
+    {"company_name": "美团科技有限公司", "tax_no": "91110108MA01712M9L", "status": "存续", "legal_person": "王兴"},
+    {"company_name": "上海寻梦信息技术有限公司", "tax_no": "91310000324443210P", "status": "存续", "legal_person": "朱健冲"},
+    {"company_name": "浙江吉利控股集团有限公司", "tax_no": "91330000749021884X", "status": "存续", "legal_person": "李书福"},
+    {"company_name": "深圳市大疆创新科技有限公司", "tax_no": "91440300795432587N", "status": "存续", "legal_person": "汪滔"},
+    {"company_name": "中国移动通信集团有限公司", "tax_no": "911100007109250324", "status": "存续", "legal_person": "杨杰"},
+]
+
+
+@router.get("/client/lookup-phone", response_model=ClientLookupPhoneResponse)
+def client_lookup_phone(
+    phone: str = Query(..., min_length=11, max_length=11),
+    db: Session = Depends(get_session),
+) -> ClientLookupPhoneResponse:
+    """根据手机号检索历史去重企业列表及租户/产品信息"""
+    phone = phone.strip()
+    # 严格校验：11位数字、以1开头、排除如 11111111111 等全重复数字
+    if not (len(phone) == 11 and phone.isdigit() and phone.startswith("1") and len(set(phone)) > 1):
+        raise HTTPException(status_code=400, detail="非法手机号码，请输入有效的11位手机号码")
+
+    sessions = (
+        db.query(ReceptionSession)
+        .filter(ReceptionSession.contact_phone == phone)
+        .order_by(desc(ReceptionSession.created_at))
+        .all()
+    )
+
+    seen = set()
+    items: list[ClientLookupCompany] = []
+    for s in sessions:
+        if not s.company_name:
+            continue
+        key = (s.company_name.strip(), (s.tax_no or "").strip())
+        if key not in seen:
+            seen.add(key)
+            items.append(
+                ClientLookupCompany(
+                    company_name=s.company_name.strip(),
+                    tax_no=s.tax_no or "",
+                    tenant_name=s.tenant_name,
+                    tenant_no=s.tenant_no,
+                    purchased_products=s.purchased_products or [],
+                    contact_name=s.contact_name,
+                )
+            )
+
+    return ClientLookupPhoneResponse(
+        phone=phone,
+        exists=len(items) > 0,
+        count=len(items),
+        items=items,
+    )
+
+
+@router.get("/client/search-enterprises", response_model=list[EnterpriseSearchResult])
+def client_search_enterprises(
+    keyword: str = Query(..., min_length=1),
+    db: Session = Depends(get_session),
+) -> list[EnterpriseSearchResult]:
+    """工商局企业模糊联想搜索适配接口"""
+    kw = keyword.strip()
+    results: list[EnterpriseSearchResult] = []
+    seen = set()
+
+    # 1. 优先从数据库既有会话企业中模糊匹配
+    db_companies = (
+        db.query(ReceptionSession.company_name, ReceptionSession.tax_no)
+        .filter(ReceptionSession.company_name.ilike(f"%{kw}%"))
+        .distinct()
+        .limit(10)
+        .all()
+    )
+    for name, tax in db_companies:
+        if name and name not in seen:
+            seen.add(name)
+            results.append(
+                EnterpriseSearchResult(
+                    company_name=name,
+                    tax_no=tax or f"91440300{random.randint(10000000, 99999999)}A",
+                    status="存续",
+                )
+            )
+
+    # 2. 从工商局种子推荐中查找
+    for item in MOCK_ENTERPRISES:
+        if kw in item["company_name"] and item["company_name"] not in seen:
+            seen.add(item["company_name"])
+            results.append(EnterpriseSearchResult(**item))
+
+    # 3. 如未完全匹配，动态生成一条规范纳税人识别号供客户一键录入
+    if not any(r.company_name == kw for r in results) and len(kw) >= 2:
+        code_suffix = "".join([str(ord(c) % 10) for c in kw[:6]]).ljust(10, "8")
+        results.insert(
+            0,
+            EnterpriseSearchResult(
+                company_name=kw,
+                tax_no=f"91310115{code_suffix}X",
+                status="存续",
+            ),
+        )
+
+    return results[:10]
+
+
+@router.post("/client/fetch-tenant-profile", response_model=TenantProfileResponse)
+def client_fetch_tenant_profile(
+    body: TenantProfileRequest,
+    db: Session = Depends(get_session),
+) -> TenantProfileResponse:
+    """运营接口适配器：根据企业名称与税号查询归属租户和已购产品信息"""
+    existing = (
+        db.query(ReceptionSession)
+        .filter(
+            or_(
+                ReceptionSession.company_name == body.company_name.strip(),
+                ReceptionSession.tax_no == body.tax_no.strip(),
+            )
+        )
+        .first()
+    )
+    if existing and existing.tenant_name and existing.tenant_no:
+        return TenantProfileResponse(
+            tenant_no=existing.tenant_no,
+            tenant_name=existing.tenant_name,
+            purchased_products=existing.purchased_products or ["发票云标准版", "数电发票采集模块"],
+        )
+
+    t_no = f"TNT_{datetime.now(timezone.utc).strftime('%Y%m%d')}_{random.randint(1000, 9999)}"
+    t_name = f"{body.company_name[:4]}企业租户"
+    return TenantProfileResponse(
+        tenant_no=t_no,
+        tenant_name=t_name,
+        purchased_products=["发票云敏捷版", "数电乐企开票组件", "进项发票查验服务"],
+    )
+
+
+@router.post("/client/init-session", response_model=SessionDetailOut)
+def client_init_session(
+    body: ClientInitSessionRequest,
+    db: Session = Depends(get_session),
+) -> SessionDetailOut:
+    """客户信息提交与会话初始化"""
+    phone = body.contact_phone.strip()
+    if not (len(phone) == 11 and phone.isdigit() and phone.startswith("1") and len(set(phone)) > 1):
+        raise HTTPException(status_code=400, detail="非法手机号码，请输入有效的11位手机号码")
+
+    contact_name = (body.contact_name or "").strip()
+    if not contact_name:
+        history_session = (
+            db.query(ReceptionSession)
+            .filter(ReceptionSession.contact_phone == phone)
+            .filter(ReceptionSession.contact_name.isnot(None))
+            .filter(ReceptionSession.contact_name != "")
+            .order_by(desc(ReceptionSession.created_at))
+            .first()
+        )
+        if history_session and history_session.contact_name:
+            contact_name = history_session.contact_name
+        else:
+            contact_name = f"客户_{phone[-4:]}"
+
+    session_id = generate_session_id(db)
+    now = datetime.now(timezone.utc)
+
+    tenant_name = body.tenant_name
+    tenant_no = body.tenant_no
+    purchased_products = body.purchased_products
+
+    if not tenant_name or not tenant_no:
+        profile = client_fetch_tenant_profile(
+            TenantProfileRequest(company_name=body.company_name, tax_no=body.tax_no), db
+        )
+        tenant_name = tenant_name or profile.tenant_name
+        tenant_no = tenant_no or profile.tenant_no
+        purchased_products = purchased_products or profile.purchased_products
+
+    session = ReceptionSession(
+        id=session_id,
+        session_type="online",
+        status="queue",
+        is_human=True,
+        agent_name="在线待分配",
+        company_name=body.company_name.strip(),
+        tax_no=body.tax_no.strip(),
+        tenant_name=tenant_name,
+        tenant_no=tenant_no,
+        contact_name=contact_name,
+        contact_phone=phone,
+        purchased_products=purchased_products or ["发票云标准版"],
+        is_in_service="服务期内",
+        unread_count=0,
+        last_message="客户发起了新的在线咨询",
+        last_message_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(session)
+
+    welcome_msg = ReceptionMessage(
+        session_id=session_id,
+        sender_type="system",
+        sender_name="发票云小助手",
+        content=f"您好！欢迎使用发票云售后在线支持。系统已为您建立会话【{session_id}】，正在为您接入在线专业客服，请稍候...",
+        is_read=True,
+        created_at=now,
+    )
+    db.add(welcome_msg)
+    db.commit()
+    db.refresh(session)
+
+    # 尝试自动分配在线坐席
+    dispatch_online_sessions_internal(db)
+    db.refresh(session)
+
+    messages = (
+        db.query(ReceptionMessage)
+        .filter(ReceptionMessage.session_id == session_id)
+        .order_by(ReceptionMessage.created_at.asc())
+        .all()
+    )
+    return SessionDetailOut(
+        session=SessionListItemOut.model_validate(session),
+        messages=[MessageOut.model_validate(m) for m in messages],
+    )
+
+
+@router.get("/client/sessions")
+def client_get_sessions(
+    phone: str = Query(..., min_length=11, max_length=11),
+    db: Session = Depends(get_session),
+) -> dict[str, list[dict[str, Any]]]:
+    """查询该手机号关联的会话列表（按「24小时内未关闭」与「已结束」分组）"""
+    phone = phone.strip()
+    sessions = (
+        db.query(ReceptionSession)
+        .filter(ReceptionSession.contact_phone == phone)
+        .order_by(desc(ReceptionSession.created_at))
+        .all()
+    )
+    now = datetime.now(timezone.utc)
+    recent_open: list[ReceptionSession] = []
+    closed: list[ReceptionSession] = []
+
+    for s in sessions:
+        if s.status in ("closed", "converted"):
+            closed.append(s)
+        else:
+            created_at = s.created_at
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            delta = now - created_at
+            if delta.total_seconds() <= 24 * 3600:
+                recent_open.append(s)
+            else:
+                closed.append(s)
+
+    return {
+        "recent_open": [SessionListItemOut.model_validate(s).model_dump() for s in recent_open],
+        "closed": [SessionListItemOut.model_validate(s).model_dump() for s in closed],
+    }
+
+
+@router.get("/client/sessions/{session_id}/messages", response_model=list[MessageOut])
+def client_get_messages(
+    session_id: str,
+    db: Session = Depends(get_session),
+) -> list[MessageOut]:
+    """查询指定会话的所有对话消息记录"""
+    msgs = (
+        db.query(ReceptionMessage)
+        .filter(ReceptionMessage.session_id == session_id)
+        .order_by(ReceptionMessage.created_at.asc())
+        .all()
+    )
+    return [MessageOut.model_validate(m) for m in msgs]
+
+
+@router.post("/client/sessions/{session_id}/send-message", response_model=MessageOut)
+def client_send_message(
+    session_id: str,
+    body: ClientSendMessageRequest,
+    db: Session = Depends(get_session),
+) -> MessageOut:
+    """客户发送消息（支持文本、图片、文件）"""
+    session = db.query(ReceptionSession).filter(ReceptionSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if session.status in ("closed", "converted"):
+        raise HTTPException(status_code=400, detail="当前会话已结束，不可继续发送消息")
+
+    now = datetime.now(timezone.utc)
+    msg = ReceptionMessage(
+        session_id=session_id,
+        sender_type="customer",
+        sender_name=body.sender_name or session.contact_name or "客户",
+        content=body.content,
+        is_read=False,
+        created_at=now,
+    )
+    db.add(msg)
+
+    session.last_message = body.content[:200]
+    session.last_message_at = now
+    session.unread_count = (session.unread_count or 0) + 1
+    session.updated_at = now
+
+    db.commit()
+    db.refresh(msg)
+    return MessageOut.model_validate(msg)
+
+
+@router.post("/client/sessions/{session_id}/close")
+def client_close_session(
+    session_id: str,
+    db: Session = Depends(get_session),
+) -> dict[str, str]:
+    """客户自主点击【结束】会话"""
+    session = db.query(ReceptionSession).filter(ReceptionSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    now = datetime.now(timezone.utc)
+    session.status = "closed"
+    session.closed_at = now
+    session.updated_at = now
+
+    sys_msg = ReceptionMessage(
+        session_id=session_id,
+        sender_type="system",
+        sender_name="系统通知",
+        content="客户已自主结束会话。感谢您的咨询，请对本次服务进行评价！",
+        is_read=True,
+        created_at=now,
+    )
+    db.add(sys_msg)
+    db.commit()
+    return {"status": "ok", "closed_at": now.isoformat()}
+
+
+@router.post("/client/sessions/{session_id}/evaluate")
+def client_evaluate_session(
+    session_id: str,
+    body: ClientEvaluateRequest,
+    db: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """客户对已结束的会话进行满意度评价"""
+    session = db.query(ReceptionSession).filter(ReceptionSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    now = datetime.now(timezone.utc)
+    eval_text = (
+        f"【客户服务评价】评分：{body.score}星 | "
+        f"标签：{', '.join(body.tags) if body.tags else '无'} | "
+        f"意见反馈：{body.comment or '无'}"
+    )
+    sys_msg = ReceptionMessage(
+        session_id=session_id,
+        sender_type="system",
+        sender_name="服务评价",
+        content=eval_text,
+        is_read=True,
+        created_at=now,
+    )
+    db.add(sys_msg)
+    db.commit()
+    return {"status": "ok", "evaluation": body.model_dump()}
+
+
+class ClientNoticeOut(BaseModel):
+    id: str
+    title: str
+    content: str
+    is_important: bool = False
+    publish_time: str
+    publisher: str = "金蝶发票云服务团队"
+    category: str = "系统通知"
+
+
+@router.get("/client/notices", response_model=list[ClientNoticeOut])
+def client_get_notices() -> list[ClientNoticeOut]:
+    """获取面向客户端的重要通知列表（卡片展示与详情弹窗，特别重要通知标记 is_important=True）"""
+    return [
+        ClientNoticeOut(
+            id="NOTICE-20260921-01",
+            title="关于数电发票乐企直连通道升级维护的通知",
+            content="尊敬的纳税人用户：为了提供更稳定优质的数电发票乐企对接服务，国家税务总局定于本周五晚 22:00 至周六早 06:00 进行乐企平台与电子底账系统底层升级。升级期间开票、受票及勾选认证服务可能出现短时响应延迟或连接波动。建议各企业财务提前做好发票开具与勾选安排，紧急开票可使用离线开票备用模式。升级完成后服务将自动恢复，如有疑问请随时联系本在线技术支持团队。",
+            is_important=True,
+            publish_time="2026-09-21 10:00",
+            publisher="国家税务总局运维中心",
+            category="系统维护",
+        ),
+        ClientNoticeOut(
+            id="NOTICE-20260918-02",
+            title="金蝶发票云 2026 年第 3 季度征期服务保障方案",
+            content="为全力保障 9 月大征期期间企业税控与数电发票系统平稳运行，金蝶发票云售后技术团队已启动 7×24 小时征期应急响应机制。专家坐席全量在线，针对批量开票卡顿、税控盘升级校验、红字信息表开具异常等常见问题提供 1 对 1 快速排障支持，确保企业纳税申报与发票交付万无一失。",
+            is_important=True,
+            publish_time="2026-09-18 09:30",
+            publisher="金蝶发票云服务团队",
+            category="征期保障",
+        ),
+        ClientNoticeOut(
+            id="NOTICE-20260915-03",
+            title="关于近期增值税发票合规开具与风险防范温馨提示",
+            content="近期各省税务局加大对异常大额发票及开票品目与企业经营范围不符的动态监控力度。金蝶发票云已全新上线「AI 智能风控开票插件」，支持开票前自动校验黑名单客户、异常开票额度预警。建议企业开票人员在系统设置中开启合规自检功能，确保业务发票合规开具与入账。",
+            is_important=False,
+            publish_time="2026-09-15 14:20",
+            publisher="税务合规运营中心",
+            category="业务指引",
+        ),
+        ClientNoticeOut(
+            id="NOTICE-20260910-04",
+            title="金蝶发票云在线技术支持客户端升级公告",
+            content="发票云在线技术支持客户端已全面完成升级，支持历史会话无缝续接、多企业身份快速切换、工单进度实时追踪及图文附件拖拽发送。同时新增重要通知实时播报面板，欢迎广大企业客户体验更高效、敏捷的专家支持服务！",
+            is_important=False,
+            publish_time="2026-09-10 11:00",
+            publisher="产品发布中心",
+            category="产品动态",
+        ),
+    ]
+
+
 

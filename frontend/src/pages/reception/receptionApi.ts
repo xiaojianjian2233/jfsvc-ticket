@@ -364,7 +364,7 @@ const SEED_MESSAGES: Record<string, MessageItem[]> = {
       session_id: "ZXHH202609180001",
       sender_type: "system",
       sender_name: "系统通知",
-      content: "已为您分配在线坐席【杨慧莉】，正在接入会话...",
+      content: "已为您分配在线坐席【慧莉客服】，正在接入会话...",
       is_read: true,
       created_at: "2026-09-18 14:16:00",
     },
@@ -372,8 +372,8 @@ const SEED_MESSAGES: Record<string, MessageItem[]> = {
       id: 4,
       session_id: "ZXHH202609180001",
       sender_type: "agent",
-      sender_name: "杨慧莉",
-      content: "李经理您好，我是发票云专属客服杨慧莉。请问您这边是乐企直连开票报错还是在云平台页面直接开具时报错？",
+      sender_name: "慧莉客服",
+      content: "李经理您好，我是发票云专属客服慧莉客服。请问您这边是乐企直连开票报错还是在云平台页面直接开具时报错？",
       is_read: true,
       created_at: "2026-09-18 14:16:30",
     },
@@ -608,6 +608,7 @@ export async function fetchSessions(params?: {
   if (params?.statuses && params.statuses.length && !params.statuses.includes("不限")) {
     const codeMap: Record<string, string> = {
       进行中: "in_progress",
+      排队中: "queue",
       挂起: "pending",
       转工单: "converted",
       已关闭: "closed",
@@ -746,7 +747,8 @@ export async function inviteSession(sessionId: string): Promise<void> {
   if (s) {
     s.status = "in_progress";
     s.is_human = true;
-    s.agent_name = "杨慧莉";
+    s.agent_name = "慧莉客服";
+    s.updated_at = new Date().toISOString().replace("T", " ").slice(0, 19);
     setLocalStore("sessions", sessions);
 
     const allMsgs = getLocalStore<Record<string, MessageItem[]>>("messages", SEED_MESSAGES);
@@ -756,7 +758,7 @@ export async function inviteSession(sessionId: string): Promise<void> {
       session_id: sessionId,
       sender_type: "system",
       sender_name: "系统通知",
-      content: "坐席【杨慧莉】已接入本次会话，正在为您提供服务。",
+      content: "已为您分配在线坐席【慧莉客服】，正在接入会话...",
       is_read: true,
       created_at: new Date().toISOString().replace("T", " ").slice(0, 19),
     });
@@ -783,7 +785,7 @@ export async function suspendSession(sessionId: string): Promise<void> {
       id: Date.now(),
       session_id: sessionId,
       sender_type: "agent",
-      sender_name: "杨慧莉",
+      sender_name: "慧莉客服",
       content: "你的问题，技术人员正在分析处理中，需要点时间定位问题，收到结论后同步给你。",
       is_read: true,
       created_at: new Date().toISOString().replace("T", " ").slice(0, 19),
@@ -880,7 +882,7 @@ export async function transferTicket(
       id: Date.now(),
       session_id: sessionId,
       sender_type: "agent",
-      sender_name: "杨慧莉",
+      sender_name: "慧莉客服",
       content: `您的问题需要转工单推送到产研修复，已经帮您创建工单，工单号 ${ticketCode}，后续工单进度会通过短信通知。`,
       is_read: true,
       created_at: new Date().toISOString().replace("T", " ").slice(0, 19),
@@ -893,10 +895,10 @@ export async function transferTicket(
 
 export async function sendAgentMessage(sessionId: string, content: string): Promise<MessageItem> {
   const newMsg: MessageItem = {
-    id: Date.now(),
+    id: Date.now() + Math.floor(Math.random() * 10000),
     session_id: sessionId,
     sender_type: "agent",
-    sender_name: "杨慧莉",
+    sender_name: "慧莉客服",
     content: content.trim(),
     is_read: true,
     created_at: new Date().toISOString().replace("T", " ").slice(0, 19),
@@ -1107,10 +1109,14 @@ export async function handoverAndOffline(
     sessions.forEach((s) => {
       if (
         s.status === "in_progress" &&
-        (s.agent_user_id === fromAgent.user_id || s.agent_name === fromAgent.user_name)
+        (s.agent_user_id === fromAgent.user_id ||
+          s.agent_name === fromAgent.user_name ||
+          s.agent_name === fromAgent.nickname)
       ) {
+        const fromDisplayName = fromAgent.nickname || fromAgent.user_name;
+        const toDisplayName = toAgent.nickname || toAgent.user_name;
         s.agent_user_id = toAgent.user_id;
-        s.agent_name = toAgent.user_name;
+        s.agent_name = toDisplayName;
         s.updated_at = nowStr;
         transferredCount++;
 
@@ -1120,7 +1126,7 @@ export async function handoverAndOffline(
           session_id: s.id,
           sender_type: "system",
           sender_name: "系统通知",
-          content: `会话已由坐席【${fromAgent.user_name}】转交给【${toAgent.user_name}】继续为您服务。`,
+          content: `会话已由坐席【${fromDisplayName}】转交给【${toDisplayName}】继续为您服务。`,
           is_read: true,
           created_at: nowStr,
         });
@@ -1160,7 +1166,9 @@ export async function autoDispatchQueueSessions(): Promise<{ dispatched: number 
       (s) =>
         s.status === "in_progress" &&
         s.session_type === "online" &&
-        (s.agent_user_id === ag.user_id || s.agent_name === ag.user_name)
+        (s.agent_user_id === ag.user_id ||
+          s.agent_name === ag.user_name ||
+          s.agent_name === ag.nickname)
     ).length;
     return {
       agent: ag,
@@ -1188,10 +1196,11 @@ export async function autoDispatchQueueSessions(): Promise<{ dispatched: number 
       agentIdx++;
       if (curr.remaining > 0) {
         curr.remaining--;
+        const agentDisplayName = curr.agent.nickname || curr.agent.user_name;
         s.status = "in_progress";
         s.is_human = true;
         s.agent_user_id = curr.agent.user_id;
-        s.agent_name = curr.agent.user_name;
+        s.agent_name = agentDisplayName;
         s.updated_at = nowStr;
 
         const msgs = messages[s.id] || [];
@@ -1200,7 +1209,7 @@ export async function autoDispatchQueueSessions(): Promise<{ dispatched: number 
           session_id: s.id,
           sender_type: "system",
           sender_name: "系统通知",
-          content: `已为您分配在线坐席【${curr.agent.user_name}】，正在接入会话...`,
+          content: `已为您分配在线坐席【${agentDisplayName}】，正在接入会话...`,
           is_read: true,
           created_at: nowStr,
         });
@@ -1221,3 +1230,499 @@ export async function autoDispatchQueueSessions(): Promise<{ dispatched: number 
 
   return { dispatched };
 }
+
+// ============================================================================
+// 8. 客户端 (Customer Client H5) API 与本地回退
+// ============================================================================
+
+export interface ClientLookupCompany {
+  company_name: string;
+  tax_no: string;
+  tenant_name?: string | null;
+  tenant_no?: string | null;
+  purchased_products?: string[];
+  contact_name?: string | null;
+}
+
+export interface ClientLookupPhoneResponse {
+  phone: string;
+  exists: boolean;
+  count: number;
+  items: ClientLookupCompany[];
+}
+
+export interface EnterpriseSearchResult {
+  company_name: string;
+  tax_no: string;
+  status?: string;
+  legal_person?: string;
+}
+
+export interface TenantProfileResponse {
+  tenant_no: string;
+  tenant_name: string;
+  purchased_products: string[];
+}
+
+export interface ClientInitSessionPayload {
+  contact_name?: string;
+  contact_phone: string;
+  company_name: string;
+  tax_no: string;
+  tenant_name?: string | null;
+  tenant_no?: string | null;
+  purchased_products?: string[];
+  is_historical?: boolean;
+}
+
+export interface ClientSessionsGrouped {
+  recent_open: SessionItem[];
+  closed: SessionItem[];
+}
+
+export interface ClientEvaluationPayload {
+  score: number;
+  tags: string[];
+  comment?: string;
+}
+
+const MOCK_INDUSTRY_ENTERPRISES: EnterpriseSearchResult[] = [
+  { company_name: "腾讯科技（深圳）有限公司", tax_no: "91440300708461136T", status: "存续", legal_person: "马化腾" },
+  { company_name: "阿里巴巴（中国）网络技术有限公司", tax_no: "91330100716105852F", status: "存续", legal_person: "蒋芳" },
+  { company_name: "北京百度网讯科技有限公司", tax_no: "91110000802100433B", status: "存续", legal_person: "梁志祥" },
+  { company_name: "华为技术有限公司", tax_no: "914403001922038216", status: "存续", legal_person: "赵明路" },
+  { company_name: "比亚迪股份有限公司", tax_no: "91440300192317458F", status: "存续", legal_person: "王传福" },
+  { company_name: "美团科技有限公司", tax_no: "91110108MA01712M9L", status: "存续", legal_person: "王兴" },
+  { company_name: "上海寻梦信息技术有限公司", tax_no: "91310000324443210P", status: "存续", legal_person: "朱健冲" },
+  { company_name: "浙江吉利控股集团有限公司", tax_no: "91330000749021884X", status: "存续", legal_person: "李书福" },
+  { company_name: "深圳市大疆创新科技有限公司", tax_no: "91440300795432587N", status: "存续", legal_person: "汪滔" },
+  { company_name: "中国移动通信集团有限公司", tax_no: "911100007109250324", status: "存续", legal_person: "杨杰" },
+];
+
+/**
+ * 客户端：根据手机号查询历史去重企业
+ */
+export async function clientLookupPhone(phone: string): Promise<ClientLookupPhoneResponse> {
+  const cleanPhone = phone.trim();
+  try {
+    return await httpGet<ClientLookupPhoneResponse>("/api/reception/client/lookup-phone", { phone: cleanPhone });
+  } catch {
+    const sessions = getLocalStore<SessionItem[]>("sessions", SEED_SESSIONS);
+    const matched = sessions.filter((s) => s.contact_phone === cleanPhone && s.company_name);
+    const seen = new Set<string>();
+    const items: ClientLookupCompany[] = [];
+
+    for (const s of matched) {
+      const key = `${s.company_name.trim()}__${(s.tax_no || "").trim()}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        items.push({
+          company_name: s.company_name.trim(),
+          tax_no: s.tax_no || "",
+          tenant_name: s.tenant_name,
+          tenant_no: s.tenant_no,
+          purchased_products: s.purchased_products || [],
+          contact_name: s.contact_name,
+        });
+      }
+    }
+
+    return {
+      phone: cleanPhone,
+      exists: items.length > 0,
+      count: items.length,
+      items,
+    };
+  }
+}
+
+/**
+ * 客户端：工商局接口模糊搜索企业与税号推荐
+ */
+export async function clientSearchEnterprises(keyword: string): Promise<EnterpriseSearchResult[]> {
+  const kw = keyword.trim();
+  if (!kw) return [];
+  try {
+    return await httpGet<EnterpriseSearchResult[]>("/api/reception/client/search-enterprises", { keyword: kw });
+  } catch {
+    const results: EnterpriseSearchResult[] = [];
+    const seen = new Set<string>();
+
+    const sessions = getLocalStore<SessionItem[]>("sessions", SEED_SESSIONS);
+    for (const s of sessions) {
+      if (s.company_name && s.company_name.includes(kw) && !seen.has(s.company_name)) {
+        seen.add(s.company_name);
+        results.push({
+          company_name: s.company_name,
+          tax_no: s.tax_no || `91440300${Math.floor(10000000 + Math.random() * 90000000)}A`,
+          status: "存续",
+        });
+      }
+    }
+
+    for (const item of MOCK_INDUSTRY_ENTERPRISES) {
+      if (item.company_name.includes(kw) && !seen.has(item.company_name)) {
+        seen.add(item.company_name);
+        results.push(item);
+      }
+    }
+
+    if (!results.some((r) => r.company_name === kw) && kw.length >= 2) {
+      const codeSuffix = Array.from(kw.slice(0, 6))
+        .map((c) => (c.charCodeAt(0) % 10).toString())
+        .join("")
+        .padEnd(10, "8");
+      results.unshift({
+        company_name: kw,
+        tax_no: `91310115${codeSuffix}X`,
+        status: "存续",
+      });
+    }
+
+    return results.slice(0, 8);
+  }
+}
+
+/**
+ * 客户端：运营接口获取归属租户和已购产品
+ */
+export async function clientFetchTenantProfile(
+  companyName: string,
+  taxNo: string
+): Promise<TenantProfileResponse> {
+  try {
+    return await httpPost<TenantProfileResponse>("/api/reception/client/fetch-tenant-profile", {
+      company_name: companyName,
+      tax_no: taxNo,
+    });
+  } catch {
+    const sessions = getLocalStore<SessionItem[]>("sessions", SEED_SESSIONS);
+    const existing = sessions.find((s) => s.company_name === companyName || (taxNo && s.tax_no === taxNo));
+    if (existing && existing.tenant_name && existing.tenant_no) {
+      return {
+        tenant_no: existing.tenant_no,
+        tenant_name: existing.tenant_name,
+        purchased_products: existing.purchased_products || ["发票云标准版", "数电发票采集模块"],
+      };
+    }
+
+    const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    return {
+      tenant_no: `TNT_${todayStr}_${Math.floor(1000 + Math.random() * 9000)}`,
+      tenant_name: `${companyName.slice(0, 4)}企业租户`,
+      purchased_products: ["发票云敏捷版", "数电乐企开票组件", "进项发票查验服务"],
+    };
+  }
+}
+
+/**
+ * 客户端：初始化/提交会话
+ */
+export async function clientInitSession(
+  payload: ClientInitSessionPayload
+): Promise<{ session: SessionItem; messages: MessageItem[] }> {
+  try {
+    const res = await httpPost<{ session: SessionItem; messages: MessageItem[] }>(
+      "/api/reception/client/init-session",
+      payload
+    );
+    return res;
+  } catch {
+    const phone = payload.contact_phone.trim();
+    let contactName = (payload.contact_name || "").trim();
+    const sessions = getLocalStore<SessionItem[]>("sessions", SEED_SESSIONS);
+
+    if (!contactName) {
+      const historySession = sessions.find((s) => s.contact_phone === phone && s.contact_name);
+      contactName = historySession?.contact_name || `客户_${phone.slice(-4)}`;
+    }
+
+    let tenantName = payload.tenant_name;
+    let tenantNo = payload.tenant_no;
+    let purchasedProducts = payload.purchased_products;
+
+    if (!tenantName || !tenantNo) {
+      const profile = await clientFetchTenantProfile(payload.company_name, payload.tax_no);
+      tenantName = tenantName || profile.tenant_name;
+      tenantNo = tenantNo || profile.tenant_no;
+      purchasedProducts = purchasedProducts || profile.purchased_products;
+    }
+
+    const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const prefix = `ZXHH${todayStr}`;
+    const seq = sessions.filter((s) => s.id.startsWith(prefix)).length + 1;
+    const sessionId = `${prefix}${seq.toString().padStart(4, "0")}`;
+    const nowStr = new Date().toISOString().replace("T", " ").slice(0, 19);
+
+    const newSession: SessionItem = {
+      id: sessionId,
+      session_type: "online",
+      status: "queue",
+      is_human: true,
+      agent_name: "在线待分配",
+      company_name: payload.company_name.trim(),
+      tax_no: payload.tax_no.trim(),
+      tenant_name: tenantName,
+      tenant_no: tenantNo,
+      contact_name: contactName,
+      contact_phone: phone,
+      purchased_products: purchasedProducts || ["发票云标准版"],
+      is_in_service: "服务期内",
+      unread_count: 0,
+      last_message: "客户发起了新的在线咨询",
+      last_message_at: nowStr,
+      created_at: nowStr,
+      updated_at: nowStr,
+    };
+
+    const welcomeMsg: MessageItem = {
+      id: Date.now(),
+      session_id: sessionId,
+      sender_type: "system",
+      sender_name: "发票云小助手",
+      content: `您好！欢迎使用发票云售后在线支持。系统已为您建立会话【${sessionId}】，正在为您接入在线专业客服，请稍候...`,
+      is_read: true,
+      created_at: nowStr,
+    };
+
+    sessions.unshift(newSession);
+    setLocalStore("sessions", sessions);
+
+    const allMessages = getLocalStore<Record<string, MessageItem[]>>("messages", SEED_MESSAGES);
+    allMessages[sessionId] = [welcomeMsg];
+    setLocalStore("messages", allMessages);
+
+    // 触发自动分发
+    autoDispatchQueueSessions().catch(() => {});
+
+    return { session: newSession, messages: [welcomeMsg] };
+  }
+}
+
+/**
+ * 客户端：查询该手机号会话（分24小时内未关闭与已结束）
+ */
+export async function clientFetchSessions(phone: string): Promise<ClientSessionsGrouped> {
+  const cleanPhone = phone.trim();
+  try {
+    return await httpGet<ClientSessionsGrouped>("/api/reception/client/sessions", { phone: cleanPhone });
+  } catch {
+    const sessions = getLocalStore<SessionItem[]>("sessions", SEED_SESSIONS);
+    const matched = sessions.filter((s) => s.contact_phone === cleanPhone);
+    const nowMs = Date.now();
+
+    const recent_open: SessionItem[] = [];
+    const closed: SessionItem[] = [];
+
+    for (const s of matched) {
+      if (s.status === "closed" || s.status === "converted") {
+        closed.push(s);
+      } else {
+        const createdMs = new Date(s.created_at.replace(" ", "T")).getTime();
+        if (nowMs - createdMs <= 24 * 3600 * 1000) {
+          recent_open.push(s);
+        } else {
+          closed.push(s);
+        }
+      }
+    }
+
+    return { recent_open, closed };
+  }
+}
+
+/**
+ * 客户端：获取指定会话历史消息
+ */
+export async function clientFetchMessages(sessionId: string): Promise<MessageItem[]> {
+  try {
+    return await httpGet<MessageItem[]>(`/api/reception/client/sessions/${sessionId}/messages`);
+  } catch {
+    const allMessages = getLocalStore<Record<string, MessageItem[]>>("messages", SEED_MESSAGES);
+    return allMessages[sessionId] || [];
+  }
+}
+
+/**
+ * 客户端：发送消息（支持文字与附件解析）
+ */
+export async function clientSendMessage(
+  sessionId: string,
+  content: string,
+  senderName = "客户"
+): Promise<MessageItem> {
+  try {
+    return await httpPost<MessageItem>(`/api/reception/client/sessions/${sessionId}/send-message`, {
+      content,
+      sender_name: senderName,
+    });
+  } catch {
+    const nowStr = new Date().toISOString().replace("T", " ").slice(0, 19);
+    const allMessages = getLocalStore<Record<string, MessageItem[]>>("messages", SEED_MESSAGES);
+    const list = allMessages[sessionId] || [];
+
+    const newMsg: MessageItem = {
+      id: Date.now() + Math.floor(Math.random() * 100),
+      session_id: sessionId,
+      sender_type: "customer",
+      sender_name: senderName,
+      content,
+      is_read: false,
+      created_at: nowStr,
+    };
+    list.push(newMsg);
+    allMessages[sessionId] = list;
+    setLocalStore("messages", allMessages);
+
+    // 更新会话最新消息
+    const sessions = getLocalStore<SessionItem[]>("sessions", SEED_SESSIONS);
+    const s = sessions.find((item) => item.id === sessionId);
+    if (s) {
+      s.last_message = content.slice(0, 120);
+      s.last_message_at = nowStr;
+      s.unread_count = (s.unread_count || 0) + 1;
+      s.updated_at = nowStr;
+      setLocalStore("sessions", sessions);
+    }
+
+    return newMsg;
+  }
+}
+
+/**
+ * 客户端：结束会话
+ */
+export async function clientCloseSession(sessionId: string): Promise<{ status: string; closed_at: string }> {
+  try {
+    return await httpPost<{ status: string; closed_at: string }>(`/api/reception/client/sessions/${sessionId}/close`);
+  } catch {
+    const nowStr = new Date().toISOString().replace("T", " ").slice(0, 19);
+    const sessions = getLocalStore<SessionItem[]>("sessions", SEED_SESSIONS);
+    const s = sessions.find((item) => item.id === sessionId);
+    if (s) {
+      s.status = "closed";
+      s.closed_at = nowStr;
+      s.updated_at = nowStr;
+      setLocalStore("sessions", sessions);
+    }
+
+    const allMessages = getLocalStore<Record<string, MessageItem[]>>("messages", SEED_MESSAGES);
+    const list = allMessages[sessionId] || [];
+    list.push({
+      id: Date.now(),
+      session_id: sessionId,
+      sender_type: "system",
+      sender_name: "系统通知",
+      content: "客户已自主结束会话。感谢您的咨询，请对本次服务进行评价！",
+      is_read: true,
+      created_at: nowStr,
+    });
+    allMessages[sessionId] = list;
+    setLocalStore("messages", allMessages);
+
+    return { status: "ok", closed_at: nowStr };
+  }
+}
+
+/**
+ * 客户端：服务评价
+ */
+export async function clientEvaluateSession(
+  sessionId: string,
+  evaluation: ClientEvaluationPayload
+): Promise<{ status: string }> {
+  try {
+    return await httpPost<{ status: string }>(`/api/reception/client/sessions/${sessionId}/evaluate`, evaluation);
+  } catch {
+    const nowStr = new Date().toISOString().replace("T", " ").slice(0, 19);
+    const evalText = `【客户服务评价】评分：${evaluation.score}星 | 标签：${
+      evaluation.tags.length > 0 ? evaluation.tags.join("、") : "无"
+    } | 意见反馈：${evaluation.comment || "无"}`;
+
+    const allMessages = getLocalStore<Record<string, MessageItem[]>>("messages", SEED_MESSAGES);
+    const list = allMessages[sessionId] || [];
+    list.push({
+      id: Date.now(),
+      session_id: sessionId,
+      sender_type: "system",
+      sender_name: "服务评价",
+      content: evalText,
+      is_read: true,
+      created_at: nowStr,
+    });
+    allMessages[sessionId] = list;
+    setLocalStore("messages", allMessages);
+
+    return { status: "ok" };
+  }
+}
+
+/**
+ * 客户端：重要通知数据类型
+ */
+export interface ClientNoticeItem {
+  id: string;
+  title: string;
+  content: string;
+  is_important: boolean;
+  publish_time: string;
+  publisher?: string;
+  category?: string;
+}
+
+export const SEED_CLIENT_NOTICES: ClientNoticeItem[] = [
+  {
+    id: "NOTICE-20260921-01",
+    title: "关于数电发票乐企直连通道升级维护的通知",
+    content:
+      "尊敬的纳税人用户：为了提供更稳定优质的数电发票乐企对接服务，国家税务总局定于本周五晚 22:00 至周六早 06:00 进行乐企平台与电子底账系统底层升级。升级期间开票、受票及勾选认证服务可能出现短时响应延迟或连接波动。建议各企业财务提前做好发票开具与勾选安排，紧急开票可使用离线开票备用模式。升级完成后服务将自动恢复，如有疑问请随时联系本在线技术支持团队。",
+    is_important: true,
+    publish_time: "2026-09-21 10:00",
+    publisher: "国家税务总局运维中心",
+    category: "系统维护",
+  },
+  {
+    id: "NOTICE-20260918-02",
+    title: "金蝶发票云 2026 年第 3 季度征期服务保障方案",
+    content:
+      "为全力保障 9 月大征期期间企业税控与数电发票系统平稳运行，金蝶发票云售后技术团队已启动 7×24 小时征期应急响应机制。专家坐席全量在线，针对批量开票卡顿、税控盘升级校验、红字信息表开具异常等常见问题提供 1 对 1 快速排障支持，确保企业纳税申报与发票交付万无一失。",
+    is_important: true,
+    publish_time: "2026-09-18 09:30",
+    publisher: "金蝶发票云服务团队",
+    category: "征期保障",
+  },
+  {
+    id: "NOTICE-20260915-03",
+    title: "关于近期增值税发票合规开具与风险防范温馨提示",
+    content:
+      "近期各省税务局加大对异常大额发票及开票品目与企业经营范围不符的动态监控力度。金蝶发票云已全新上线「AI 智能风控开票插件」，支持开票前自动校验黑名单客户、异常开票额度预警。建议企业开票人员在系统设置中开启合规自检功能，确保业务发票合规开具与入账。",
+    is_important: false,
+    publish_time: "2026-09-15 14:20",
+    publisher: "税务合规运营中心",
+    category: "业务指引",
+  },
+  {
+    id: "NOTICE-20260910-04",
+    title: "金蝶发票云在线技术支持客户端升级公告",
+    content:
+      "发票云在线技术支持客户端已全面完成升级，支持历史会话无缝续接、多企业身份快速切换、工单进度实时追踪及图文附件拖拽发送。同时新增重要通知实时播报面板，欢迎广大企业客户体验更高效、敏捷的专家支持服务！",
+    is_important: false,
+    publish_time: "2026-09-10 11:00",
+    publisher: "产品发布中心",
+    category: "产品动态",
+  },
+];
+
+/**
+ * 客户端：获取重要通知列表
+ */
+export async function clientFetchNotices(): Promise<ClientNoticeItem[]> {
+  try {
+    const res = await httpGet<ClientNoticeItem[]>("/api/reception/client/notices");
+    if (Array.isArray(res) && res.length > 0) return res;
+  } catch {
+    // ignore
+  }
+  return SEED_CLIENT_NOTICES;
+}
+

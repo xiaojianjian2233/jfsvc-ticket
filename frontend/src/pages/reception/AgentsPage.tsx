@@ -204,30 +204,30 @@ export function AgentsPage() {
   const allSelected = agents.length > 0 && selectedIds.length === agents.length;
 
   return (
-    <div className="w-full pl-2.5 pr-2.5 py-3.5 font-hub space-y-3.5">
-      {/* 顶部标题区 */}
-      <div className="flex items-center justify-between pb-2.5 border-b border-slate-200">
+    <div className="w-full pl-2.5 pr-2.5 pt-0 pb-1 font-hub flex flex-col h-[calc(100vh-70px)] min-h-[660px]">
+      {/* 顶部标题区：白色矩形底层，宽度等于展示区域，与下方两列间隔5px */}
+      <div className="w-full bg-white rounded-lg border border-slate-200 shadow-xs px-4 py-2.5 flex items-center justify-between flex-none mb-[5px]">
         <div>
-          <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2.5">
+          <h1 className="text-[18px] font-bold text-slate-800 flex items-center gap-2.5">
             <span>坐席设置</span>
-            <span className="text-xs font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+            <span className="text-[12px] font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
               共 {agents.length} 位坐席
             </span>
           </h1>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-[12px] text-slate-500 mt-0.5">
             维护系统在线接待服务坐席人员、基础接待时段配置及单人最大接待并发会话阈值
           </p>
         </div>
       </div>
 
-      {/* 主体双列布局：第1列坐席基础设置，第2列现在的坐席设置（占满右侧，无多余留白） */}
-      <div className="flex flex-col lg:flex-row gap-3.5 w-full items-start">
+      {/* 主体双列布局：第1列坐席基础设置，第2列现在的坐席设置（高度撑满到底端对齐，左侧留白10px） */}
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-3.5 w-full items-stretch">
         {/* =================================================================== */}
         {/* 第 1 列：坐席基础设置 */}
         {/* =================================================================== */}
-        <div className="w-full lg:w-[380px] xl:w-[410px] flex-none bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+        <div className="w-full lg:w-[380px] xl:w-[410px] flex-none bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden flex flex-col h-full">
           {/* 卡片头部 */}
-          <div className="px-4 py-3 bg-slate-50/80 border-b border-slate-200 flex items-center justify-between">
+          <div className="px-4 py-3 bg-slate-50/80 border-b border-slate-200 flex items-center justify-between flex-none">
             <div className="flex items-center gap-2">
               <span className="text-[14px] font-bold text-slate-800">坐席基础设置</span>
               {scheduleSavedToast && (
@@ -276,7 +276,7 @@ export function AgentsPage() {
           </div>
 
           {/* 卡片内容区 */}
-          <div className="p-4 space-y-4 text-xs">
+          <div className="p-4 space-y-4 text-xs flex-1 overflow-y-auto">
             {/* 说明 */}
             <div className="text-[12px] text-slate-500 leading-relaxed bg-slate-50 p-2.5 rounded border border-slate-200/70">
               设置系统在线坐席接待时间区间，用于后续判定是否分配人工坐席进线接待。非接待时段客户转人工将进入排队状态等待。
@@ -312,7 +312,7 @@ export function AgentsPage() {
                     return (
                       <div
                         key={idx}
-                        className="flex items-center justify-between p-2.5 bg-slate-50/90 rounded border border-slate-200 text-slate-700"
+                        className="flex items-center justify-between px-3 py-2 bg-slate-50/90 rounded border border-slate-200 text-slate-700"
                       >
                         <span className="text-[12.5px] font-medium text-slate-600 min-w-[50px]">
                           {label}
@@ -327,7 +327,7 @@ export function AgentsPage() {
                                 copy[idx].start = e.target.value;
                                 setScheduleForm({ ...scheduleForm, weekday_slots: copy });
                               }}
-                              className="px-2 py-1 bg-white border border-slate-200 rounded text-xs focus:outline-none focus:border-teal-600"
+                              className="h-[30px] px-2 bg-white border border-slate-200 rounded text-xs focus:outline-none focus:border-teal-600"
                             />
                             <span className="text-slate-400">~</span>
                             <input
@@ -338,7 +338,7 @@ export function AgentsPage() {
                                 copy[idx].end = e.target.value;
                                 setScheduleForm({ ...scheduleForm, weekday_slots: copy });
                               }}
-                              className="px-2 py-1 bg-white border border-slate-200 rounded text-xs focus:outline-none focus:border-teal-600"
+                              className="h-[30px] px-2 bg-white border border-slate-200 rounded text-xs focus:outline-none focus:border-teal-600"
                             />
                             {scheduleForm.weekday_slots.length > 1 && (
                               <button
@@ -355,9 +355,9 @@ export function AgentsPage() {
                             )}
                           </div>
                         ) : (
-                          <span className="font-mono text-[13px] font-medium text-slate-800">
+                          <div className="h-[30px] px-2.5 flex items-center bg-white border border-slate-200/80 rounded font-mono text-[13px] font-medium text-slate-800">
                             {slot.start} ~ {slot.end}
-                          </span>
+                          </div>
                         )}
                       </div>
                     );
@@ -396,7 +396,7 @@ export function AgentsPage() {
                     return (
                       <div
                         key={idx}
-                        className="flex items-center justify-between p-2.5 bg-slate-50/90 rounded border border-slate-200 text-slate-700"
+                        className="flex items-center justify-between px-3 py-2 bg-slate-50/90 rounded border border-slate-200 text-slate-700"
                       >
                         <span className="text-[12.5px] font-medium text-slate-600 min-w-[50px]">
                           {label}
@@ -411,7 +411,7 @@ export function AgentsPage() {
                                 copy[idx].start = e.target.value;
                                 setScheduleForm({ ...scheduleForm, weekend_slots: copy });
                               }}
-                              className="px-2 py-1 bg-white border border-slate-200 rounded text-xs focus:outline-none focus:border-teal-600"
+                              className="h-[30px] px-2 bg-white border border-slate-200 rounded text-xs focus:outline-none focus:border-teal-600"
                             />
                             <span className="text-slate-400">~</span>
                             <input
@@ -422,7 +422,7 @@ export function AgentsPage() {
                                 copy[idx].end = e.target.value;
                                 setScheduleForm({ ...scheduleForm, weekend_slots: copy });
                               }}
-                              className="px-2 py-1 bg-white border border-slate-200 rounded text-xs focus:outline-none focus:border-teal-600"
+                              className="h-[30px] px-2 bg-white border border-slate-200 rounded text-xs focus:outline-none focus:border-teal-600"
                             />
                             {scheduleForm.weekend_slots.length > 1 && (
                               <button
@@ -439,9 +439,9 @@ export function AgentsPage() {
                             )}
                           </div>
                         ) : (
-                          <span className="font-mono text-[13px] font-medium text-slate-800">
+                          <div className="h-[30px] px-2.5 flex items-center bg-white border border-slate-200/80 rounded font-mono text-[13px] font-medium text-slate-800">
                             {slot.start} ~ {slot.end}
-                          </span>
+                          </div>
                         )}
                       </div>
                     );
@@ -453,11 +453,11 @@ export function AgentsPage() {
         </div>
 
         {/* =================================================================== */}
-        {/* 第 2 列：现在的坐席设置（筛选与列表），自适应占满右侧全部区域 */}
+        {/* 第 2 列：现在的坐席设置（筛选与列表），自适应占满右侧全部区域且与左列等高 */}
         {/* =================================================================== */}
-        <div className="flex-1 w-full min-w-0 flex flex-col gap-3.5">
-          {/* 筛选条件录入区（参考全部工单页面字体放大、调整录入框高宽） */}
-          <div className="bg-white rounded-lg p-3.5 border border-slate-200 shadow-sm flex flex-wrap items-center gap-3 text-[13px]">
+        <div className="flex-1 w-full min-w-0 flex flex-col gap-3.5 h-full">
+          {/* 筛选条件录入区（姓名、昵称、状态筛选框值录入区域均调整到300px） */}
+          <div className="bg-white rounded-lg p-3.5 border border-slate-200 shadow-sm flex flex-wrap items-center gap-3 text-[13px] flex-none">
             <div className="flex items-center gap-2">
               <span className="text-slate-600 font-medium whitespace-nowrap text-[13px]">姓名：</span>
               <input
@@ -466,7 +466,7 @@ export function AgentsPage() {
                 onChange={(e) => setFilterName(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && loadData()}
                 placeholder="录入用户姓名查找"
-                className="w-40 h-[34px] px-3 border border-slate-200 rounded text-[13px] focus:outline-none focus:border-teal-600"
+                className="w-[300px] h-[34px] px-3 border border-slate-200 rounded text-[13px] focus:outline-none focus:border-teal-600"
               />
             </div>
 
@@ -478,7 +478,7 @@ export function AgentsPage() {
                 onChange={(e) => setFilterNickname(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && loadData()}
                 placeholder="录入昵称查找"
-                className="w-40 h-[34px] px-3 border border-slate-200 rounded text-[13px] focus:outline-none focus:border-teal-600"
+                className="w-[300px] h-[34px] px-3 border border-slate-200 rounded text-[13px] focus:outline-none focus:border-teal-600"
               />
             </div>
 
@@ -488,7 +488,7 @@ export function AgentsPage() {
               <button
                 type="button"
                 onClick={() => setStatusDropdownOpen(!statusDropdownOpen)}
-                className="w-44 h-[34px] px-3 border border-slate-200 rounded text-left flex items-center justify-between bg-white text-[13px] hover:border-slate-300"
+                className="w-[300px] h-[34px] px-3 border border-slate-200 rounded text-left flex items-center justify-between bg-white text-[13px] hover:border-slate-300"
               >
                 <span className="truncate text-slate-700">
                   {filterStatuses.join("、")}
@@ -497,7 +497,7 @@ export function AgentsPage() {
               </button>
 
               {statusDropdownOpen && (
-                <div className="absolute top-full left-12 mt-1 w-44 bg-white border border-slate-200 rounded shadow-lg z-30 p-1.5 space-y-1">
+                <div className="absolute top-full left-12 mt-1 w-[300px] bg-white border border-slate-200 rounded shadow-lg z-30 p-1.5 space-y-1">
                   {STATUS_OPTIONS.map((opt) => {
                     const checked = filterStatuses.includes(opt);
                     return (
@@ -523,7 +523,7 @@ export function AgentsPage() {
               <button
                 type="button"
                 onClick={loadData}
-                className="h-[34px] px-4 bg-teal-600 text-white rounded text-[13px] font-medium hover:bg-teal-700 transition cursor-pointer shadow-2xs"
+                className="h-[25px] px-3.5 bg-[rgb(99,136,226)] text-white rounded-[5px] text-[13px] font-medium hover:opacity-90 transition cursor-pointer shadow-2xs flex items-center justify-center"
               >
                 查询
               </button>
@@ -534,7 +534,7 @@ export function AgentsPage() {
                   setFilterNickname("");
                   setFilterStatuses(["不限"]);
                 }}
-                className="h-[34px] px-3.5 border border-slate-200 text-slate-600 rounded text-[13px] hover:bg-slate-50 transition cursor-pointer"
+                className="h-[25px] px-3 border border-slate-200 text-slate-600 rounded-[5px] text-[13px] hover:bg-slate-50 transition cursor-pointer flex items-center justify-center"
               >
                 重置
               </button>
@@ -542,21 +542,21 @@ export function AgentsPage() {
           </div>
 
           {/* 功能按钮操作栏 */}
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-none">
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={handleOpenAdd}
-                className="inline-flex items-center gap-1.5 h-[34px] px-3.5 bg-teal-600 text-white rounded text-[13px] font-medium hover:bg-teal-700 transition shadow-sm cursor-pointer"
+                className="inline-flex items-center justify-center gap-1.5 h-[25px] px-3 bg-[rgb(99,136,226)] text-white rounded-[5px] text-[13px] font-medium hover:opacity-90 transition shadow-2xs cursor-pointer"
               >
-                <span className="text-sm font-bold">+</span>
+                <span className="text-sm font-bold leading-none">+</span>
                 <span>添加坐席</span>
               </button>
               <button
                 type="button"
                 onClick={handleBatchRemove}
                 disabled={selectedIds.length === 0}
-                className={`inline-flex items-center gap-1 h-[34px] px-3.5 rounded text-[13px] font-medium transition cursor-pointer ${
+                className={`inline-flex items-center justify-center gap-1 h-[25px] px-3 rounded-[5px] text-[13px] font-medium transition cursor-pointer ${
                   selectedIds.length > 0
                     ? "bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100"
                     : "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed"
@@ -568,11 +568,11 @@ export function AgentsPage() {
             </div>
           </div>
 
-          {/* 坐席表格展示区（字体放大，自适应占满右侧） */}
-          <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden w-full">
-            <div className="overflow-x-auto w-full">
+          {/* 坐席表格展示区（字体放大，自适应占满右侧剩余高度） */}
+          <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden w-full flex-1 min-h-0 flex flex-col">
+            <div className="overflow-x-auto overflow-y-auto flex-1 w-full">
               <table className="w-full text-left text-[13.5px] border-collapse">
-                <thead>
+                <thead className="sticky top-0 z-10">
                   <tr className="bg-slate-50 border-b border-slate-200 text-slate-700 font-semibold text-[13px]">
                     <th className="w-11 px-3 py-3 text-center">
                       <input
@@ -683,7 +683,7 @@ export function AgentsPage() {
         </div>
       </div>
 
-      {/* 右侧抽屉：维护在线接待坐席 */}
+      {/* 右侧抽屉：维护在线接待坐席 / 编辑在线接待坐席 */}
       {drawerOpen && (
         <div className="fixed inset-0 z-50 flex justify-end">
           <div
@@ -691,9 +691,9 @@ export function AgentsPage() {
             onClick={() => setDrawerOpen(false)}
           />
           <div className="relative w-[480px] bg-white shadow-2xl h-full flex flex-col z-10 animate-in slide-in-from-right duration-200">
-            {/* 抽屉标题栏 */}
-            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
-              <h2 className="text-sm font-bold text-slate-800">
+            {/* 抽屉标题栏：标题字体16号字体 */}
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50 flex-none">
+              <h2 className="text-[16px] font-bold text-slate-800">
                 {editingAgent ? "编辑在线接待坐席" : "维护在线接待坐席"}
               </h2>
               <button
@@ -705,17 +705,17 @@ export function AgentsPage() {
               </button>
             </div>
 
-            {/* 抽屉正文表单 */}
-            <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4 text-xs">
+            {/* 抽屉正文表单：每个key之间的间距调整到8px (space-y-2) */}
+            <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-2 text-[14px]">
               {errorMsg && (
-                <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-600 rounded">
+                <div className="p-2 bg-rose-50 border border-rose-200 text-rose-600 rounded text-[12px]">
                   {errorMsg}
                 </div>
               )}
 
               {/* 姓名字段 */}
               <div>
-                <label className="block text-slate-700 font-semibold mb-1">
+                <label className="block text-slate-700 font-semibold mb-1 text-[14px]">
                   姓名 <span className="text-rose-500">*</span>
                 </label>
                 {editingAgent ? (
@@ -723,7 +723,7 @@ export function AgentsPage() {
                     type="text"
                     disabled
                     value={editingAgent.user_name}
-                    className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded text-slate-500 cursor-not-allowed"
+                    className="w-full h-[25px] px-2 py-0 bg-slate-100 border border-slate-200 rounded text-slate-500 text-[14px] leading-none cursor-not-allowed"
                   />
                 ) : (
                   <div className="space-y-1.5">
@@ -732,12 +732,12 @@ export function AgentsPage() {
                       value={userSearchText}
                       onChange={(e) => setUserSearchText(e.target.value)}
                       placeholder="输入姓名或邮箱快速搜索人员..."
-                      className="w-full px-3 py-1.5 border border-slate-200 rounded text-xs focus:outline-none focus:border-teal-600"
+                      className="w-full h-[25px] px-2 py-0 border border-slate-200 rounded text-[14px] leading-none focus:outline-none focus:border-teal-600"
                     />
                     <select
                       value={formUserId || ""}
                       onChange={(e) => setFormUserId(Number(e.target.value))}
-                      className="w-full px-3 py-2 border border-slate-200 rounded text-slate-800 focus:outline-none focus:border-teal-600 bg-white"
+                      className="w-full h-[25px] px-2 py-0 border border-slate-200 rounded text-slate-800 text-[14px] leading-none focus:outline-none focus:border-teal-600 bg-white"
                     >
                       {filteredEligibleUsers.map((u) => (
                         <option key={u.id} value={u.id}>
@@ -745,7 +745,7 @@ export function AgentsPage() {
                         </option>
                       ))}
                     </select>
-                    <p className="text-[11px] text-slate-400">
+                    <p className="text-[12px] text-slate-400 mt-0.5 leading-normal">
                       数据来源系统基础配置启用状态人员，编辑模式不可修改
                     </p>
                   </div>
@@ -754,7 +754,7 @@ export function AgentsPage() {
 
               {/* 昵称字段 */}
               <div>
-                <label className="block text-slate-700 font-semibold mb-1">
+                <label className="block text-slate-700 font-semibold mb-1 text-[14px]">
                   昵称 <span className="text-rose-500">*</span>
                 </label>
                 <input
@@ -763,16 +763,16 @@ export function AgentsPage() {
                   onChange={(e) => setFormNickname(e.target.value)}
                   placeholder="请输入在线接待客户可以看到的称呼"
                   maxLength={64}
-                  className="w-full px-3 py-2 border border-slate-200 rounded text-slate-800 focus:outline-none focus:border-teal-600"
+                  className="w-full h-[25px] px-2 py-0 border border-slate-200 rounded text-slate-800 text-[14px] leading-none focus:outline-none focus:border-teal-600"
                 />
-                <p className="text-[11px] text-slate-400 mt-1">
+                <p className="text-[12px] text-slate-400 mt-1 leading-normal">
                   客户在会话界面看到的坐席对外名称，如「客服小李」、「资深财税顾问」
                 </p>
               </div>
 
               {/* 在线接待上限 */}
               <div>
-                <label className="block text-slate-700 font-semibold mb-1">
+                <label className="block text-slate-700 font-semibold mb-1 text-[14px]">
                   在线接待上限 <span className="text-rose-500">*</span>
                 </label>
                 <input
@@ -781,9 +781,9 @@ export function AgentsPage() {
                   max={100}
                   value={formMaxConcurrent}
                   onChange={(e) => setFormMaxConcurrent(Number(e.target.value))}
-                  className="w-full px-3 py-2 border border-slate-200 rounded text-slate-800 focus:outline-none focus:border-teal-600 font-mono"
+                  className="w-full h-[25px] px-2 py-0 border border-slate-200 rounded text-slate-800 text-[14px] leading-none focus:outline-none focus:border-teal-600 font-mono"
                 />
-                <p className="text-[11px] text-slate-400 mt-1">
+                <p className="text-[12px] text-slate-400 mt-1 leading-normal">
                   允许同时接入的会话数量，达到上限后系统将不会再自动分配新会话进入接待
                 </p>
               </div>
@@ -791,13 +791,13 @@ export function AgentsPage() {
               {/* 在线状态（仅编辑时显示切换） */}
               {editingAgent && (
                 <div>
-                  <label className="block text-slate-700 font-semibold mb-1">
+                  <label className="block text-slate-700 font-semibold mb-1 text-[14px]">
                     当前在线状态
                   </label>
                   <select
                     value={formStatus}
                     onChange={(e) => setFormStatus(e.target.value as any)}
-                    className="w-full px-3 py-2 border border-slate-200 rounded text-slate-800 focus:outline-none focus:border-teal-600 bg-white"
+                    className="w-full h-[25px] px-2 py-0 border border-slate-200 rounded text-slate-800 text-[14px] leading-none focus:outline-none focus:border-teal-600 bg-white"
                   >
                     <option value="online">在线</option>
                     <option value="busy">忙碌</option>
@@ -806,21 +806,21 @@ export function AgentsPage() {
                 </div>
               )}
 
-              {/* 底部操作按钮 */}
-              <div className="pt-6 border-t border-slate-100 flex items-center justify-end gap-2.5">
+              {/* 底部操作按钮：按钮【保存】/【提交】、【取消】的宽度调整到100Px，高度调整为25PX，修改为圆幅5px的圆角矩形，提交/保存按钮填充颜色为rgb(99, 136, 226) */}
+              <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-2.5">
                 <button
                   type="button"
                   onClick={() => setDrawerOpen(false)}
-                  className="px-4 py-2 border border-slate-200 rounded text-slate-600 hover:bg-slate-50 transition cursor-pointer"
+                  className="w-[100px] h-[25px] p-0 flex items-center justify-center border border-slate-200 rounded-[5px] text-slate-600 hover:bg-slate-50 transition cursor-pointer text-[14px]"
                 >
                   取消
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="px-5 py-2 bg-teal-600 text-white rounded font-medium hover:bg-teal-700 transition shadow-sm cursor-pointer disabled:opacity-50"
+                  className="w-[100px] h-[25px] p-0 flex items-center justify-center bg-[rgb(99,136,226)] text-white rounded-[5px] font-medium hover:opacity-90 transition shadow-2xs cursor-pointer text-[14px] disabled:opacity-50"
                 >
-                  {submitting ? "保存中..." : "提交"}
+                  {submitting ? "提交中..." : (editingAgent ? "保存" : "提交")}
                 </button>
               </div>
             </form>

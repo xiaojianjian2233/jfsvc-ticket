@@ -97,23 +97,165 @@ describe("Reception Management Pages", () => {
         expect(screen.getAllByText("ZXHH202609180001").length).toBeGreaterThan(1);
       });
 
-      // 验证 Row 1: 咨询企业、咨询企业税号、归属租户、咨询人、咨询人电话
-      expect(screen.getAllByText(/咨询企业/).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/咨询企业税号/).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/归属租户/).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/咨询人/).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/咨询人电话/).length).toBeGreaterThan(0);
+      // 验证抽屉宽度为 1000px
+      const drawer = screen.getByText("客户信息").closest(".relative.w-\\[1000px\\]");
+      expect(drawer).toBeInTheDocument();
 
-      // 验证 Row 2: 会话状态、创建时间、是否转人工、最后接待人、关联工单号
-      expect(screen.getAllByText(/会话状态/).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/创建时间/).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/是否转人工/).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/最后接待人/).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/关联工单号/).length).toBeGreaterThan(0);
+      // 验证【客户信息】容器与 10 项信息
+      expect(screen.getByText("客户信息")).toBeInTheDocument();
+      expect(screen.getAllByText("咨询企业").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("咨询企业税号").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("归属租户").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("咨询人").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("咨询人电话").length).toBeGreaterThan(0);
 
-      // 验证 Row 3 & 4
-      expect(screen.getByText("客户问题总结：")).toBeInTheDocument();
-      expect(screen.getByText("会话内容明细：")).toBeInTheDocument();
+      expect(screen.getAllByText("会话状态").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("创建时间").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("是否转人工").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("最后解答人").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("关联工单").length).toBeGreaterThan(0);
+
+      // 验证客户信息下面的值均为 13 号不加粗 (text-[13px] font-normal) 且不换行 (whitespace-nowrap)
+      const companyVal = screen.getByTitle("腾讯科技（深圳）有限公司");
+      expect(companyVal).toHaveClass("text-[13px]");
+      expect(companyVal).toHaveClass("font-normal");
+      expect(companyVal).toHaveClass("whitespace-nowrap");
+      expect(companyVal).not.toHaveClass("font-semibold");
+      expect(companyVal).not.toHaveClass("font-medium");
+      expect(companyVal).not.toHaveClass("break-words");
+
+      // 验证客户问题总结与会话内容明细
+      expect(screen.getAllByText("客户问题总结").length).toBeGreaterThanOrEqual(2);
+      expect(screen.getByText("会话内容明细")).toBeInTheDocument();
+    });
+
+    it("applies new styling: 16px title with 40px fixed bar, queue status option, 300x25px inputs, 100x25px query button, sticky column, and 500px summary modal", async () => {
+      render(
+        <MemoryRouter>
+          <SessionListPage />
+        </MemoryRouter>
+      );
+
+      // 1. 标题 16 号与说明 12 号
+      const title = screen.getByText("会话记录列表");
+      expect(title).toHaveClass("text-[16px]");
+      const desc = screen.getByText(/记录所有在线与热线会话的历史详情/);
+      expect(desc).toHaveClass("text-[12px]");
+
+      // 2. 状态选项中包含【排队中】
+      const statusBtn = screen.getByLabelText("会话状态选择");
+      fireEvent.click(statusBtn);
+      expect(screen.getByText("排队中")).toBeInTheDocument();
+
+      // 3. 输入框尺寸 300px * 25px，字体 13 号
+      const companyInput = screen.getByPlaceholderText("录入企业名称查找");
+      expect(companyInput).toHaveClass("w-[300px]");
+      expect(companyInput).toHaveClass("h-[25px]");
+      expect(companyInput).toHaveClass("text-[13px]");
+
+      // 4. 查询按钮样式与 13 号字体
+      const queryBtn = screen.getByRole("button", { name: "查询" });
+      expect(queryBtn).toHaveClass("w-[100px]");
+      expect(queryBtn).toHaveClass("h-[25px]");
+      expect(queryBtn).toHaveClass("rounded-[5px]");
+      expect(queryBtn).toHaveClass("bg-[rgb(102,139,221)]");
+      expect(queryBtn).toHaveClass("text-[13px]");
+
+      // 5. 导出操作按钮与 13 号字体，填充颜色为 rgb(35, 94, 212)
+      const exportBtn = screen.getByRole("button", { name: /导出/ });
+      expect(exportBtn).toHaveClass("w-[100px]");
+      expect(exportBtn).toHaveClass("h-[25px]");
+      expect(exportBtn).toHaveClass("bg-[rgb(35,94,212)]");
+      expect(exportBtn).toHaveClass("text-[13px]");
+
+      // 6. 会话ID前面多选框与固定列样式
+      const selectAllCheckbox = screen.getByLabelText("全选本页会话");
+      expect(selectAllCheckbox).toBeInTheDocument();
+      fireEvent.click(selectAllCheckbox);
+
+      const sessionTh = screen.getByRole("columnheader", { name: "会话ID" });
+      expect(sessionTh).toHaveClass("sticky");
+      expect(sessionTh).toHaveClass("left-[44px]");
+      expect(sessionTh).toHaveClass("top-0");
+      expect(sessionTh).toHaveClass("z-30");
+
+      const sessionIdBtn = await screen.findByText("ZXHH202609180001");
+      expect(sessionIdBtn).toHaveClass("text-[rgb(102,139,221)]");
+
+      // 7. 客户问题总结点击后弹出 500px 顶层浮窗
+      const summaryCell = await screen.findByText(/数电发票开具额度不足/);
+      expect(summaryCell).toBeInTheDocument();
+      fireEvent.click(summaryCell);
+
+      // 浮窗弹出并在顶层显示固定 500px 宽度
+      const modalBox = await screen.findByTestId("summary-modal");
+      expect(modalBox).toBeInTheDocument();
+      expect(modalBox).toHaveClass("w-[500px]");
+      expect(screen.getByText("客户问题总结详情")).toBeInTheDocument();
+
+      // 关闭浮窗
+      const closeBtn = screen.getByRole("button", { name: "关闭" });
+      fireEvent.click(closeBtn);
+      expect(screen.queryByTestId("summary-modal")).not.toBeInTheDocument();
+    });
+
+    it("supports multi-selection and export to Excel with or without selection", async () => {
+      // mock createObjectURL & revokeObjectURL
+      const createObjectURLMock = vi.fn(() => "blob:mock-url");
+      const revokeObjectURLMock = vi.fn();
+      window.URL.createObjectURL = createObjectURLMock;
+      window.URL.revokeObjectURL = revokeObjectURLMock;
+
+      // mock anchor click
+      const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+      render(
+        <MemoryRouter>
+          <SessionListPage />
+        </MemoryRouter>
+      );
+
+      // 等待会话数据加载完成
+      await screen.findByText("ZXHH202609180001");
+
+      // 1. 无勾选状态下点击【导出】（位于列表左上角，填充颜色 rgb(35, 94, 212)），导出符合条件的全部记录
+      const exportBtn = screen.getByRole("button", { name: /^导出$/ });
+      expect(exportBtn).toHaveClass("bg-[rgb(35,94,212)]");
+      expect(exportBtn).toHaveClass("text-white");
+      fireEvent.click(exportBtn);
+
+      await waitFor(() => {
+        expect(createObjectURLMock).toHaveBeenCalled();
+        expect(clickSpy).toHaveBeenCalled();
+      });
+
+      // 2. 勾选第一条记录
+      const rowCheckbox = screen.getByLabelText("选择会话 ZXHH202609180001");
+      fireEvent.click(rowCheckbox);
+
+      // 验证标题栏显示已勾选 1 项
+      expect(screen.getByText("已勾选 1 项")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "导出 (1)" })).toBeInTheDocument();
+
+      // 点击取消勾选
+      fireEvent.click(screen.getByRole("button", { name: "取消" }));
+      expect(screen.queryByText("已勾选 1 项")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^导出$/ })).toBeInTheDocument();
+
+      // 3. 点击全选
+      const selectAll = screen.getByLabelText("全选本页会话");
+      fireEvent.click(selectAll);
+      expect(screen.getByText(/已勾选 \d+ 项/)).toBeInTheDocument();
+
+      // 导出已勾选记录
+      const exportSelectedBtn = screen.getByRole("button", { name: /导出 \(\d+\)/ });
+      fireEvent.click(exportSelectedBtn);
+
+      await waitFor(() => {
+        expect(clickSpy).toHaveBeenCalledTimes(2);
+      });
+
+      clickSpy.mockRestore();
     });
   });
 
@@ -181,6 +323,204 @@ describe("Reception Management Pages", () => {
       // 预期弹出「离线状态切换确认」弹窗
       expect(await screen.findByText("离线状态切换确认")).toBeInTheDocument();
       expect(screen.getByText(/当前存在进行中的会话，建议修改为忙碌/)).toBeInTheDocument();
+    });
+
+    it("applies enhanced input height, attachment upload methods, 13px section titles, and rgb(35,94,212) styles", async () => {
+      render(
+        <MemoryRouter>
+          <ReceptionWorkbenchPage />
+        </MemoryRouter>
+      );
+
+      // 1. 验证中间坐席端录入框高度（在原3行约75px基础上增加30px -> h-[105px] min-h-[105px]）
+      const textarea = await screen.findByPlaceholderText(/输入回复内容给客户/);
+      expect(textarea).toHaveClass("h-[105px]");
+      expect(textarea).toHaveClass("min-h-[105px]");
+
+      // 2. 验证附件上传按钮与说明
+      const attachBtn = screen.getByRole("button", { name: "添加附件" });
+      expect(attachBtn).toBeInTheDocument();
+      expect(screen.getByText(/支持勾选、拖拽或 Ctrl\+V 粘贴图片与文件/)).toBeInTheDocument();
+
+      // 模拟本地文件上传
+      const file = new File(["dummy content"], "test_contract.pdf", { type: "application/pdf" });
+      const fileInput = attachBtn.parentElement?.querySelector('input[type="file"]');
+      expect(fileInput).not.toBeNull();
+      if (fileInput) {
+        fireEvent.change(fileInput, { target: { files: [file] } });
+        // 验证暂存文件卡片展示
+        expect(await screen.findByText("test_contract.pdf")).toBeInTheDocument();
+        expect(screen.getByTitle("移除附件")).toBeInTheDocument();
+      }
+
+      // 3. 验证右侧两小节标题统一字号加2 -> 13号加粗 (text-[13px] font-bold)
+      const profileHeading = screen.getByRole("heading", { name: /企业与客户画像/ });
+      expect(profileHeading).toHaveClass("text-[13px]");
+      expect(profileHeading).toHaveClass("font-bold");
+
+      const assistantHeading = screen.getByRole("heading", { name: /坐席助手/ });
+      expect(assistantHeading).toHaveClass("text-[13px]");
+      expect(assistantHeading).toHaveClass("font-bold");
+
+      // 4. 验证坐席助手切换按钮：选中效果切换为填充 RGB:35,94,212 (白字)
+      const kbTab = screen.getByRole("button", { name: "知识库" });
+      expect(kbTab).toHaveClass("bg-[rgb(35,94,212)]");
+      expect(kbTab).toHaveClass("text-white");
+
+      // 切换至「工单」Tab
+      const ticketTab = screen.getByRole("button", { name: "工单" });
+      fireEvent.click(ticketTab);
+      expect(ticketTab).toHaveClass("bg-[rgb(35,94,212)]");
+      expect(ticketTab).toHaveClass("text-white");
+
+      // 5. 验证坐席助手的录入框标记突出的颜色 (border-2 border-[rgb(35,94,212)] bg-blue-50/50)
+      const assistantInput = screen.getByPlaceholderText("录入查询内容，回车确认检索...");
+      expect(assistantInput).toHaveClass("border-[rgb(35,94,212)]");
+      expect(assistantInput).toHaveClass("bg-blue-50/50");
+
+      // 6. 验证查询出的内容操作按钮【发送给客户】填充颜色为 rgb(35,94,212)
+      const sendBtns = await screen.findAllByRole("button", { name: "发送给客户" });
+      expect(sendBtns.length).toBeGreaterThan(0);
+      expect(sendBtns[0]).toHaveClass("bg-[rgb(35,94,212)]");
+      expect(sendBtns[0]).toHaveClass("text-white");
+    });
+
+    it("supports clicking customer message to quote reply and sends message with quote format", async () => {
+      render(
+        <MemoryRouter>
+          <ReceptionWorkbenchPage />
+        </MemoryRouter>
+      );
+
+      // Wait for workbench to load default active session ZXHH202609180001
+      const customerMsg = await screen.findByText(/您好，我们腾讯财务今天开具数电发票提示「发票额度不足」/);
+      expect(customerMsg).toBeInTheDocument();
+
+      // Click customer message to quote
+      fireEvent.click(customerMsg);
+
+      // Verify quote preview bar appears
+      expect(screen.getByText(/💬 引用 李经理:/)).toBeInTheDocument();
+
+      // Test cancel quote
+      const cancelBtn = screen.getByRole("button", { name: "取消引用" });
+      fireEvent.click(cancelBtn);
+      expect(screen.queryByText(/💬 引用 李经理:/)).not.toBeInTheDocument();
+
+      // Click "引用回复" button at the bottom-right of the message to quote again
+      const quoteBtns = screen.getAllByRole("button", { name: "引用此消息" });
+      expect(quoteBtns.length).toBeGreaterThan(0);
+      expect(quoteBtns[0].closest("div")).toHaveClass("justify-end");
+      fireEvent.click(quoteBtns[0]);
+      expect(screen.getByText(/💬 引用 李经理:/)).toBeInTheDocument();
+      expect(screen.getByText("已引用")).toBeInTheDocument();
+
+      // Enter response
+      const textarea = screen.getByPlaceholderText(/输入回复内容给客户/);
+      fireEvent.change(textarea, { target: { value: "局端审批完成后通常在15-30分钟内自动同步生效。" } });
+
+      const sendBtn = screen.getByRole("button", { name: "发送" });
+      fireEvent.click(sendBtn);
+
+      // Verify quote block rendered in conversation
+      await waitFor(() => {
+        expect(screen.getByText(/引用 李经理/)).toBeInTheDocument();
+        expect(screen.getByText("局端审批完成后通常在15-30分钟内自动同步生效。")).toBeInTheDocument();
+      });
+
+      // Verify quote preview bar is cleared
+      expect(screen.queryByText(/💬 引用 李经理:/)).not.toBeInTheDocument();
+    });
+
+    it("verifies enlarged fonts, 5-row profile key-value layout, and peer-level purchased products 3-column table", async () => {
+      render(
+        <MemoryRouter>
+          <ReceptionWorkbenchPage />
+        </MemoryRouter>
+      );
+
+      // 1. 左侧会话列表左右字体：加2个字号
+      const companyItems = await screen.findAllByText("腾讯科技（深圳）有限公司");
+      expect(companyItems[0]).toHaveClass("text-[14px]");
+
+      const card = companyItems[0].closest("div[class*='p-3']")!;
+      const timeSpan = card.querySelector("span[class*='font-mono']");
+      expect(timeSpan).toHaveClass("text-[12.5px]");
+
+      const previewItem = card.querySelectorAll("span[class*='truncate']")[1];
+      expect(previewItem).toHaveClass("text-[13.5px]");
+
+      // 2. 中间会话窗口：气泡内容与输入框字体加2个字号
+      const chatBubble = screen.getByText(/您好！数电发票额度由电子税务局/);
+      expect(chatBubble.closest("div[class*='text-']")).toHaveClass("text-[14px]");
+
+      const textarea = screen.getByPlaceholderText(/输入回复内容给客户/);
+      expect(textarea).toHaveClass("text-[14px]");
+
+      // 3. 右侧 企业与客户画像：5个 key-value 行结构字号调到12号、严禁换行
+      const profileHeading = screen.getByRole("heading", { name: "企业与客户画像" });
+      expect(profileHeading).toBeInTheDocument();
+
+      const tenantKey = screen.getByText("租户：");
+      const companyKey = screen.getByText("咨询企业：");
+      const taxNoKey = screen.getByText("税号：");
+      const contactKey = screen.getByText("咨询人：");
+      const phoneKey = screen.getByText("联系电话：");
+
+      expect(tenantKey).toHaveClass("text-left", "text-[12px]", "whitespace-nowrap");
+      expect(companyKey).toHaveClass("text-left", "text-[12px]", "whitespace-nowrap");
+      expect(taxNoKey).toHaveClass("text-left", "text-[12px]", "whitespace-nowrap");
+      expect(contactKey).toHaveClass("text-left", "text-[12px]", "whitespace-nowrap");
+      expect(phoneKey).toHaveClass("text-left", "text-[12px]", "whitespace-nowrap");
+
+      // 验证值右对齐、12px字号、不换行
+      const tenantValue = screen.getByText("腾讯集团财务云租户");
+      expect(tenantValue).toHaveClass("text-right", "text-[12px]", "whitespace-nowrap");
+
+      const contactValue = screen.getByText("李经理");
+      expect(contactValue).toHaveClass("text-right", "text-[12px]", "whitespace-nowrap");
+
+      // 验证坐席助手切换按钮均为 12 号字体（知识库、工单、订单、企业权益）
+      const tabKnowledge = screen.getByRole("button", { name: "知识库" });
+      const tabTicket = screen.getByRole("button", { name: "工单" });
+      const tabOrder = screen.getByRole("button", { name: "订单" });
+      const tabBenefit = screen.getByRole("button", { name: "企业权益" });
+
+      expect(tabKnowledge).toHaveClass("text-[12px]", "whitespace-nowrap");
+      expect(tabTicket).toHaveClass("text-[12px]", "whitespace-nowrap");
+      expect(tabOrder).toHaveClass("text-[12px]", "whitespace-nowrap");
+      expect(tabBenefit).toHaveClass("text-[12px]", "whitespace-nowrap");
+
+      // 4. 右侧 已购产品：独立出来作为同等级模块，3列列表呈现数据（产品、状态、到期时间）
+      const productsHeading = screen.getByRole("heading", { name: /已购产品/ });
+      expect(productsHeading).toBeInTheDocument();
+      expect(productsHeading).toHaveClass("text-[13px]");
+      expect(productsHeading).toHaveClass("font-bold");
+
+      // 验证 3 列表格标题与底边框及列宽、12px字号、不加粗、不换行
+      const thProduct = screen.getByRole("columnheader", { name: "产品" });
+      const thStatus = screen.getByRole("columnheader", { name: "状态" });
+      const thExpire = screen.getByRole("columnheader", { name: "到期时间" });
+
+      expect(thProduct).toBeInTheDocument();
+      expect(thStatus).toBeInTheDocument();
+      expect(thExpire).toBeInTheDocument();
+      expect(thProduct).toHaveClass("text-[12px]", "font-normal", "whitespace-nowrap");
+      expect(thStatus).toHaveClass("text-[12px]", "font-normal", "whitespace-nowrap", "w-[54px]");
+      expect(thExpire).toHaveClass("text-[12px]", "font-normal", "whitespace-nowrap", "w-[90px]");
+      expect(thProduct.closest("tr")).toHaveClass("border-b", "border-slate-200");
+
+      // 验证表格数据项字号都调到12、不加粗、一行显示不换行
+      const productCell = screen.getByText("发票云乐企直连版");
+      expect(productCell).toBeInTheDocument();
+      expect(productCell).toHaveClass("text-[12px]", "font-normal", "whitespace-nowrap");
+
+      const statusBadge = screen.getAllByText("服务中")[0];
+      expect(statusBadge).toHaveClass("text-[12px]", "font-normal", "whitespace-nowrap");
+
+      const expireDateCells = screen.getAllByText("2027-12-31");
+      expect(expireDateCells.length).toBeGreaterThan(0);
+      expect(expireDateCells[0]).toHaveClass("text-[12px]", "font-normal", "whitespace-nowrap");
     });
   });
 });

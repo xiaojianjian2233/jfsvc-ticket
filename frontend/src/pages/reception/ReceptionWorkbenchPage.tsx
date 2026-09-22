@@ -30,6 +30,21 @@ type HotlineSubTab = "answered" | "missed";
 type AssistantTab = "knowledge" | "ticket" | "order" | "benefit";
 type ReceptionStatus = "online" | "busy" | "offline";
 
+interface StagedAttachment {
+  id: string;
+  name: string;
+  size: number;
+  isImage: boolean;
+  dataUrl?: string;
+  file: File;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
 export function ReceptionWorkbenchPage() {
   // 顶层与二级切换
   const [mainTab, setMainTab] = useState<MainTab>("online");
@@ -60,10 +75,23 @@ export function ReceptionWorkbenchPage() {
   // 输入框与坐席助手
   const [inputMessage, setInputMessage] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [stagedAttachments, setStagedAttachments] = useState<StagedAttachment[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [assistantTab, setAssistantTab] = useState<AssistantTab>("knowledge");
   const [assistantQuery, setAssistantQuery] = useState("");
   const [assistantResults, setAssistantResults] = useState<AssistantSearchItem[]>([]);
   const [searchingAssistant, setSearchingAssistant] = useState(false);
+
+  // 引用回复状态
+  const [quotedMessage, setQuotedMessage] = useState<MessageItem | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const handleQuoteMessage = (msg: MessageItem) => {
+    setQuotedMessage(msg);
+    textareaRef.current?.focus();
+  };
 
   // 对话流滚动定位
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -200,14 +228,206 @@ export function ReceptionWorkbenchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assistantTab]);
 
-  // 发送消息
+  // 附件选择/拖拽上传处理
+  const handleFiles = (files: File[]) => {
+    if (!files || files.length === 0) return;
+    files.forEach((file) => {
+      const isImage = file.type.startsWith("image/");
+      const attId = `att_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      if (isImage) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const dataUrl = e.target?.result as string;
+          setStagedAttachments((prev) => [
+            ...prev,
+            {
+              id: attId,
+              name: file.name,
+              size: file.size,
+              isImage: true,
+              dataUrl,
+              file,
+            },
+          ]);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        setStagedAttachments((prev) => [
+          ...prev,
+          {
+            id: attId,
+            name: file.name,
+            size: file.size,
+            isImage: false,
+            file,
+          },
+        ]);
+      }
+    });
+  };
+
+  const removeStagedAttachment = (id: string) => {
+    setStagedAttachments((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  // 剪贴板粘贴处理（支持 Ctrl+V / Cmd+V 粘贴截图与文件）
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const clipboardFiles: File[] = [];
+    if (e.clipboardData?.items) {
+      for (let i = 0; i < e.clipboardData.items.length; i++) {
+        const item = e.clipboardData.items[i];
+        if (item.kind === "file") {
+          const file = item.getAsFile();
+          if (file) {
+            clipboardFiles.push(file);
+          }
+        }
+      }
+    }
+    if (clipboardFiles.length > 0) {
+      e.preventDefault();
+      handleFiles(clipboardFiles);
+    }
+  };
+
+  // 渲染消息气泡内容（支持引用、图片与文件卡片）
+  const renderMessageContent = (content: string, isSelfAgent: boolean) => {
+    // 检查是否包含引用：格式为 「引用 发送人: 引用内容」\n回复正文
+    const quoteMatch = content.match(/^「引用\s+([^:：]+)[:：]\s*([\s\S]*?)」\n([\s\S]*)$/);
+
+    const renderBody = (body: string) => {
+      // 匹配图片消息
+      const imageMatch = body.match(/^\[图片:\s*([^\]]+)\]\n(data:image\/[^\s]+)/s);
+      if (imageMatch) {
+        const imgName = imageMatch[1];
+        const imgUrl = imageMatch[2];
+        return (
+          <div className="space-y-1">
+            <img
+              src={imgUrl}
+              alt={imgName}
+              onClick={(e) => {
+                e.stopPropagation();
+                setPreviewImage(imgUrl);
+              }}
+              className="max-w-[280px] max-h-[200px] rounded object-cover cursor-zoom-in border border-black/10 hover:opacity-95 transition"
+            />
+            <div className="text-[10px] opacity-80 flex items-center gap-1">
+              <span>🖼️</span>
+              <span className="truncate max-w-[240px]" title={imgName}>
+                {imgName}
+              </span>
+            </div>
+          </div>
+        );
+      }
+
+      // 纯 base64 图片格式
+      if (body.startsWith("data:image/")) {
+        return (
+          <img
+            src={body}
+            alt="图片"
+            onClick={(e) => {
+              e.stopPropagation();
+              setPreviewImage(body);
+            }}
+            className="max-w-[280px] max-h-[200px] rounded object-cover cursor-zoom-in border border-black/10 hover:opacity-95 transition"
+          />
+        );
+      }
+
+      // 匹配文件消息
+      const fileMatch = body.match(/^\[文件:\s*([^\]]+)\]/);
+      if (fileMatch) {
+        const fileInfo = fileMatch[1];
+        return (
+          <div
+            className={`flex items-center gap-2 p-2 rounded border ${
+              isSelfAgent
+                ? "bg-white/15 border-white/20 text-white"
+                : "bg-slate-50 border-slate-200 text-slate-800"
+            }`}
+          >
+            <span className="text-xl">📄</span>
+            <div className="text-[14px]">
+              <div className="font-medium truncate max-w-[220px]">{fileInfo}</div>
+              <div className="text-[12px] opacity-75">附件文档</div>
+            </div>
+          </div>
+        );
+      }
+
+      return body;
+    };
+
+    if (quoteMatch) {
+      const quoteSender = quoteMatch[1].trim();
+      const quoteText = quoteMatch[2].trim();
+      const replyBody = quoteMatch[3];
+
+      return (
+        <div className="space-y-1.5">
+          <div
+            className={`text-[13px] px-2.5 py-1.5 rounded border-l-2 mb-1 ${
+              isSelfAgent
+                ? "bg-black/15 border-white/70 text-white/90"
+                : "bg-slate-100 border-teal-600 text-slate-600"
+            }`}
+          >
+            <div className="font-semibold text-[12px] opacity-80 mb-0.5">
+              引用 {quoteSender}
+            </div>
+            <div className="line-clamp-2 truncate text-[13px] opacity-90">
+              {quoteText}
+            </div>
+          </div>
+          <div>{renderBody(replyBody)}</div>
+        </div>
+      );
+    }
+
+    return renderBody(content);
+  };
+
+  // 发送消息及附件
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || !activeSession || sendingMessage) return;
+    if (
+      (!inputMessage.trim() && stagedAttachments.length === 0) ||
+      !activeSession ||
+      sendingMessage
+    ) {
+      return;
+    }
     setSendingMessage(true);
     try {
-      const newMsg = await sendAgentMessage(activeSession.id, inputMessage);
-      setActiveMessages((prev) => [...prev, newMsg]);
+      // 1. 如果有输入文本，先发送文本消息
+      if (inputMessage.trim()) {
+        let textToSend = inputMessage.trim();
+        if (quotedMessage) {
+          const quoteSender =
+            quotedMessage.sender_name ||
+            (quotedMessage.sender_type === "customer" ? "客户" : "客服");
+          const quoteContent = quotedMessage.content.replace(/\n/g, " ").slice(0, 100);
+          textToSend = `「引用 ${quoteSender}: ${quoteContent}」\n${textToSend}`;
+        }
+        const textMsg = await sendAgentMessage(activeSession.id, textToSend);
+        setActiveMessages((prev) => [...prev, textMsg]);
+        setQuotedMessage(null);
+      }
+      // 2. 如果有暂存附件，发送附件
+      if (stagedAttachments.length > 0) {
+        for (const att of stagedAttachments) {
+          const content =
+            att.isImage && att.dataUrl
+              ? `[图片: ${att.name}]\n${att.dataUrl}`
+              : `[文件: ${att.name} (${formatFileSize(att.size)})]`;
+          const attMsg = await sendAgentMessage(activeSession.id, content);
+          setActiveMessages((prev) => [...prev, attMsg]);
+        }
+      }
       setInputMessage("");
+      setStagedAttachments([]);
       setTimeout(scrollToBottom, 50);
     } finally {
       setSendingMessage(false);
@@ -302,7 +522,8 @@ export function ReceptionWorkbenchPage() {
           (s) =>
             !currentAgent ||
             s.agent_user_id === currentAgent.user_id ||
-            s.agent_name === currentAgent.user_name
+            s.agent_name === currentAgent.user_name ||
+            s.agent_name === currentAgent.nickname
         ) || [];
 
       if (inProgressSessions.length > 0) {
@@ -392,7 +613,7 @@ export function ReceptionWorkbenchPage() {
       {/* ------------------------------------------------------------------- */}
       {/* 5.1 左侧会话队列导航 */}
       {/* ------------------------------------------------------------------- */}
-      <div className="w-[310px] flex-none bg-white border-r border-slate-200 flex flex-col">
+      <div className="w-[320px] flex-none bg-white border-r border-slate-200 flex flex-col">
         {/* 3.1 账号接待状态控制栏（在线接待、热线接待上面） */}
         <div className="px-3 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-1.5 text-xs text-slate-700 font-medium">
@@ -599,19 +820,19 @@ export function ReceptionWorkbenchPage() {
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-semibold text-xs text-slate-800 truncate max-w-[190px]">
+                    <span className="font-semibold text-[14px] text-slate-800 truncate max-w-[200px]">
                       {card.company_name}
                     </span>
-                    <span className="text-[10.5px] text-slate-400 font-mono">
+                    <span className="text-[12.5px] text-slate-400 font-mono">
                       {(card.last_message_at || card.created_at).slice(11, 16)}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between text-xs text-slate-500">
-                    <span className="truncate max-w-[210px] text-[11.5px]">
+                  <div className="flex items-center justify-between text-slate-500">
+                    <span className="truncate max-w-[220px] text-[13.5px]">
                       {card.last_message || card.summary || "等待消息..."}
                     </span>
                     {card.unread_count > 0 && (
-                      <span className="flex-none px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500 text-white font-bold">
+                      <span className="flex-none px-1.5 py-0.2 rounded-full text-[12px] bg-rose-500 text-white font-bold">
                         {card.unread_count}
                       </span>
                     )}
@@ -701,14 +922,14 @@ export function ReceptionWorkbenchPage() {
                   暂无对话记录
                 </div>
               ) : (
-                activeMessages.map((msg) => {
+                activeMessages.map((msg, index) => {
                   const isCustomer = msg.sender_type === "customer";
                   const isSystem = msg.sender_type === "system";
                   const isBot = msg.sender_type === "bot";
 
                   if (isSystem) {
                     return (
-                      <div key={msg.id} className="text-center my-2">
+                      <div key={`sys_${msg.id}_${index}`} className="text-center my-2">
                         <span className="inline-block px-3 py-0.5 rounded-full text-[10.5px] bg-slate-200/80 text-slate-600">
                           {msg.content}
                         </span>
@@ -718,10 +939,10 @@ export function ReceptionWorkbenchPage() {
 
                   return (
                     <div
-                      key={msg.id}
-                      className={`flex flex-col ${isCustomer ? "items-start" : "items-end"}`}
+                      key={`msg_${msg.id}_${index}`}
+                      className={`flex flex-col group ${isCustomer ? "items-start" : "items-end"}`}
                     >
-                      <div className="flex items-center gap-1.5 mb-1 text-[10.5px] text-slate-400">
+                      <div className="flex items-center gap-1.5 mb-1 text-[12.5px] text-slate-400">
                         <span>
                           {isCustomer
                             ? `客户 · ${msg.sender_name}`
@@ -732,15 +953,70 @@ export function ReceptionWorkbenchPage() {
                         <span>{msg.created_at.slice(11, 16)}</span>
                       </div>
                       <div
-                        className={`max-w-[75%] px-4 py-2.5 rounded-lg text-xs leading-relaxed shadow-2xs whitespace-pre-wrap ${
+                        onClick={() => {
+                          if (
+                            isCustomer &&
+                            activeSession.status !== "closed" &&
+                            activeSession.status !== "converted"
+                          ) {
+                            handleQuoteMessage(msg);
+                          }
+                        }}
+                        className={`max-w-[75%] px-4 py-2.5 rounded-lg text-[14px] leading-relaxed shadow-2xs whitespace-pre-wrap transition ${
                           isCustomer
-                            ? "bg-white text-slate-800 border border-slate-200 rounded-tl-none"
+                            ? "bg-white text-slate-800 border border-slate-200 rounded-tl-none hover:border-teal-500/50 cursor-pointer"
                             : isBot
                             ? "bg-purple-50 text-purple-900 border border-purple-200 rounded-tr-none"
                             : "bg-teal-600 text-white rounded-tr-none"
+                        } ${
+                          quotedMessage?.id === msg.id
+                            ? "ring-2 ring-teal-500 border-teal-500"
+                            : ""
                         }`}
+                        title={
+                          isCustomer &&
+                          activeSession.status !== "closed" &&
+                          activeSession.status !== "converted"
+                            ? "点击可引用回复此消息"
+                            : undefined
+                        }
                       >
-                        {msg.content}
+                        <div>{renderMessageContent(msg.content, !isCustomer && !isBot)}</div>
+
+                        {/* 对应消息右下角：引用回复操作按钮 */}
+                        {isCustomer &&
+                          activeSession.status !== "closed" &&
+                          activeSession.status !== "converted" && (
+                            <div className="flex justify-end mt-1.5 pt-1 border-t border-slate-100">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleQuoteMessage(msg);
+                                }}
+                                className={`inline-flex items-center gap-1 text-[12.5px] rounded px-2 py-0.5 font-medium transition cursor-pointer shadow-2xs ${
+                                  quotedMessage?.id === msg.id
+                                    ? "bg-teal-600 text-white border border-teal-600"
+                                    : "text-teal-700 hover:text-teal-900 bg-teal-50 hover:bg-teal-100 border border-teal-200/80"
+                                }`}
+                                title="引用此消息"
+                                aria-label="引用此消息"
+                              >
+                                <svg
+                                  className="w-3 h-3"
+                                  viewBox="0 0 20 20"
+                                  fill="currentColor"
+                                >
+                                  <path
+                                    fillRule="evenodd"
+                                    d="M7.707 3.293a1 1 0 010 1.414L5.414 7H11a7 7 0 017 7v2a1 1 0 11-2 0v-2a5 5 0 00-5-5H5.414l2.293 2.293a1 1 0 11-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
+                                    clipRule="evenodd"
+                                  />
+                                </svg>
+                                <span>{quotedMessage?.id === msg.id ? "已引用" : "引用回复"}</span>
+                              </button>
+                            </div>
+                          )}
                       </div>
                     </div>
                   );
@@ -751,24 +1027,158 @@ export function ReceptionWorkbenchPage() {
 
             {/* 坐席端信息录入发送区 */}
             <div className="p-3 bg-white border-t border-slate-200 flex flex-col gap-2">
-              <textarea
-                rows={3}
-                value={inputMessage}
-                disabled={activeSession.status === "closed" || activeSession.status === "converted"}
-                onChange={(e) => setInputMessage(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendMessage();
+              {/* 工具栏：附件按钮 */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    title="添加附件（支持图片、文件；也可直接拖拽至录入框或 Ctrl+V 粘贴）"
+                    aria-label="添加附件"
+                    disabled={activeSession.status === "closed" || activeSession.status === "converted"}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-1.5 px-2 py-1 rounded text-slate-600 hover:text-[rgb(35,94,212)] hover:bg-blue-50 transition cursor-pointer text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <svg
+                      className="w-4 h-4 text-slate-500"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
+                      />
+                    </svg>
+                    <span className="font-medium">附件</span>
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files.length > 0) {
+                        handleFiles(Array.from(e.target.files));
+                        e.target.value = "";
+                      }
+                    }}
+                    className="hidden"
+                  />
+                  <span className="text-[11px] text-slate-400">
+                    支持勾选、拖拽或 Ctrl+V 粘贴图片与文件
+                  </span>
+                </div>
+              </div>
+
+              {/* 暂存附件预览列表 */}
+              {stagedAttachments.length > 0 && (
+                <div className="flex flex-wrap gap-2 p-2 bg-slate-50 rounded border border-slate-200">
+                  {stagedAttachments.map((att) => (
+                    <div
+                      key={att.id}
+                      className="flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-200 rounded text-xs shadow-2xs"
+                    >
+                      {att.isImage && att.dataUrl ? (
+                        <img
+                          src={att.dataUrl}
+                          alt={att.name}
+                          className="w-5 h-5 rounded object-cover"
+                        />
+                      ) : (
+                        <span className="text-slate-400">📄</span>
+                      )}
+                      <span
+                        className="max-w-[140px] truncate text-slate-700 font-medium text-[11px]"
+                        title={att.name}
+                      >
+                        {att.name}
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        ({formatFileSize(att.size)})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeStagedAttachment(att.id)}
+                        className="text-slate-400 hover:text-red-500 ml-1 cursor-pointer font-bold text-xs"
+                        title="移除附件"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 引用消息提示条 */}
+              {quotedMessage && (
+                <div className="flex items-center justify-between px-3 py-1 bg-teal-50 border border-teal-200 rounded-md text-[13.5px] text-slate-700">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <span className="text-teal-700 font-semibold flex-none text-[13px]">
+                      💬 引用 {quotedMessage.sender_name || (quotedMessage.sender_type === "customer" ? "客户" : "客服")}:
+                    </span>
+                    <span className="truncate text-slate-600 text-[13px] max-w-[360px] md:max-w-[500px]">
+                      {quotedMessage.content.replace(/\n/g, " ").slice(0, 80)}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setQuotedMessage(null)}
+                    className="text-slate-400 hover:text-slate-600 ml-2 font-bold cursor-pointer text-xs"
+                    title="取消引用"
+                    aria-label="取消引用"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              {/* 录入框容器（支持拖拽覆盖与高度在原来基础上加30px：原3行约75px -> h-[105px] min-h-[105px]） */}
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDragging(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    handleFiles(Array.from(e.dataTransfer.files));
                   }
                 }}
-                placeholder={
-                  activeSession.status === "closed" || activeSession.status === "converted"
-                    ? "当前会话已结束或已转工单，不可继续发送消息"
-                    : "输入回复内容给客户，回车快捷发送，Shift+Enter 换行..."
-                }
-                className="w-full resize-none border border-slate-200 rounded-md p-2.5 text-xs text-slate-800 focus:outline-none focus:border-teal-600 disabled:bg-slate-100 disabled:cursor-not-allowed"
-              />
+                className="relative rounded-md"
+              >
+                <textarea
+                  ref={textareaRef}
+                  value={inputMessage}
+                  disabled={activeSession.status === "closed" || activeSession.status === "converted"}
+                  onChange={(e) => setInputMessage(e.target.value)}
+                  onPaste={handlePaste}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendMessage();
+                    }
+                  }}
+                  placeholder={
+                    activeSession.status === "closed" || activeSession.status === "converted"
+                      ? "当前会话已结束或已转工单，不可继续发送消息"
+                      : "输入回复内容给客户，回车快捷发送，Shift+Enter 换行；支持拖拽或 Ctrl+V 粘贴图片与文件..."
+                  }
+                  className="w-full h-[105px] min-h-[105px] resize-none border border-slate-200 rounded-md p-2.5 text-[14px] text-slate-800 focus:outline-none focus:border-teal-600 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                />
+
+                {isDragging && (
+                  <div className="absolute inset-0 bg-blue-50/90 border-2 border-dashed border-[rgb(35,94,212)] rounded-md flex items-center justify-center pointer-events-none text-xs font-medium text-[rgb(35,94,212)]">
+                    松开鼠标即可添加附件或图片
+                  </div>
+                )}
+              </div>
+
               <div className="flex items-center justify-between">
                 <span className="text-[11px] text-slate-400">
                   按 Enter 快捷发送，Shift + Enter 换行
@@ -777,7 +1187,7 @@ export function ReceptionWorkbenchPage() {
                   type="button"
                   onClick={handleSendMessage}
                   disabled={
-                    !inputMessage.trim() ||
+                    (!inputMessage.trim() && stagedAttachments.length === 0) ||
                     sendingMessage ||
                     activeSession.status === "closed" ||
                     activeSession.status === "converted"
@@ -799,54 +1209,114 @@ export function ReceptionWorkbenchPage() {
       {/* ------------------------------------------------------------------- */}
       {/* 5.3 右侧分上下结构：上部分基础信息，下部分坐席助手 */}
       {/* ------------------------------------------------------------------- */}
-      <div className="w-[360px] flex-none bg-white flex flex-col overflow-hidden">
+      <div className="w-[360px] flex-none bg-white flex flex-col overflow-y-auto">
         {activeSession ? (
           <>
-            {/* 上部：客户基础信息 */}
-            <div className="p-4 border-b border-slate-200 bg-slate-50/50 space-y-3">
+            {/* 上部：企业与客户画像 */}
+            <div className="px-3.5 py-2.5 border-b border-slate-200 bg-slate-50/50 space-y-2 flex-none">
               <div className="flex items-center justify-between">
-                <h3 className="text-xs font-bold text-slate-800">企业与客户画像</h3>
-                <span className="text-[11px] text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-200 font-medium">
+                <h3 className="text-[13px] font-bold text-slate-800">企业与客户画像</h3>
+                <span className="text-[11px] text-teal-700 bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200 font-medium whitespace-nowrap">
                   {activeSession.is_in_service || "服务期内"}
                 </span>
               </div>
 
-              {/* 5.3.1 归属租户、咨询企业、咨询企业税号 直接显示值，不显示 key */}
-              <div className="p-2.5 bg-white rounded border border-slate-200/80 space-y-1">
-                <div className="text-xs font-bold text-slate-900 break-words">
-                  {activeSession.company_name}
+              {/* 租户、咨询企业、税号、咨询人、联系电话：全部key+值左右结构，key左对齐在一起不隔开，值右对齐，字号统一12号，严禁换行 */}
+              <div className="px-3 py-2 bg-white rounded-lg border border-slate-200/90 space-y-1.5">
+                <div className="flex items-center justify-between text-[12px] whitespace-nowrap gap-2">
+                  <span className="text-slate-500 text-left flex-none text-[12px] whitespace-nowrap">租户：</span>
+                  <span
+                    className="font-medium text-slate-800 text-right truncate max-w-[220px] text-[12px] whitespace-nowrap"
+                    title={activeSession.tenant_name || activeSession.tenant_no || "—"}
+                  >
+                    {activeSession.tenant_name || activeSession.tenant_no || "—"}
+                  </span>
                 </div>
-                <div className="text-[11px] font-mono text-slate-500">
-                  税号：{activeSession.tax_no || "—"}
+                <div className="flex items-center justify-between text-[12px] whitespace-nowrap gap-2">
+                  <span className="text-slate-500 text-left flex-none text-[12px] whitespace-nowrap">咨询企业：</span>
+                  <span
+                    className="font-medium text-slate-800 text-right truncate max-w-[220px] text-[12px] whitespace-nowrap"
+                    title={activeSession.company_name || "—"}
+                  >
+                    {activeSession.company_name || "—"}
+                  </span>
                 </div>
-                <div className="text-[11px] text-slate-600">
-                  租户：{activeSession.tenant_name || activeSession.tenant_no || "—"}
+                <div className="flex items-center justify-between text-[12px] whitespace-nowrap gap-2">
+                  <span className="text-slate-500 text-left flex-none text-[12px] whitespace-nowrap">税号：</span>
+                  <span
+                    className="font-mono text-slate-800 text-right truncate max-w-[220px] text-[12px] whitespace-nowrap"
+                    title={activeSession.tax_no || "—"}
+                  >
+                    {activeSession.tax_no || "—"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[12px] whitespace-nowrap gap-2">
+                  <span className="text-slate-500 text-left flex-none text-[12px] whitespace-nowrap">咨询人：</span>
+                  <span
+                    className="font-medium text-slate-800 text-right truncate max-w-[220px] text-[12px] whitespace-nowrap"
+                    title={activeSession.contact_name || "—"}
+                  >
+                    {activeSession.contact_name || "—"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[12px] whitespace-nowrap gap-2">
+                  <span className="text-slate-500 text-left flex-none text-[12px] whitespace-nowrap">联系电话：</span>
+                  <span
+                    className="font-mono text-slate-800 text-right truncate max-w-[220px] text-[12px] whitespace-nowrap"
+                    title={activeSession.contact_phone || "—"}
+                  >
+                    {activeSession.contact_phone || "—"}
+                  </span>
                 </div>
               </div>
+            </div>
 
-              {/* 咨询人、联系电话号码、已购产品、是否期内 显示 key: value */}
-              <div className="space-y-1.5 text-xs text-slate-700">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400 text-[11px]">咨询人：</span>
-                  <span className="font-medium text-slate-800">{activeSession.contact_name || "—"}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400 text-[11px]">联系电话：</span>
-                  <span className="font-mono text-slate-800">{activeSession.contact_phone || "—"}</span>
-                </div>
-                <div className="pt-1">
-                  <div className="text-slate-400 text-[11px] mb-1">已购产品：</div>
-                  <div className="flex flex-col gap-1 pl-1">
-                    {(activeSession.purchased_products || ["发票云敏捷版", "数电发票乐企模块"]).map((p) => (
-                      <span
-                        key={p}
-                        className="inline-block px-2 py-0.5 rounded text-[11px] bg-slate-100 text-slate-700 border border-slate-200"
-                      >
-                        {p}
-                      </span>
-                    ))}
-                  </div>
-                </div>
+            {/* 中部：已购产品（独立模块，与企业与客户画像和坐席助手同等级） */}
+            <div className="px-3.5 py-2 border-b border-slate-200 bg-white space-y-1.5 flex-none">
+              <div className="flex items-center justify-between">
+                <h3 className="text-[13px] font-bold text-slate-800 flex items-center gap-1.5">
+                  <span>已购产品</span>
+                  <span className="text-[11px] text-slate-400 font-normal">
+                    ({(activeSession.purchased_products || ["发票云敏捷版", "数电发票乐企模块"]).length}项)
+                  </span>
+                </h3>
+              </div>
+
+              {/* 3列表格呈现数据：产品、状态、到期时间；紧凑单行无折叠，节省坐席助手空间 */}
+              <div className="w-full overflow-hidden">
+                <table className="w-full text-left border-collapse table-fixed">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-500 font-normal text-[12px]">
+                      <th className="pb-1 px-1 font-normal text-left whitespace-nowrap text-[12px]">产品</th>
+                      <th className="pb-1 px-1 font-normal text-center w-[54px] whitespace-nowrap text-[12px]">状态</th>
+                      <th className="pb-1 px-1 font-normal text-right w-[90px] whitespace-nowrap text-[12px]">到期时间</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(activeSession.purchased_products || ["发票云敏捷版", "数电发票乐企模块"]).map(
+                      (productItem, idx) => {
+                        const name = typeof productItem === "string" ? productItem : (productItem as any).name;
+                        const status = typeof productItem === "string" ? "服务中" : ((productItem as any).status || "服务中");
+                        const expireDate = typeof productItem === "string" ? "2027-12-31" : ((productItem as any).expire_date || "2027-12-31");
+                        return (
+                          <tr key={idx} className="hover:bg-slate-50/60 transition">
+                            <td className="py-1 px-1 text-[12px] text-slate-700 font-normal truncate whitespace-nowrap" title={name}>
+                              {name}
+                            </td>
+                            <td className="py-1 px-1 text-center whitespace-nowrap">
+                              <span className="inline-block px-1.5 py-0.5 rounded text-[12px] bg-emerald-50 text-emerald-700 font-normal whitespace-nowrap">
+                                {status}
+                              </span>
+                            </td>
+                            <td className="py-1 px-1 text-right font-mono text-slate-600 text-[12px] font-normal whitespace-nowrap">
+                              {expireDate}
+                            </td>
+                          </tr>
+                        );
+                      }
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
 
@@ -854,19 +1324,21 @@ export function ReceptionWorkbenchPage() {
             <div className="flex-1 flex flex-col overflow-hidden">
               <div className="p-3 pb-2 border-b border-slate-100">
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <h3 className="text-[13px] font-bold text-slate-800 flex items-center gap-1.5">
                     <span>坐席助手</span>
                     <span className="text-[10.5px] text-slate-400 font-normal">快速解答</span>
                   </h3>
                 </div>
 
-                {/* 5.3.2.1 查询类型 tab */}
-                <div className="grid grid-cols-4 gap-1 p-1 bg-slate-100 rounded text-center text-xs">
+                {/* 5.3.2.1 查询类型 tab（修改为12号字体，选中状态填充 RGB:35,94,212） */}
+                <div className="grid grid-cols-4 gap-1 p-1 bg-slate-100 rounded text-center text-[12px]">
                   <button
                     type="button"
                     onClick={() => setAssistantTab("knowledge")}
-                    className={`py-1 rounded font-medium transition cursor-pointer ${
-                      assistantTab === "knowledge" ? "bg-white text-teal-700 shadow-2xs" : "text-slate-600"
+                    className={`py-1 px-0.5 rounded font-medium transition cursor-pointer text-[12px] whitespace-nowrap ${
+                      assistantTab === "knowledge"
+                        ? "bg-[rgb(35,94,212)] text-white shadow-xs font-semibold"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
                     }`}
                   >
                     知识库
@@ -874,8 +1346,10 @@ export function ReceptionWorkbenchPage() {
                   <button
                     type="button"
                     onClick={() => setAssistantTab("ticket")}
-                    className={`py-1 rounded font-medium transition cursor-pointer ${
-                      assistantTab === "ticket" ? "bg-white text-teal-700 shadow-2xs" : "text-slate-600"
+                    className={`py-1 px-0.5 rounded font-medium transition cursor-pointer text-[12px] whitespace-nowrap ${
+                      assistantTab === "ticket"
+                        ? "bg-[rgb(35,94,212)] text-white shadow-xs font-semibold"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
                     }`}
                   >
                     工单
@@ -883,8 +1357,10 @@ export function ReceptionWorkbenchPage() {
                   <button
                     type="button"
                     onClick={() => setAssistantTab("order")}
-                    className={`py-1 rounded font-medium transition cursor-pointer ${
-                      assistantTab === "order" ? "bg-white text-teal-700 shadow-2xs" : "text-slate-600"
+                    className={`py-1 px-0.5 rounded font-medium transition cursor-pointer text-[12px] whitespace-nowrap ${
+                      assistantTab === "order"
+                        ? "bg-[rgb(35,94,212)] text-white shadow-xs font-semibold"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
                     }`}
                   >
                     订单
@@ -892,23 +1368,40 @@ export function ReceptionWorkbenchPage() {
                   <button
                     type="button"
                     onClick={() => setAssistantTab("benefit")}
-                    className={`py-1 rounded font-medium transition cursor-pointer ${
-                      assistantTab === "benefit" ? "bg-white text-teal-700 shadow-2xs" : "text-slate-600"
+                    className={`py-1 px-0.5 rounded font-medium transition cursor-pointer text-[12px] whitespace-nowrap ${
+                      assistantTab === "benefit"
+                        ? "bg-[rgb(35,94,212)] text-white shadow-xs font-semibold"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
                     }`}
                   >
                     企业权益
                   </button>
                 </div>
 
-                {/* 5.3.2.2 查询内容录入框 */}
-                <div className="mt-2.5">
+                {/* 5.3.2.2 查询内容录入框（标记醒目突出颜色与搜索图标，快速定位） */}
+                <div className="mt-2.5 relative flex items-center">
+                  <span className="absolute left-2.5 text-[rgb(35,94,212)] pointer-events-none">
+                    <svg
+                      className="w-3.5 h-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                      />
+                    </svg>
+                  </span>
                   <input
                     type="text"
                     value={assistantQuery}
                     onChange={(e) => setAssistantQuery(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleAssistantSearch()}
                     placeholder="录入查询内容，回车确认检索..."
-                    className="w-full px-2.5 py-1.5 border border-slate-200 rounded text-xs focus:outline-none focus:border-teal-600"
+                    className="w-full pl-8 pr-2.5 py-1.5 border-2 border-[rgb(35,94,212)] bg-blue-50/50 rounded text-xs text-slate-800 placeholder:text-blue-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-[rgb(35,94,212)]/30 transition shadow-xs"
                   />
                 </div>
               </div>
@@ -936,7 +1429,7 @@ export function ReceptionWorkbenchPage() {
                         <button
                           type="button"
                           onClick={() => handleSendAssistantAnswer(item)}
-                          className="px-2 py-0.5 bg-teal-600 hover:bg-teal-700 text-white rounded text-[10.5px] font-medium transition cursor-pointer"
+                          className="px-2.5 py-1 bg-[rgb(35,94,212)] hover:opacity-90 text-white rounded text-[11px] font-medium transition cursor-pointer shadow-2xs"
                         >
                           发送给客户
                         </button>
@@ -1044,6 +1537,33 @@ export function ReceptionWorkbenchPage() {
                 {handoverSubmitting ? "正在转交并离线..." : "确认转交并离线"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 图片放大预览模态窗 */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 cursor-pointer"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div
+            className="relative max-w-4xl max-h-[90vh] bg-white rounded-lg p-2 shadow-2xl overflow-hidden cursor-default"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setPreviewImage(null)}
+              className="absolute top-3 right-3 w-8 h-8 rounded-full bg-slate-800/80 hover:bg-slate-900 text-white flex items-center justify-center text-sm shadow cursor-pointer transition"
+              title="关闭预览"
+            >
+              ✕
+            </button>
+            <img
+              src={previewImage}
+              alt="图片预览"
+              className="max-w-full max-h-[85vh] rounded object-contain"
+            />
           </div>
         </div>
       )}
