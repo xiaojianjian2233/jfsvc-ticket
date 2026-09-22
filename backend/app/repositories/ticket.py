@@ -441,7 +441,7 @@ class TicketRepository:
             # 严格以工单生命周期为准：已处于终态（closed / transferred_return / rejected / superseded）的工单，
             # 绝不因 Hub 的陈旧状态或非 released 状态而误穿透到「处理中」等活跃状态列表。
             terminal_statuses = ("closed", "transferred_return", "rejected", "superseded")
-            if any(s in ("processing", "reviewing", "supplementing") for s in targets) and not any(
+            if any(s in ("processing", "supplementing") for s in targets) and not any(
                 s in terminal_statuses for s in targets
             ):
                 ticket_cond = and_(
@@ -513,8 +513,7 @@ class TicketRepository:
         cutoff = (now or datetime.now(UTC)) - threshold
         active_statuses = (
             "processing",
-            "reviewing",
-            "supplementing",
+                    "supplementing",
             "exception",
             "received",
             "linked",
@@ -551,7 +550,6 @@ OP_STATUS_VALUES = [
     "closed",
     "supplementing",
     "exception",
-    "reviewing",
     "transferred_return",
 ]
 

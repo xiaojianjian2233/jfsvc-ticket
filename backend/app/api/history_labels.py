@@ -26,7 +26,7 @@ HUB_TYPE_ZH: dict[str, str] = {
 # ticket.status / hub.status 英文枚举 → 中文（状态流转 from→to 展示）。
 STATUS_ZH: dict[str, str] = {
     "processing": "处理中",
-    "reviewing": "待审核",
+    "reviewing": "处理中",  # 兼容尚未迁移的历史记录
     "supplementing": "补充资料",
     "answered": "已答复",
     "exception": "处理异常",

@@ -349,8 +349,8 @@ def test_d_observe_mode_scores_but_sends(db_session: Session) -> None:
     assert d is not None and d.proposal.get("accuracy") == 40
 
 
-def test_d_enforce_low_accuracy_saves_draft_reviewing(db_session: Session) -> None:
-    """enforce + <阈值：存草稿(不发) + reviewing + 转主管 + 无 outbox。"""
+def test_d_enforce_low_accuracy_saves_draft_processing(db_session: Session) -> None:
+    """enforce + <阈值：存草稿(不发) + processing + 转主管 + 无 outbox。"""
     from app.models import SyncOutbox
     from app.services.agents.answer_accuracy import AccuracyScore
 
@@ -374,7 +374,7 @@ def test_d_enforce_low_accuracy_saves_draft_reviewing(db_session: Session) -> No
         ok = auto_answer_operation(db_session, hub.id, settings=s)
     assert ok is True
     db_session.refresh(hub)
-    assert hub.op_status == "reviewing"
+    assert hub.op_status == "processing"
     assert hub.op_handler != "agent"  # 转兜底主管
     assert hub.reply_content == "可能是网络问题，建议稍后再试。"
     assert hub.reply_is_draft is True  # 草稿标记
@@ -392,7 +392,7 @@ def test_d_enforce_low_accuracy_saves_draft_reviewing(db_session: Session) -> No
 
 def test_d_review_persists_cited_knowledge_and_skills_used(db_session: Session) -> None:
     """D_review 分支（打分未过转人工审核）同样必存 cited_knowledge/skills_used
-    ——镜像 D 分支的持久化（供 reviewing 态处理人跑反思推断还原黄金三元组）。"""
+    ——镜像 D 分支的持久化（供 处理中草稿态处理人跑反思推断还原黄金三元组）。"""
     from app.services.agents.answer_accuracy import AccuracyScore
 
     hub, _t = _seed_op_hub(db_session)
@@ -463,8 +463,8 @@ def test_d_enforce_high_accuracy_sends(db_session: Session) -> None:
     assert hub.reply_is_draft is False
 
 
-def test_d_review_mode_always_saves_draft_reviewing(db_session: Session) -> None:
-    """review：无论准确率高低都存草稿(不发) + reviewing + 转主管 + 无 outbox。"""
+def test_d_review_mode_always_saves_draft_processing(db_session: Session) -> None:
+    """review：无论准确率高低都存草稿(不发) + processing + 转主管 + 无 outbox。"""
     from app.models import SyncOutbox
     from app.services.agents.answer_accuracy import AccuracyScore
 
@@ -487,7 +487,7 @@ def test_d_review_mode_always_saves_draft_reviewing(db_session: Session) -> None
         ok = auto_answer_operation(db_session, hub.id, settings=s)
     assert ok is True
     db_session.refresh(hub)
-    assert hub.op_status == "reviewing"  # 高分也转审核
+    assert hub.op_status == "processing"  # 高分也转审核
     assert hub.op_handler != "agent"  # 转兜底主管
     assert hub.reply_content == "您好，请在【发票管理】页重新发起开票并保存。"
     assert hub.reply_is_draft is True  # 草稿标记，未发

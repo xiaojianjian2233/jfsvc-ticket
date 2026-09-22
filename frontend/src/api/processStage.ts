@@ -4,7 +4,7 @@
  * 系统有 4 个状态字段各服务不同角色：
  *   - ticket.status   工单底层生命周期（received/split/in_progress/released/closed）
  *   - hub.status      毕业后流转 + 闸门（created/pending_review/pending/in_progress/released/resolved/closed）
- *   - hub.op_status   仅 Operation 的处理机（processing/answered/closed/supplementing/reviewing/exception）
+ *   - hub.op_status   仅 Operation 的处理机（processing/answered/closed/supplementing/exception）
  *   - linear_status   仅研发类，镜像 Linear 列名（Backlog/In Progress/In Review/Done…）
  *
  * 过去各页面各自映射、粒度不一（工单列表 2 档、hub 详情 6 段），且列表读 hub.status、
@@ -68,7 +68,7 @@ export const STAGE_TONE_STYLE: Record<StageTone, { bg: string; fg: string; bd: s
 const OP_STAGE: Record<string, ProcessStage> = {
   processing: { label: "处理中", tone: "progress" },
   resubmitted: { label: "补充重提", tone: "progress" },
-  reviewing: { label: "待审核", tone: "pending" },
+  reviewing: { label: "处理中", tone: "progress" },
   supplementing: { label: "补充资料", tone: "progress" },
   unresolved_return: { label: "未解决退回", tone: "exception" },
   transferred: { label: "转单", tone: "progress" },
@@ -115,7 +115,7 @@ export function computeProcessStage(input: StageInput): ProcessStage {
   // 2. Ticket 明确业务主状态优先（SSOT 单一事实源）
   if (ticketStatus === "closed" || ticketStatus === "done") return { label: "已关闭", tone: "closed" };
   if (ticketStatus === "answered") return { label: "已答复", tone: "done" };
-  if (ticketStatus === "reviewing") return { label: "待审核", tone: "pending" };
+  if (ticketStatus === "reviewing") return { label: "处理中", tone: "progress" };
   if (ticketStatus === "supplementing") return { label: "补充资料", tone: "progress" };
   if (ticketStatus === "exception") return { label: "处理异常", tone: "exception" };
 

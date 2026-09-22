@@ -20,7 +20,7 @@ from adapters.ai_cs import AiCsClient, AiCsConfig
 from app.core.logging import get_logger
 from app.models import AgentDecision, HubIssue, Ticket
 from app.repositories.status_history import StatusHistoryRepository
-from app.services.hub_issues.op_status import OP_REVIEWING
+from app.services.hub_issues.op_status import OP_PROCESSING
 
 logger = get_logger(__name__)
 
@@ -66,13 +66,13 @@ def _dict_list(value: Any) -> list[dict[str, Any]]:
 
 
 def reviewing_hub_for_ticket(db: Session, ticket: Ticket) -> HubIssue | None:
-    """ticket 挂的 hub 是否处于 reviewing 态（AI 答复因打分未过/review 模式转
-    人工审核）。用于让 op_status=reviewing 的处理人在没有真实 ai_cs escalation
+    """ticket 挂的 hub 是否处于处理中且保留 AI 草稿（AI 答复因打分未过/review 模式转
+    人工审核）。用于让该工单处理人在没有真实 ai_cs escalation
     或 diagnosis_flagged_at 标记的情况下，也能自助跑一次反思诊断。"""
     if ticket.hub_issue_id is None:
         return None
     hub = db.get(HubIssue, ticket.hub_issue_id)
-    if hub is None or hub.op_status != OP_REVIEWING:
+    if hub is None or hub.op_status != OP_PROCESSING or not hub.reply_is_draft:
         return None
     return hub
 

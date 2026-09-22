@@ -28,7 +28,6 @@ _RANGES = ("today", "week", "month")
 
 _IN_PROGRESS_STATUSES = (
     "processing",
-    "reviewing",
     "supplementing",
     "exception",
     "linked",

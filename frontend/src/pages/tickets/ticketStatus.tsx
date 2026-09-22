@@ -14,7 +14,7 @@ export const PROCESS_STAGE_OPTIONS: { value: string; label: string }[] = [
 
 export const TICKET_STATUS_BADGE: Record<string, { label: string; bg: string; fg: string; bd: string }> = {
   processing: { label: "处理中", bg: "#e7f2f6", fg: "#2383a0", bd: "#c9e0e8" },
-  reviewing: { label: "待审核", bg: "#eef1fb", fg: "#4b4fb3", bd: "#d4d8f2" },
+  reviewing: { label: "处理中", bg: "#e7f2f6", fg: "#2383a0", bd: "#c9e0e8" },
   supplementing: { label: "补充资料", bg: "#faf3e3", fg: "#9a6c1c", bd: "#eddfba" },
   answered: { label: "已答复", bg: "#edf5ee", fg: "#2f7d4f", bd: "#bcd9c4" },
   closed: { label: "已关闭", bg: "#f3f0e9", fg: "#8b8577", bd: "#e8e3d9" },
@@ -93,7 +93,7 @@ export function StatusBadge({ status, prefix }: { status: string; prefix?: strin
 }
 
 export function isTicketClosed(t: TicketSummary): boolean {
-  if (t.op_status && ["processing", "reviewing", "supplementing"].includes(t.op_status)) {
+  if (t.op_status && ["processing", "supplementing"].includes(t.op_status)) {
     return false;
   }
   if (t.hub_issue_id == null) {
@@ -120,7 +120,7 @@ export function getTicketProcessLink(t: TicketSummary): ProcessLinkStage {
       return stage as ProcessLinkStage;
     }
   }
-  if (t.op_status && ["processing", "reviewing", "supplementing"].includes(t.op_status)) {
+  if (t.op_status && ["processing", "supplementing"].includes(t.op_status)) {
     return "服务处理";
   }
   // 1. 工单关闭后环节记录为【完成】

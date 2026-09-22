@@ -697,9 +697,9 @@ export function TicketDetailPage() {
     enabled: !Number.isNaN(id) && canSeeReflect,
   });
   const showReflectBtn = canSeeReflect && !!escalationCtx.data?.is_escalation;
-  // 待审核(reviewing)：AI 草稿答复存 hub.reply_content（未级联到 ticket），
+  // AI 草稿：答复存 hub.reply_content（未级联到 ticket），
   // 供审核人在处理说明框查看/编辑后点答复正式发出。
-  const draftReply = effectiveOpStatus === "reviewing" ? (hub.data?.reply_content ?? "") : "";
+  const draftReply = hub.data?.reply_is_draft ? (hub.data.reply_content ?? "") : "";
   // 标记诊断按钮可见性：运营类 + 已毕业确认 + AI 已答复未关闭 + 答复确实是 AI 自动发的
   // （不是主管/处理人人工发的或编辑过的）；处理人本人或主管可点。
   const aiAutoReplied = hub.data?.reply_authored_by === "agent:ai_cs";
@@ -1548,7 +1548,7 @@ export function TicketDetailPage() {
                       <span className="text-[12px] font-bold text-black tracking-wide">
                         处理说明
                       </span>
-                      {(d.status === "reviewing" || d.op_status === "reviewing" || opStatus === "reviewing") && (
+                      {hub.data?.reply_is_draft && (
                         <span className="text-[11.5px] text-hub-amber-deep font-normal">
                           AI 草稿待审核，确认后正式发出
                         </span>

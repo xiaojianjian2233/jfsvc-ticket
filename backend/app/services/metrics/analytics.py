@@ -21,14 +21,11 @@ from typing import Any
 from sqlalchemy import ColumnElement, and_, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models import StatusHistory, Ticket, User
+from app.models import HubIssue, Ticket, User
 
 _TYPES = ("Operation", "Bug_fix", "Demand", "Internal_task")
-_DEV_TYPES = ("Bug_fix", "Internal_task", "Demand")
+_DEV_TYPES = ("Bug_fix", "Demand")
 _HIST_BUCKETS = [(0, 4), (4, 8), (8, 24), (24, 72), (72, None)]
-# 研发维度排除名单：这些是客服/受理人，虽受理过研发类工单但非研发人员，
-# 不计入 by_dev_staff（该批数据 assigned_user_id 是受理处理人而非研发责任人）
-_NON_DEV_STAFF = frozenset({"刘伟成", "颜明霞", "杨慧莉", "曾青青", "杜德彬"})
 
 
 @dataclass(slots=True, frozen=True)
@@ -45,7 +42,9 @@ class KpiBlock:
     pending_operation_count: int = 0
     pending_dev_count: int = 0
     overdue_count: int = 0
-    rejected_count: int = 0
+    overdue_operation_count: int = 0
+    overdue_dev_count: int = 0
+    returned_count: int = 0
 
 
 @dataclass(slots=True)
@@ -103,8 +102,10 @@ def compute_ticket_analytics(
     product_line: str | None = None,
 ) -> TicketAnalytics:
     flt = _base_filter(start, end, product_line)
-    pending = Ticket.status.in_(("processing", "reviewing", "supplementing", "exception"))
-    completed = Ticket.status.in_(("answered", "closed", "transferred_return"))
+    # 处理进展的统一口径：待处理、已完成、退回三类互不重叠。
+    pending = Ticket.status.in_(("processing", "exception"))
+    completed = Ticket.status == "answered"
+    returned = Ticket.status.in_(("supplementing", "transferred_return"))
     now = datetime.now(UTC)
     overdue = and_(
         pending,
@@ -118,21 +119,6 @@ def compute_ticket_analytics(
             ),
         ),
     )
-    rejected = (
-        select(StatusHistory.id)
-        .where(
-            or_(
-                and_(StatusHistory.entity_type == "ticket", StatusHistory.entity_id == Ticket.id),
-                and_(
-                    StatusHistory.entity_type == "hub_issue",
-                    StatusHistory.entity_id == Ticket.hub_issue_id,
-                ),
-            ),
-            StatusHistory.reason.like("客户驳回%"),
-        )
-        .exists()
-    )
-
     def count_matching(condition: ColumnElement[bool]) -> int:
         return db.scalar(select(func.count(Ticket.id)).where(flt, condition)) or 0
 
@@ -210,7 +196,13 @@ def compute_ticket_analytics(
             and_(pending, Ticket.predicted_type.in_(("Bug_fix", "Demand")))
         ),
         overdue_count=count_matching(overdue),
-        rejected_count=count_matching(rejected),
+        overdue_operation_count=count_matching(
+            and_(overdue, Ticket.predicted_type == "Operation")
+        ),
+        overdue_dev_count=count_matching(
+            and_(overdue, Ticket.predicted_type.in_(_DEV_TYPES))
+        ),
+        returned_count=count_matching(returned),
     )
 
     # 模块 × 类型（这批工单产品线单一=金蝶发票云，无区分度；module 才是有意义的细分维度）
@@ -251,22 +243,17 @@ def compute_ticket_analytics(
             mod_map[key]["overdue_count"] = c
     by_module = sorted(mod_map.values(), key=lambda x: x["total"], reverse=True)[:10]
 
-    # 处理人负载 top15
+    # 待处理工单按处理人聚合（仅处理中、处理异常）。
     as_rows = db.execute(
-        select(Ticket.assigned_user_id, User.name, func.count(), func.avg(Ticket.handle_hours))
+        select(Ticket.assigned_user_id, User.name, func.count())
         .join(User, User.id == Ticket.assigned_user_id, isouter=True)
-        .where(flt)
+        .where(flt, pending)
         .group_by(Ticket.assigned_user_id, User.name)
     ).all()
     by_assignee = sorted(
         [
-            {
-                "user_id": uid,
-                "name": name or "(未分配)",
-                "total": c,
-                "avg_handle_hours": float(avg) if avg is not None else None,
-            }
-            for uid, name, c, avg in as_rows
+            {"user_id": uid, "name": name or "(未分配)", "total": c}
+            for uid, name, c in as_rows
         ],
         key=lambda x: x["total"],
         reverse=True,
@@ -311,14 +298,15 @@ def compute_ticket_analytics(
     month_rows = db.execute(select(month_expr).where(Ticket.deleted_at.is_(None)).distinct()).all()
     available_months = sorted((m for (m,) in month_rows if m), reverse=True)
 
-    # 研发人员维度：研发三类工单(Bug_fix/Internal_task/Demand)按处理人聚合
-    # 工单数 + 类型构成
+    # 研发责任人维度：只统计 Bug/需求，并按 hub.owner_user_id（研发责任人）聚合。
+    # owner_user_id 为空的历史数据归为“未指定研发责任人”，便于补齐数据。
     dev_flt = and_(flt, Ticket.predicted_type.in_(_DEV_TYPES))
     dev_rows = db.execute(
-        select(Ticket.assigned_user_id, User.name, Ticket.predicted_type, func.count())
-        .join(User, User.id == Ticket.assigned_user_id, isouter=True)
+        select(HubIssue.owner_user_id, User.name, Ticket.predicted_type, func.count())
+        .join(HubIssue, HubIssue.id == Ticket.hub_issue_id, isouter=True)
+        .join(User, User.id == HubIssue.owner_user_id, isouter=True)
         .where(dev_flt)
-        .group_by(Ticket.assigned_user_id, User.name, Ticket.predicted_type)
+        .group_by(HubIssue.owner_user_id, User.name, Ticket.predicted_type)
     ).all()
     dev_map: dict[Any, dict[str, Any]] = {}
     for uid, name, ptype, c in dev_rows:
@@ -326,35 +314,16 @@ def compute_ticket_analytics(
             uid,
             {
                 "user_id": uid,
-                "name": name or "(未分配)",
+                "name": name or "(未指定研发责任人)",
                 "total": 0,
                 "by_type": dict.fromkeys(_DEV_TYPES, 0),
-                "median_handle_hours": None,
-                "avg_handle_hours": None,
             },
         )
         d["total"] += c
         if ptype in d["by_type"]:
             d["by_type"][ptype] += c
-    # 每人耗时（中位 Python 侧算，平均一并算）
-    hh_rows = db.execute(
-        select(Ticket.assigned_user_id, Ticket.handle_hours).where(
-            and_(dev_flt, Ticket.handle_hours.is_not(None))
-        )
-    ).all()
-    hh_by_user: dict[Any, list[float]] = {}
-    for uid, hh in hh_rows:
-        hh_by_user.setdefault(uid, []).append(float(hh))
-    for uid, values in hh_by_user.items():
-        if uid in dev_map:
-            sv = sorted(values)
-            dev_map[uid]["median_handle_hours"] = _percentile(sv, 0.5)
-            dev_map[uid]["avg_handle_hours"] = sum(sv) / len(sv)
-    by_dev_staff = sorted(
-        (d for d in dev_map.values() if d["name"] not in _NON_DEV_STAFF),
-        key=lambda x: x["total"],
-        reverse=True,
-    )[:20]
+    by_dev_staff = sorted(dev_map.values(), key=lambda x: x["total"], reverse=True)[:20]
+
 
     return TicketAnalytics(
         kpi=kpi,

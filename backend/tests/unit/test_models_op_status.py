@@ -54,8 +54,8 @@ def test_resupplied_rejected_by_constraint(db_session: Session) -> None:
         db_session.flush()
 
 
-def test_reviewing_accepted_by_constraint(db_session) -> None:
-    """迁移后 op_status='reviewing' 应被接受。"""
+def test_reviewing_rejected_by_constraint(db_session) -> None:
+    """合并后不再允许写入独立的 reviewing 状态。"""
     from app.models import HubIssue
 
     hub = HubIssue(
@@ -67,8 +67,8 @@ def test_reviewing_accepted_by_constraint(db_session) -> None:
         op_handler="主管",
     )
     db_session.add(hub)
-    db_session.flush()  # 不抛 = 通过
-    assert hub.op_status == "reviewing"
+    with pytest.raises(IntegrityError):
+        db_session.flush()
 
 
 def test_transferred_return_accepted_by_constraint(db_session: Session) -> None:

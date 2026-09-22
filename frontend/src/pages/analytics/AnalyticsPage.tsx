@@ -170,7 +170,6 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
   const assigneeChartData = byAssignee.map((row) => ({
     name: row.name,
     total: row.total,
-    avg_handle_hours: row.avg_handle_hours,
   }));
 
   const trend = (data.trend ?? []) as Array<Record<string, any>>;
@@ -180,22 +179,28 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
   const devChartData = devStaff.map((row) => ({
     name: row.name,
     total: row.total,
-    median_handle_hours: row.median_handle_hours,
-    avg_handle_hours: row.avg_handle_hours,
     ...row.by_type,
   }));
 
   return (
     <div className="flex flex-col gap-6">
       <section>
-        <SectionTitle title="处理进展" note="按所选月份和产品线统计；待处理含处理中、待审核、补充资料、处理异常" />
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-          <MetricCard label="待处理工单总数" value={(kpi.pending_count ?? 0).toLocaleString()} note="处理中、待审核、补充资料、处理异常" tone="amber" />
-          <MetricCard label="运营类工单" value={(kpi.pending_operation_count ?? 0).toLocaleString()} note="待处理的运营类工单" tone="blue" />
-          <MetricCard label="Bug/需求类工单" value={(kpi.pending_dev_count ?? 0).toLocaleString()} note="待处理的 Bug、需求类工单" tone="blue" />
-          <MetricCard label="超期工单" value={(kpi.overdue_count ?? 0).toLocaleString()} note="接收至今：运营超过24小时，Bug/需求超过40小时" tone="rose" />
-          <MetricCard label="驳回工单" value={(kpi.rejected_count ?? 0).toLocaleString()} note="发生过客户驳回的工单，按工单去重" tone="rose" />
-          <MetricCard label="处理完成" value={(kpi.completed_count ?? 0).toLocaleString()} note="已答复、已关闭、转单退回" tone="teal" />
+        <SectionTitle title="处理进展" note="按所选月份和产品线统计；待处理含处理中、处理异常" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <MetricCard
+            label="待处理工单总数"
+            value={(kpi.pending_count ?? 0).toLocaleString()}
+            note={<>运营类 {(kpi.pending_operation_count ?? 0).toLocaleString()} 个 · Bug/需求类 {(kpi.pending_dev_count ?? 0).toLocaleString()} 个</>}
+            tone="amber"
+          />
+          <MetricCard
+            label="超期工单"
+            value={(kpi.overdue_count ?? 0).toLocaleString()}
+            note={<>运营类 {(kpi.overdue_operation_count ?? 0).toLocaleString()} 个 · Bug/需求类 {(kpi.overdue_dev_count ?? 0).toLocaleString()} 个</>}
+            tone="rose"
+          />
+          <MetricCard label="处理完成" value={(kpi.completed_count ?? 0).toLocaleString()} note="已答复" tone="teal" />
+          <MetricCard label="退回工单" value={(kpi.returned_count ?? 0).toLocaleString()} note="补充资料、转单退回" tone="neutral" />
         </div>
       </section>
       <section>
@@ -223,20 +228,20 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
         </div>
       </section>
 
-      {/* ② 研发人员维度（Bug修复/需求/内部任务 三类研发工单） */}
+      {/* ② 研发责任人维度（Bug/需求工单） */}
       <div>
         <div className="text-sm font-semibold text-hub-text mb-4">
-          研发人员维度（Bug修复 / 需求 / 内部任务）
+          研发责任人工单量（Bug / 需求）
         </div>
         {devChartData.length === 0 ? (
           <div className="min-w-0 bg-white border border-hub-borderLight rounded-2xl p-5 shadow-sm text-xs text-hub-textFaint">
-            暂无研发工单
+            暂无 Bug/需求工单
           </div>
         ) : (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             {/* 工单量堆叠柱状 */}
             <div className="min-w-0 bg-white border border-hub-borderLight rounded-2xl p-5 shadow-sm">
-              <div className="text-[11.5px] text-hub-textMuted mb-2">研发工单量（按类型）</div>
+              <div className="text-[11.5px] text-hub-textMuted mb-2">Bug/需求工单总数（按研发责任人）</div>
               <div
                 style={{ width: "100%", height: Math.max(200, devChartData.length * 30) }}
                 data-testid="dev-staff-bar-chart"
@@ -248,7 +253,7 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
                     <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={80} />
                     <Tooltip />
                     <Legend wrapperStyle={{ fontSize: 10.5 }} />
-                    {HUB_TYPES.filter((t) => t !== "Operation").map((t) => (
+                    {HUB_TYPES.filter((t) => t === "Bug_fix" || t === "Demand").map((t) => (
                       <Bar
                         key={t}
                         dataKey={t}
@@ -260,30 +265,6 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-            </div>
-            {/* 耗时表格 */}
-            <div className="min-w-0 bg-white border border-hub-borderLight rounded-2xl p-5 shadow-sm">
-              <div className="text-[11.5px] text-hub-textMuted mb-2">研发人员处理耗时</div>
-              <table className="w-full text-[11.5px]" data-testid="dev-staff-table">
-                <thead>
-                  <tr className="text-hub-textMuted border-b border-hub-borderLight">
-                    <th className="text-left py-1 font-medium">研发人员</th>
-                    <th className="text-right py-1 font-medium">工单数</th>
-                    <th className="text-right py-1 font-medium">中位耗时</th>
-                    <th className="text-right py-1 font-medium">平均耗时</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {devChartData.map((d) => (
-                    <tr key={d.name} className="border-b border-hub-borderLight/50">
-                      <td className="py-1">{d.name}</td>
-                      <td className="text-right py-1 font-mono">{d.total}</td>
-                      <td className="text-right py-1 font-mono">{fmtHours(d.median_handle_hours)}</td>
-                      <td className="text-right py-1 font-mono">{fmtHours(d.avg_handle_hours)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             </div>
           </div>
         )}
@@ -354,9 +335,9 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
         </div>
       </div>
 
-      {/* ③ 处理人工单量 */}
+      {/* ③ 待处理工单按处理人 */}
       <div>
-        <div className="text-sm font-semibold text-hub-text mb-4">处理人工单量（前 15）</div>
+        <div className="text-sm font-semibold text-hub-text mb-4">待处理工单（按处理人，前 15）</div>
         <div className="min-w-0 bg-white border border-hub-borderLight rounded-2xl p-5 shadow-sm">
           {assigneeChartData.length === 0 ? (
             <div className="text-xs text-hub-textFaint">暂无数据</div>
@@ -373,17 +354,16 @@ function AnalyticsBody({ data }: { data: AnalyticsData }) {
                   <Tooltip
                     content={({ active, payload, label }) => {
                       if (!active || !payload || payload.length === 0) return null;
-                      const row = payload[0].payload as { total: number; avg_handle_hours: number | null };
+                      const row = payload[0].payload as { total: number };
                       return (
                         <div className="bg-white border border-hub-border rounded px-2 py-1.5 text-[11px]">
                           <div className="font-semibold">{label}</div>
-                          <div>工单数：{row.total}</div>
-                          <div>平均处理时长：{fmtHours(row.avg_handle_hours)}</div>
+                          <div>待处理工单：{row.total}</div>
                         </div>
                       );
                     }}
                   />
-                  <Bar dataKey="total" name="工单数" fill="#177e83" />
+                  <Bar dataKey="total" name="待处理工单" fill="#177e83" />
                 </BarChart>
               </ResponsiveContainer>
             </div>

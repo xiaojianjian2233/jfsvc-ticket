@@ -722,7 +722,7 @@ def test_reflect_tickets_endpoint(app_client: TestClient, world: Session) -> Non
     assert 812 not in ids
 
 
-# ---- reviewing 态处理人自助诊断+反思回填答复 -----------------------------------
+# ---- 处理中草稿态处理人自助诊断+反思回填答复 -----------------------------------
 
 
 def _mk_reviewing_hub_ticket(
@@ -731,9 +731,9 @@ def _mk_reviewing_hub_ticket(
     hub_id: int,
     *,
     handler_user_id: int | None = None,
-    op_status: str = "reviewing",
+    op_status: str = "processing",
 ) -> None:
-    """一个 op_status=reviewing 的 Operation hub + 关联 ticket + 一条
+    """一个 op_status=processing 且 reply_is_draft=true 的 Operation hub + 关联 ticket + 一条
     D_review 分支的 auto_reply AgentDecision（含 cited_knowledge/skills_used，
     镜像 D 分支补存后的真实审计形态）。"""
     from app.models import AgentDecision, HubIssue
@@ -914,7 +914,7 @@ def test_reflect_reviewing_no_revised_answer_no_writeback(
 
 
 def test_escalation_queue_excludes_reviewing_ticket(app_client: TestClient, world: Session) -> None:
-    """窄口径：reviewing 态工单不出现在主管工作台的 escalation-pending-diagnosis 队列。"""
+    """窄口径：处理中草稿态工单不出现在主管工作台的 escalation-pending-diagnosis 队列。"""
     world.add(User(id=3, feishu_uid="ou_h", name="handler", role="member"))
     world.commit()
     _mk_reviewing_hub_ticket(world, 904, 94, handler_user_id=3)
@@ -924,7 +924,7 @@ def test_escalation_queue_excludes_reviewing_ticket(app_client: TestClient, worl
 
 
 def test_reflect_tickets_excludes_reviewing_ticket(app_client: TestClient, world: Session) -> None:
-    """窄口径：reviewing 态工单不出现在主管工作台的 reflect-tickets 浏览列表。"""
+    """窄口径：处理中草稿态工单不出现在主管工作台的 reflect-tickets 浏览列表。"""
     world.add(User(id=3, feishu_uid="ou_h", name="handler", role="member"))
     world.commit()
     _mk_reviewing_hub_ticket(world, 905, 95, handler_user_id=3)
@@ -936,7 +936,7 @@ def test_reflect_tickets_excludes_reviewing_ticket(app_client: TestClient, world
 def test_reflect_reviewing_ticket_not_reviewing_state_404s(
     app_client: TestClient, world: Session
 ) -> None:
-    """回归：同一 ticket 一旦 hub 离开 reviewing 态（如已 answered），
+    """回归：同一 ticket 一旦 hub 离开 处理中草稿态（如已 answered），
     escalation-context 又不再认得它（不是真实 escalation 也没被标记诊断）。"""
     world.add(User(id=3, feishu_uid="ou_h", name="handler", role="member"))
     world.commit()

@@ -89,7 +89,6 @@ from app.services.hub_issues.linear_push import push_hub_issue_to_linear
 from app.services.hub_issues.module_owner import consume_module_owner, peek_module_owner
 from app.services.hub_issues.op_status import (
     OP_PROCESSING,
-    OP_REVIEWING,
     apply_op_status,
     default_owner_from_ticket_handler,
     record_ticket_action,
@@ -907,7 +906,8 @@ def list_reviewing_answers(
     q = db.query(HubIssue).filter(
         HubIssue.deleted_at.is_(None),
         HubIssue.type == "Operation",
-        HubIssue.op_status == "reviewing",
+        HubIssue.op_status == OP_PROCESSING,
+        HubIssue.reply_is_draft.is_(True),
     )
     scope = _handler_scope(db, user)
     if scope is not None:
@@ -2061,7 +2061,7 @@ def _get_reclassifiable_hub(db: Session, hub_issue_id: int) -> HubIssue:
         raise HTTPException(status_code=409, detail=f"hub_issue {hub_issue_id} not found")
     if hub.status in ("pending_review", "draft"):
         return hub
-    if hub.type == "Operation" and hub.op_status in (OP_PROCESSING, OP_REVIEWING):
+    if hub.type == "Operation" and hub.op_status == OP_PROCESSING:
         return hub
     raise HTTPException(
         status_code=409,

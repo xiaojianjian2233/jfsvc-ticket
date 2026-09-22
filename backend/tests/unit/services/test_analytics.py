@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from freezegun import freeze_time
 
-from app.models import Ticket, User
+from app.models import HubIssue, Ticket, User
 from app.services.metrics.analytics import compute_ticket_analytics
 
 
@@ -99,7 +99,7 @@ def test_pending_and_overdue_thresholds(db_session):
     now = datetime(2026, 9, 14, 4, tzinfo=UTC)
     for kind, status, hours in [
         ("Operation", "processing", 24),
-        ("Operation", "reviewing", 25),
+        ("Operation", "exception", 25),
         ("Bug_fix", "supplementing", 40),
         ("Demand", "exception", 41),
         ("Operation", "answered", 80),
@@ -113,11 +113,14 @@ def test_pending_and_overdue_thresholds(db_session):
         )
     db_session.commit()
     result = compute_ticket_analytics(db_session)
-    assert result.kpi.pending_count == 5
+    assert result.kpi.pending_count == 4
     assert result.kpi.pending_operation_count == 2
-    assert result.kpi.pending_dev_count == 2
-    assert result.kpi.completed_count == 3
+    assert result.kpi.pending_dev_count == 1
+    assert result.kpi.completed_count == 1
+    assert result.kpi.returned_count == 2
     assert result.kpi.overdue_count == 2
+    assert result.kpi.overdue_operation_count == 1
+    assert result.kpi.overdue_dev_count == 1
 
 
 def test_trend_by_month(db_session):
@@ -131,40 +134,41 @@ def test_trend_by_month(db_session):
     assert r.available_months == ["2026-05", "2026-04"]
 
 
-def test_by_dev_staff(db_session):
-    # 研发人员 A：2 Bug + 1 需求，耗时 [4, 8, 12] → 中位 8
-    _tk(db_session, predicted_type="Bug_fix", assigned_user_id=1, handle_hours=Decimal("4"))
-    _tk(db_session, predicted_type="Bug_fix", assigned_user_id=1, handle_hours=Decimal("8"))
-    _tk(db_session, predicted_type="Demand", assigned_user_id=1, handle_hours=Decimal("12"))
-    # 研发人员 B：1 需求
-    _tk(db_session, predicted_type="Demand", assigned_user_id=2, handle_hours=Decimal("20"))
-    # Operation 不算研发，不进 by_dev_staff
-    _tk(db_session, predicted_type="Operation", assigned_user_id=1, handle_hours=Decimal("99"))
-    db_session.add(User(id=1, feishu_uid="ou_a", name="研发甲", role="assignee"))
-    db_session.add(User(id=2, feishu_uid="ou_b", name="研发乙", role="assignee"))
+def test_by_dev_staff_uses_hub_owner_for_bug_and_demand(db_session):
+    db_session.add_all(
+        [
+            User(id=1, feishu_uid="ou_a", name="研发甲", role="assignee"),
+            User(id=2, feishu_uid="ou_b", name="研发乙", role="assignee"),
+            HubIssue(id=101, short_code="HUB-000101", type="Bug_fix", title="bug", status="created", owner_user_id=1, ticket_id=1001),
+            HubIssue(id=102, short_code="HUB-000102", type="Demand", title="demand", status="created", owner_user_id=2, ticket_id=1002),
+        ]
+    )
+    # assigned_user_id 是受理处理人；看板必须按 hub.owner_user_id（研发责任人）统计。
+    _tk(db_session, predicted_type="Bug_fix", assigned_user_id=2, hub_issue_id=101)
+    _tk(db_session, predicted_type="Bug_fix", assigned_user_id=2, hub_issue_id=101)
+    _tk(db_session, predicted_type="Demand", assigned_user_id=1, hub_issue_id=102)
+    _tk(db_session, predicted_type="Internal_task", assigned_user_id=1)
     db_session.commit()
 
     r = compute_ticket_analytics(db_session)
     a = next(x for x in r.by_dev_staff if x["user_id"] == 1)
-    assert a["total"] == 3  # 不含 Operation
+    b = next(x for x in r.by_dev_staff if x["user_id"] == 2)
+    assert a["total"] == 2
     assert a["by_type"]["Bug_fix"] == 2
-    assert a["by_type"]["Demand"] == 1
-    assert abs(a["median_handle_hours"] - 8.0) < 1e-6  # [4,8,12] 中位
-    assert abs(a["avg_handle_hours"] - 8.0) < 1e-6  # (4+8+12)/3
-    # 按 total 降序：甲(3) 在 乙(1) 前
-    dev_ids = [x["user_id"] for x in r.by_dev_staff]
-    assert dev_ids.index(1) < dev_ids.index(2)
+    assert b["total"] == 1
+    assert b["by_type"]["Demand"] == 1
+    assert "Internal_task" not in a["by_type"]
 
 
-def test_by_dev_staff_excludes_non_dev(db_session):
-    # 刘伟成是客服(排除名单),虽受理研发类工单也不进 by_dev_staff
-    _tk(db_session, predicted_type="Bug_fix", assigned_user_id=3, handle_hours=Decimal("5"))
-    _tk(db_session, predicted_type="Demand", assigned_user_id=4, handle_hours=Decimal("6"))
-    db_session.add(User(id=3, feishu_uid="ou_cs", name="刘伟成", role="member"))
-    db_session.add(User(id=4, feishu_uid="ou_dev", name="真研发", role="member"))
+def test_by_dev_staff_keeps_all_named_owners(db_session):
+    db_session.add_all(
+        [
+            User(id=3, feishu_uid="ou_cs", name="刘伟成", role="member"),
+            HubIssue(id=103, short_code="HUB-000103", type="Bug_fix", title="bug", status="created", owner_user_id=3, ticket_id=1003),
+        ]
+    )
+    _tk(db_session, predicted_type="Bug_fix", assigned_user_id=None, hub_issue_id=103)
     db_session.commit()
 
     r = compute_ticket_analytics(db_session)
-    names = {x["name"] for x in r.by_dev_staff}
-    assert "刘伟成" not in names  # 排除名单
-    assert "真研发" in names
+    assert {x["name"] for x in r.by_dev_staff} == {"刘伟成"}

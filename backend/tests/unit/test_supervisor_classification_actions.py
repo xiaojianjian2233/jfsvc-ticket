@@ -512,15 +512,16 @@ def test_answered_operation_cannot_reclassify(app_client: TestClient, op_world: 
     assert "不可改判" in r.text
 
 
-def test_reviewing_operation_can_reclassify_to_dev(
+def test_processing_draft_operation_can_reclassify_to_dev(
     app_client: TestClient, op_world: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """草稿待审(op_status=reviewing)的 Operation——AI 判错类型——可改判转研发，草稿
+    """草稿待审（处理中 + 草稿标记）的 Operation——AI 判错类型——可改判转研发，草稿
     连同 op 专属字段一并清空（草稿本就没发出去，直接清掉即可）。"""
     hub = op_world.get(HubIssue, 80)
-    hub.op_status = "reviewing"
+    hub.op_status = "processing"
     hub.reply_content = "AI 生成的答复草稿"
     hub.reply_authored_by = "agent:ai_cs:draft"
+    hub.reply_is_draft = True
     op_world.commit()
     monkeypatch.setattr(
         "app.api.supervisor.peek_module_owner",

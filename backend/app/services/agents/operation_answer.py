@@ -27,7 +27,6 @@ from app.services.hub_issues.op_status import (
     OP_CLOSED,
     OP_EXCEPTION,
     OP_PROCESSING,
-    OP_REVIEWING,
     OP_SUPPLEMENTING,
     OP_TRANSFERRED_RETURN,
     apply_op_status,
@@ -142,7 +141,7 @@ def _save_draft_reply(db: Session, hub: HubIssue, *, content: str) -> None:
 
 
 def apply_reflect_draft(db: Session, hub: HubIssue, *, content: str) -> None:
-    """反思推断生成的客户新答案回填草稿（仅 reviewing 态）。镜像
+    """反思推断生成的客户新答案回填草稿（仅处理中且为 AI 草稿的工单）。镜像
     _save_draft_reply，但标记来源为 reflect（区别于首次自动答复草稿），便于
     审计/前端区分。不 commit（调用方负责事务边界）。
     """
@@ -405,15 +404,19 @@ def auto_answer_operation(
                         f"{settings.operation_answer_accuracy_threshold}%，待主管审核"
                     )
                 )
+                # 已请求客户补料时，不能由异步 AI 草稿覆盖回处理中。
+                if hub.op_status == OP_SUPPLEMENTING:
+                    logger.info("operation_answer_review_skipped_supplementing", hub_issue_id=hub.id)
+                    return False
                 _save_draft_reply(db, hub, content=answer)
                 apply_op_status(
                     db,
                     hub,
-                    to_status=OP_REVIEWING,
+                    to_status=OP_PROCESSING,
                     handler=resolve_op_handler(db, hub, settings),
                     reason=reason,
                 )
-                # cited_knowledge/skills_used 必存（同 D 分支）：reviewing 态
+                # cited_knowledge/skills_used 必存（同 D 分支）：处理中草稿态
                 # 处理人自助反思推断需要还原黄金三元组，晚存就永久丢了。
                 review_extra: dict[str, object] = {
                     "accuracy": score.accuracy,

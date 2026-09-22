@@ -67,8 +67,8 @@ def test_list_paginated_excludes_closed_and_returned_from_processing(db_session:
     db_session.add(t_closed)
     db_session.commit()
 
-    # 筛选：处理中 / 待审核 / 补充资料
-    page = repo.list_paginated(op_statuses=["processing", "reviewing", "supplementing"])
+    # 筛选：处理中 / 补充资料
+    page = repo.list_paginated(op_statuses=["processing", "supplementing"])
     codes = [item.short_code for item in page.items]
 
     assert "TKT-PROC-1" in codes

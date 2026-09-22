@@ -84,7 +84,6 @@ const SOURCE_OPTIONS: { value: string; label: string }[] = [
 
 const OP_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "processing", label: "处理中" },
-  { value: "reviewing", label: "待审核" },
   { value: "supplementing", label: "补充资料" },
   { value: "answered", label: "已答复" },
   { value: "closed", label: "已关闭" },
@@ -95,7 +94,7 @@ const OP_STATUS_OPTIONS: { value: string; label: string }[] = [
 // 默认只展示处理中/待审核；补充资料属于独立等待态，必须由用户明确勾选。
 // 之前把 supplementing 隐式塞进默认值，用户没有选择它时列表仍会出现补料单，
 // 造成筛选条件与页面认知不一致。
-const DEFAULT_OP_STATUSES = ["processing", "reviewing"];
+const DEFAULT_OP_STATUSES = ["processing"];
 
 // v9: 新增【处理环节】列、替换提单企业为处理环节多选筛选
 const PREFS_KEY = "tickets_table_prefs_v20260909_process_stage";

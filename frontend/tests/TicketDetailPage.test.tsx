@@ -600,10 +600,10 @@ describe("TicketDetailPage", () => {
     localStorage.clear();
   });
 
-  it("op_status=reviewing 显示 AI 草稿待审核提示 + 处理说明框填 hub 草稿答复", async () => {
+  it("处理中且带 AI 草稿时显示审核提示，并填充处理说明", async () => {
     localStorage.setItem("auth_user", JSON.stringify({ role: "supervisor" }));
     // ticket 层 cached 为空（草稿不级联）；草稿答复在 hub.reply_content
-    stubOperationTicket(324, { op_status: "reviewing", cached_reply_content: null });
+    stubOperationTicket(324, { op_status: "processing", cached_reply_content: null });
     server.use(
       http.get("*/api/hub-issues/88", () =>
         HttpResponse.json({
@@ -611,7 +611,8 @@ describe("TicketDetailPage", () => {
           short_code: "HUB-88",
           type: "Operation",
           status: "created",
-          op_status: "reviewing",
+          op_status: "processing",
+          reply_is_draft: true,
           reply_content: "AI 草稿：标准版不支持预览开票",
         }),
       ),

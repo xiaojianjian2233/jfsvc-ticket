@@ -25,7 +25,7 @@ def rvw_world(db_session: Session) -> Session:
             type="Operation",
             title="开票失败",
             status="created",
-            op_status="reviewing",
+            op_status="processing",
             op_handler="主管",
             reply_content="草稿答复",
             reply_is_draft=True,

@@ -4752,6 +4752,16 @@
             "title": "Overdue Count",
             "type": "integer"
           },
+          "overdue_dev_count": {
+            "default": 0,
+            "title": "Overdue Dev Count",
+            "type": "integer"
+          },
+          "overdue_operation_count": {
+            "default": 0,
+            "title": "Overdue Operation Count",
+            "type": "integer"
+          },
           "pending_count": {
             "default": 0,
             "title": "Pending Count",
@@ -4767,9 +4777,9 @@
             "title": "Pending Operation Count",
             "type": "integer"
           },
-          "rejected_count": {
+          "returned_count": {
             "default": 0,
-            "title": "Rejected Count",
+            "title": "Returned Count",
             "type": "integer"
           },
           "sla_base": {

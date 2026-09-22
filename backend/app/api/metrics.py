@@ -152,7 +152,9 @@ class KpiOut(BaseModel):
     pending_operation_count: int = 0
     pending_dev_count: int = 0
     overdue_count: int = 0
-    rejected_count: int = 0
+    overdue_operation_count: int = 0
+    overdue_dev_count: int = 0
+    returned_count: int = 0
     total: int
     by_type: dict[str, int]
     avg_handle_hours: float | None

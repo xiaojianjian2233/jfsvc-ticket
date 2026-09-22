@@ -4827,6 +4827,16 @@ export interface components {
              */
             overdue_count: number;
             /**
+             * Overdue Dev Count
+             * @default 0
+             */
+            overdue_dev_count: number;
+            /**
+             * Overdue Operation Count
+             * @default 0
+             */
+            overdue_operation_count: number;
+            /**
              * Pending Count
              * @default 0
              */
@@ -4842,10 +4852,10 @@ export interface components {
              */
             pending_operation_count: number;
             /**
-             * Rejected Count
+             * Returned Count
              * @default 0
              */
-            rejected_count: number;
+            returned_count: number;
             /** Sla Base */
             sla_base: number;
             /** Sla Rate */

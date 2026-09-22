@@ -27,6 +27,14 @@ const sampleAnalytics = {
     sla_base: 110,
     unassigned_count: 18,
     unassigned_avg_hours: 30.4,
+    pending_count: 26,
+    completed_count: 58,
+    pending_operation_count: 10,
+    pending_dev_count: 16,
+    overdue_count: 6,
+    overdue_operation_count: 2,
+    overdue_dev_count: 4,
+    returned_count: 8,
   },
   by_module: [
     {
@@ -170,10 +178,9 @@ describe("AnalyticsPage", () => {
     expect(overdue).toHaveTextContent("2");
 
     expect(screen.getByTestId("dev-staff-bar-chart")).toBeInTheDocument();
-    const devTable = screen.getByTestId("dev-staff-table");
-    expect(devTable).toHaveTextContent("研发甲");
-    expect(devTable).toHaveTextContent("224.2h");
-    expect(devTable).toHaveTextContent("研发乙");
+    expect(screen.getByText("待处理工单总数")).toBeInTheDocument();
+    expect(screen.getByText(/运营类 10 个/)).toBeInTheDocument();
+    expect(screen.getByText(/Bug\/需求类 4 个/)).toBeInTheDocument();
 
     localStorage.clear();
   });

@@ -166,7 +166,7 @@ def test_reply_clears_draft_flag(app_client: TestClient, reply_world: Session) -
     """主管发送答复后 reply_is_draft 清零（草稿转正式已发）。"""
     hub = reply_world.get(HubIssue, 90)
     hub.reply_is_draft = True
-    hub.op_status = "reviewing"
+    hub.op_status = "processing"
     reply_world.commit()
 
     r = app_client.post(

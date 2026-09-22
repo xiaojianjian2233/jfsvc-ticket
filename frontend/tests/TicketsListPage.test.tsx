@@ -59,7 +59,7 @@ describe("TicketsListPage", () => {
     renderPage();
 
     await waitFor(() => expect(lastQuery).not.toBeNull());
-    expect(lastQuery!.getAll("op_statuses")).toEqual(["processing", "reviewing"]);
+    expect(lastQuery!.getAll("op_statuses")).toEqual(["processing"]);
     expect(lastQuery!.getAll("op_statuses")).not.toContain("supplementing");
   });
 

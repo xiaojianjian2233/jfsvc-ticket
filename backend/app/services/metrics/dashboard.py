@@ -144,7 +144,6 @@ def get_dashboard_metrics(db: Session) -> DashboardMetrics:
 
 _TICKET_ACTIVE_STATUSES = (
     "processing",
-    "reviewing",
     "supplementing",
     "exception",
     "received",
