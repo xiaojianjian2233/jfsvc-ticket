@@ -1821,7 +1821,10 @@ const LOCAL_NOTICES_KEY = "ticket_hub_reception_notices_local";
 function getLocalNotices(): ReceptionNoticeItem[] {
   try {
     const raw = localStorage.getItem(LOCAL_NOTICES_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw !== null) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
   } catch {
     // ignore
   }
@@ -1916,16 +1919,9 @@ export async function fetchNotices(
       query.end_time = filters.end_time;
     }
     const res = await httpGet<ReceptionNoticeItem[]>("/api/reception/notices", query);
-    if (Array.isArray(res) && res.length > 0) {
-      const map = new Map<string | number, ReceptionNoticeItem>();
-      for (const item of list) {
-        map.set(item.notice_no || item.id, item);
-      }
-      for (const item of res) {
-        map.set(item.notice_no || item.id, item);
-      }
-      list = Array.from(map.values());
-      saveLocalNotices(list);
+    if (Array.isArray(res)) {
+      list = res;
+      saveLocalNotices(res);
     }
   } catch {
     // 降级使用本地存储
@@ -2132,17 +2128,16 @@ export async function batchDeleteNotices(ids: number[]): Promise<void> {
  * 客户端：获取重要通知列表
  */
 export async function clientFetchNotices(): Promise<ClientNoticeItem[]> {
-  let serverNotices: ClientNoticeItem[] = [];
   try {
     const res = await httpGet<ClientNoticeItem[]>("/api/reception/client/notices");
-    if (Array.isArray(res) && res.length > 0) {
-      serverNotices = res;
+    if (Array.isArray(res)) {
+      return res;
     }
   } catch {
     // ignore
   }
 
-  // 从本地持久缓存提取所有上架且有效的通知
+  // 离线/开发降级：从本地持久缓存提取所有上架且有效的通知
   const localList = getLocalNotices();
   const nowStr = new Date().toISOString().slice(0, 10);
   const localPublished: ClientNoticeItem[] = localList
@@ -2166,30 +2161,7 @@ export async function clientFetchNotices(): Promise<ClientNoticeItem[]> {
       popup_prompt: !!n.popup_prompt,
     }));
 
-  // 合并本地与服务端数据：以本地最新发布的通知为先，去重
-  const seenNos = new Set<string>();
-  const combined: ClientNoticeItem[] = [];
-
-  for (const item of localPublished) {
-    const key = String(item.id);
-    if (!seenNos.has(key)) {
-      seenNos.add(key);
-      combined.push(item);
-    }
-  }
-
-  for (const item of serverNotices) {
-    const key = String(item.id);
-    if (!seenNos.has(key)) {
-      seenNos.add(key);
-      combined.push(item);
-    }
-  }
-
-  if (combined.length === 0) {
-    return SEED_CLIENT_NOTICES;
-  }
-  return combined;
+  return localPublished;
 }
 
 

@@ -790,36 +790,44 @@ export function CustomerChatWorkbenchPage({
           {/* 1.1 Tab 1：重要通知卡片列表（标题、部分内容、特别重要加标签，点击弹窗看完整内容） */}
           {rightTab === "notices" && (
             <div className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-slate-50/40">
-              {notices.map((notice) => (
-                <div
-                  key={notice.id}
-                  onClick={() => setSelectedNotice(notice)}
-                  className="p-4 bg-white rounded-xl border border-slate-200/90 hover:border-[rgb(35,94,212)]/60 hover:shadow-md cursor-pointer transition space-y-2.5 group"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <h3 className="text-[15px] font-bold text-slate-800 group-hover:text-[rgb(35,94,212)] transition leading-snug line-clamp-1">
-                      {notice.title}
-                    </h3>
-                    {notice.is_important && (
-                      <span className="flex-none px-2 py-0.5 bg-rose-50 text-rose-600 border border-rose-200 rounded text-[12px] font-bold flex items-center gap-1 shadow-2xs">
-                        <span>⚡</span>
-                        <span>重要</span>
-                      </span>
-                    )}
-                  </div>
-
-                  <p className="text-[13px] text-[#666666] line-clamp-2 leading-relaxed">
-                    {notice.content.replace(/<[^>]+>/g, "").trim()}
-                  </p>
-
-                  <div className="flex items-center justify-between text-[12px] text-slate-400 pt-1.5 border-t border-slate-100">
-                    <span className="font-mono">{notice.publish_time}</span>
-                    <span className="text-[rgb(35,94,212)] font-medium group-hover:underline">
-                      查看完整通知 &gt;
-                    </span>
-                  </div>
+              {notices.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full min-h-[260px] text-slate-400 py-12 select-none">
+                  <div className="text-4xl mb-2 opacity-40">📢</div>
+                  <div className="text-[14px] font-medium text-slate-500">暂无重要通知</div>
+                  <div className="text-[12px] text-slate-400 mt-1">当前没有上架生效的重要通知</div>
                 </div>
-              ))}
+              ) : (
+                notices.map((notice) => (
+                  <div
+                    key={notice.id}
+                    onClick={() => setSelectedNotice(notice)}
+                    className="p-4 bg-white rounded-xl border border-slate-200/90 hover:border-[rgb(35,94,212)]/60 hover:shadow-md cursor-pointer transition space-y-2.5 group"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <h3 className="text-[15px] font-bold text-slate-800 group-hover:text-[rgb(35,94,212)] transition leading-snug line-clamp-1">
+                        {notice.title}
+                      </h3>
+                      {notice.is_important && (
+                        <span className="flex-none px-2 py-0.5 bg-rose-50 text-rose-600 border border-rose-200 rounded text-[12px] font-bold flex items-center gap-1 shadow-2xs">
+                          <span>⚡</span>
+                          <span>重要</span>
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="text-[13px] text-[#666666] line-clamp-2 leading-relaxed">
+                      {notice.content.replace(/<[^>]+>/g, "").trim()}
+                    </p>
+
+                    <div className="flex items-center justify-between text-[12px] text-slate-400 pt-1.5 border-t border-slate-100">
+                      <span className="font-mono">{notice.publish_time}</span>
+                      <span className="text-[rgb(35,94,212)] font-medium group-hover:underline">
+                        查看完整通知 &gt;
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           )}
 

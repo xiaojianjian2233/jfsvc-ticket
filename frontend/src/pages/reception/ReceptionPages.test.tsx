@@ -622,5 +622,29 @@ describe("Reception Management Pages", () => {
       expect(expireDateCells.length).toBeGreaterThan(0);
       expect(expireDateCells[0]).toHaveClass("text-[12px]", "font-normal", "whitespace-nowrap");
     });
+
+    it("switches to pending tab when clicking suspend and switches to closed tab when clicking close", async () => {
+      // Mock window.confirm
+      window.confirm = () => true;
+
+      render(
+        <MemoryRouter>
+          <ReceptionWorkbenchPage />
+        </MemoryRouter>
+      );
+
+      // 等待默认选中的进行中会话加载完成
+      const suspendBtn = await screen.findByRole("button", { name: "挂起" });
+      expect(suspendBtn).toBeInTheDocument();
+
+      // 点击挂起
+      fireEvent.click(suspendBtn);
+
+      // 验证是否切换到了「挂起」Tab
+      await waitFor(() => {
+        const pendingTabBtn = screen.getByRole("button", { name: /挂起 \(\d+\)/ });
+        expect(pendingTabBtn).toHaveClass("border-teal-600");
+      });
+    });
   });
 });

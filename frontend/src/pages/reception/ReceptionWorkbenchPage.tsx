@@ -142,21 +142,30 @@ export function ReceptionWorkbenchPage() {
     }
   };
 
-  const loadWorkbench = async (preserveActiveId?: string) => {
+  const isActionSwitchingRef = useRef(false);
+
+  const loadWorkbench = async (
+    preserveActiveId?: string,
+    targetOnlineSubTab?: OnlineSubTab,
+    targetMainTab?: MainTab
+  ) => {
     setLoadingSessions(true);
     try {
       // 先尝试自动轮询分流排队会话
       await autoDispatchQueueSessions().catch(() => {});
+
+      const effectiveMainTab = targetMainTab || mainTab;
+      const effectiveOnlineSubTab = targetOnlineSubTab || onlineSubTab;
 
       const data = await fetchWorkbenchSessions();
       setWorkbenchData(data);
 
       // 确定默认选中会话
       let candidateList: SessionItem[] = [];
-      if (mainTab === "online") {
-        if (onlineSubTab === "in_progress") candidateList = data.sessions.online_in_progress;
-        else if (onlineSubTab === "queue") candidateList = data.sessions.online_queue;
-        else if (onlineSubTab === "pending") candidateList = data.sessions.online_pending;
+      if (effectiveMainTab === "online") {
+        if (effectiveOnlineSubTab === "in_progress") candidateList = data.sessions.online_in_progress;
+        else if (effectiveOnlineSubTab === "queue") candidateList = data.sessions.online_queue;
+        else if (effectiveOnlineSubTab === "pending") candidateList = data.sessions.online_pending;
         else candidateList = data.sessions.online_closed;
       } else {
         if (hotlineSubTab === "answered") candidateList = data.sessions.hotline_answered;
@@ -164,6 +173,13 @@ export function ReceptionWorkbenchPage() {
       }
 
       if (preserveActiveId) {
+        // 优先在当前激活的子列表中匹配
+        const foundInTab = candidateList.find((x) => x.id === preserveActiveId);
+        if (foundInTab) {
+          selectSession(foundInTab);
+          return;
+        }
+        // 全局搜索
         const found =
           data.sessions.online_in_progress.find((x) => x.id === preserveActiveId) ||
           data.sessions.online_queue.find((x) => x.id === preserveActiveId) ||
@@ -195,6 +211,10 @@ export function ReceptionWorkbenchPage() {
   }, []);
 
   useEffect(() => {
+    if (isActionSwitchingRef.current) {
+      isActionSwitchingRef.current = false;
+      return;
+    }
     loadWorkbench();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mainTab, onlineSubTab, hotlineSubTab]);
@@ -551,47 +571,57 @@ export function ReceptionWorkbenchPage() {
   // 操作区：邀请
   const handleInvite = async () => {
     if (!activeSession) return;
-    await inviteSession(activeSession.id);
+    const sessionId = activeSession.id;
+    await inviteSession(sessionId);
+    isActionSwitchingRef.current = true;
     setOnlineSubTab("in_progress");
-    await loadWorkbench(activeSession.id);
+    await loadWorkbench(sessionId, "in_progress");
   };
 
   // 操作区：挂起
   const handleSuspend = async () => {
     if (!activeSession) return;
-    await suspendSession(activeSession.id);
+    const sessionId = activeSession.id;
+    await suspendSession(sessionId);
+    isActionSwitchingRef.current = true;
     setOnlineSubTab("pending");
-    await loadWorkbench(activeSession.id);
+    await loadWorkbench(sessionId, "pending");
   };
 
   // 操作区：激活
   const handleActivate = async () => {
     if (!activeSession) return;
-    await activateSession(activeSession.id);
+    const sessionId = activeSession.id;
+    await activateSession(sessionId);
+    isActionSwitchingRef.current = true;
     setOnlineSubTab("in_progress");
-    await loadWorkbench(activeSession.id);
+    await loadWorkbench(sessionId, "in_progress");
   };
 
   // 操作区：关闭（关闭后自动补位排队会话）
   const handleClose = async () => {
     if (!activeSession) return;
     if (!window.confirm("确认要关闭本次会话吗？")) return;
-    await closeSession(activeSession.id);
+    const sessionId = activeSession.id;
+    await closeSession(sessionId);
     // 释放容量后触发自动补位分流
     await autoDispatchQueueSessions().catch(() => {});
+    isActionSwitchingRef.current = true;
     setOnlineSubTab("closed");
-    await loadWorkbench(activeSession.id);
+    await loadWorkbench(sessionId, "closed");
   };
 
   // 操作区：转工单（转工单后自动补位排队会话）
   const handleTransferTicket = async () => {
     if (!activeSession) return;
     if (!window.confirm("确认要将当前会话转工单推送到产研处理吗？")) return;
-    await transferTicket(activeSession.id, { title: activeSession.summary || "在线会话转派" });
+    const sessionId = activeSession.id;
+    await transferTicket(sessionId, { title: activeSession.summary || "在线会话转派" });
     // 释放容量后触发自动补位分流
     await autoDispatchQueueSessions().catch(() => {});
+    isActionSwitchingRef.current = true;
     setOnlineSubTab("closed");
-    await loadWorkbench(activeSession.id);
+    await loadWorkbench(sessionId, "closed");
   };
 
   // --------------------------------------------------------------------------
@@ -997,6 +1027,7 @@ export function ReceptionWorkbenchPage() {
                     <button
                       type="button"
                       onClick={handleClose}
+                      title="标记会话结束并关闭"
                       className="px-3 py-1.5 border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs rounded font-medium transition cursor-pointer"
                     >
                       关闭会话

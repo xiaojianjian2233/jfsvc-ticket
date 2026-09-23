@@ -2023,45 +2023,20 @@ def client_get_notices(db: Session = Depends(get_session)) -> list[ClientNoticeO
         .order_by(desc(ReceptionNotice.created_at))
         .all()
     )
-    if notices:
-        results: list[ClientNoticeOut] = []
-        for n in notices:
-            st = n.start_time if n.start_time.tzinfo else n.start_time.replace(tzinfo=UTC)
-            results.append(
-                ClientNoticeOut(
-                    id=n.notice_no,
-                    title=n.title,
-                    content=n.content,
-                    is_important=True,
-                    publish_time=st.strftime("%Y-%m-%d %H:%M"),
-                    publisher=n.created_by or "金蝶发票云服务团队",
-                    category="重要通知",
-                    popup_prompt=n.popup_prompt,
-                )
+    results: list[ClientNoticeOut] = []
+    for n in notices:
+        st = n.start_time if n.start_time.tzinfo else n.start_time.replace(tzinfo=UTC)
+        results.append(
+            ClientNoticeOut(
+                id=n.notice_no,
+                title=n.title,
+                content=n.content,
+                is_important=True,
+                publish_time=st.strftime("%Y-%m-%d %H:%M"),
+                publisher=n.created_by or "金蝶发票云服务团队",
+                category="重要通知",
+                popup_prompt=n.popup_prompt,
             )
-        return results
-
-    # 数据库尚无记录时的默认种子通知
-    return [
-        ClientNoticeOut(
-            id="NOTICE-20260921-01",
-            title="关于数电发票乐企直连通道升级维护的通知",
-            content="尊敬的纳税人用户：为了提供更稳定优质的数电发票乐企对接服务，国家税务总局定于本周五晚 22:00 至周六早 06:00 进行乐企平台与电子底账系统底层升级。升级期间开票、受票及勾选认证服务可能出现短时响应延迟或连接波动。建议各企业财务提前做好发票开具与勾选安排，紧急开票可使用离线开票备用模式。升级完成后服务将自动恢复，如有疑问请随时联系本在线技术支持团队。",
-            is_important=True,
-            publish_time="2026-09-21 10:00",
-            publisher="国家税务总局运维中心",
-            category="系统维护",
-            popup_prompt=False,
-        ),
-        ClientNoticeOut(
-            id="NOTICE-20260918-02",
-            title="金蝶发票云 2026 年第 3 季度征期服务保障方案",
-            content="为全力保障 9 月大征期期间企业税控与数电发票系统平稳运行，金蝶发票云售后技术团队已启动 7×24 小时征期应急响应机制。专家坐席全量在线，针对批量开票卡顿、税控盘升级校验、红字信息表开具异常等常见问题提供 1 对 1 快速排障支持，确保企业纳税申报与发票交付万无一失。",
-            is_important=True,
-            publish_time="2026-09-18 09:30",
-            publisher="金蝶发票云服务团队",
-            category="征期保障",
-            popup_prompt=False,
-        ),
-    ]
+        )
+    return results
 
