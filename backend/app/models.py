@@ -1541,3 +1541,35 @@ class ReceptionMessage(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class ReceptionNotice(Base):
+    """在线接待重要消息通知配置。"""
+
+    __tablename__ = "reception_notices"
+    __table_args__ = (
+        CheckConstraint("status IN ('published','unpublished')", name="ck_reception_notices_status"),
+        Index("ix_reception_notices_notice_no", "notice_no"),
+        Index("ix_reception_notices_status", "status"),
+        Index("ix_reception_notices_created_at", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    notice_no: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(128), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    popup_prompt: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16), default="published", server_default="published", nullable=False
+    )  # published | unpublished
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+

@@ -199,6 +199,111 @@ export function ReceptionWorkbenchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mainTab, onlineSubTab, hotlineSubTab]);
 
+  // 核心优化：增加实时轮询机制（每 2 秒静默拉取当前会话最新消息与工作台队列）
+  // 确保客户端发送消息后，坐席端无需手动点击即可直接实时展示新消息！
+  useEffect(() => {
+    let isMounted = true;
+    let isPolling = false;
+
+    const poll = async () => {
+      if (isPolling || !isMounted) return;
+      isPolling = true;
+      try {
+        const curSessionId = activeSession?.id;
+
+        // 1. 静默拉取工作台队列（含排队会话自动分配）
+        await autoDispatchQueueSessions().catch(() => {});
+        const wbData = await fetchWorkbenchSessions();
+        if (isMounted && wbData) {
+          setWorkbenchData(wbData);
+
+          // 若当前没有任何选中的会话，且当前列表有候选项，自动选中第一项
+          if (!curSessionId) {
+            let candidateList: SessionItem[] = [];
+            if (mainTab === "online") {
+              if (onlineSubTab === "in_progress") candidateList = wbData.sessions.online_in_progress;
+              else if (onlineSubTab === "queue") candidateList = wbData.sessions.online_queue;
+              else if (onlineSubTab === "pending") candidateList = wbData.sessions.online_pending;
+              else candidateList = wbData.sessions.online_closed;
+            } else {
+              if (hotlineSubTab === "answered") candidateList = wbData.sessions.hotline_answered;
+              else candidateList = wbData.sessions.hotline_missed;
+            }
+            if (candidateList.length > 0) {
+              selectSession(candidateList[0]);
+              return;
+            }
+          }
+        }
+
+        // 2. 如果当前有选中的会话，静默拉取最新会话详情与对话记录流
+        if (curSessionId) {
+          const detailRes = await fetchSessionDetail(curSessionId);
+          if (isMounted && detailRes?.session && detailRes.session.id === curSessionId) {
+            setActiveSession((prev) => {
+              if (!prev) return detailRes.session;
+              if (
+                prev.status !== detailRes.session.status ||
+                prev.agent_name !== detailRes.session.agent_name ||
+                prev.updated_at !== detailRes.session.updated_at ||
+                prev.unread_count !== detailRes.session.unread_count
+              ) {
+                return detailRes.session;
+              }
+              return prev;
+            });
+
+            const newMsgs = detailRes.messages || [];
+            setActiveMessages((prev) => {
+              if (!prev || prev.length === 0) {
+                if (newMsgs.length > 0) {
+                  setTimeout(scrollToBottom, 50);
+                  return newMsgs;
+                }
+                return prev;
+              }
+              const prevLast = prev[prev.length - 1];
+              const newLast = newMsgs[newMsgs.length - 1];
+              if (
+                prev.length !== newMsgs.length ||
+                prevLast?.id !== newLast?.id ||
+                prevLast?.content !== newLast?.content
+              ) {
+                setTimeout(scrollToBottom, 50);
+                return newMsgs;
+              }
+              return prev;
+            });
+          }
+        }
+      } catch {
+        // 静默捕获
+      } finally {
+        isPolling = false;
+      }
+    };
+
+    const intervalId = setInterval(poll, 2000);
+
+    const handlePing = () => {
+      poll();
+    };
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "ticket_hub_reception_session_ping") {
+        poll();
+      }
+    };
+    window.addEventListener("reception:session_created", handlePing);
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+      window.removeEventListener("reception:session_created", handlePing);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, [activeSession?.id, mainTab, onlineSubTab, hotlineSubTab]);
+
   const selectSession = async (s: SessionItem) => {
     setActiveSession(s);
     setLoadingMessages(true);

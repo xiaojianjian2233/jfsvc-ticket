@@ -174,9 +174,10 @@ const navItems: {
     label: "在线接待管理",
     icon: HeadsetIcon,
     children: [
+      { to: "/reception/workbench", label: "在线接待工作台" },
       { to: "/reception/agents", label: "坐席设置" },
       { to: "/reception/sessions", label: "会话记录列表" },
-      { to: "/reception/workbench", label: "在线接待工作台" },
+      { to: "/reception/notices", label: "消息通知配置" },
     ],
   },
   {

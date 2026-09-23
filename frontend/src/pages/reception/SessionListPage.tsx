@@ -11,6 +11,33 @@ import {
 
 const SESSION_STATUS_OPTIONS = ["不限", "进行中", "排队中", "挂起", "转工单", "已关闭"];
 
+/**
+ * 格式化会话创建时间，前端展示严格按照 yyyy-mm-dd hh:mm
+ */
+export function formatDateTime(raw?: string | null): string {
+  if (!raw || !raw.trim()) return "—";
+  const s = raw.trim().replace("T", " ");
+  // 匹配 YYYY-MM-DD HH:mm 开头的标准日期格式
+  if (/^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}/.test(s)) {
+    return s.slice(0, 16);
+  }
+  try {
+    const d = new Date(raw);
+    if (!isNaN(d.getTime())) {
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const y = d.getFullYear();
+      const m = pad(d.getMonth() + 1);
+      const day = pad(d.getDate());
+      const h = pad(d.getHours());
+      const min = pad(d.getMinutes());
+      return `${y}-${m}-${day} ${h}:${min}`;
+    }
+  } catch {
+    // ignore
+  }
+  return s.slice(0, 16);
+}
+
 function exportSessionsToExcel(targetSessions: SessionItem[], fileName: string) {
   const statusMap: Record<string, string> = {
     in_progress: "进行中",
@@ -27,7 +54,7 @@ function exportSessionsToExcel(targetSessions: SessionItem[], fileName: string) 
     归属租户: s.tenant_name || s.tenant_no || "—",
     咨询人: s.contact_name ?? "—",
     咨询人电话: s.contact_phone ?? "—",
-    会话创建时间: s.created_at,
+    会话创建时间: formatDateTime(s.created_at),
     会话状态: statusMap[s.status] || s.status,
     是否转人工: s.is_human ? "是" : "否",
     最后接待人: s.agent_name || "—",
@@ -105,8 +132,30 @@ export function SessionListPage() {
     summary: string;
   } | null>(null);
 
-  const loadData = async (targetPage = page) => {
-    setLoading(true);
+  const filtersRef = useRef({
+    company: filterCompany,
+    phone: filterPhone,
+    statuses: filterStatuses,
+    timeRange,
+    isHuman: filterIsHuman,
+    agentName: filterAgentName,
+    page,
+  });
+
+  useEffect(() => {
+    filtersRef.current = {
+      company: filterCompany,
+      phone: filterPhone,
+      statuses: filterStatuses,
+      timeRange,
+      isHuman: filterIsHuman,
+      agentName: filterAgentName,
+      page,
+    };
+  });
+
+  const loadData = async (targetPage = page, silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const res = await fetchSessions({
         company_name: filterCompany,
@@ -119,17 +168,80 @@ export function SessionListPage() {
         page: targetPage,
         page_size: 20,
       });
-      setSessions(res.items);
+      const sorted = [...res.items].sort((a, b) =>
+        (b.created_at || "").localeCompare(a.created_at || "")
+      );
+      setSessions(sorted);
       setTotal(res.total);
       setPage(res.page);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     loadData(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 核心：新会话事件监听与跨标签页广播响应，以及定时静默轮询（3秒），保证坐席端自动刷新
+  useEffect(() => {
+    let isMounted = true;
+    let isRefreshing = false;
+
+    const silentRefresh = async () => {
+      if (!isMounted || isRefreshing) return;
+      isRefreshing = true;
+      try {
+        const f = filtersRef.current;
+        const res = await fetchSessions({
+          company_name: f.company,
+          contact_phone: f.phone,
+          statuses: f.statuses,
+          start_time: f.timeRange.start,
+          end_time: f.timeRange.end,
+          is_human: f.isHuman,
+          agent_name: f.agentName,
+          page: f.page,
+          page_size: 20,
+        });
+        if (isMounted) {
+          const sorted = [...res.items].sort((a, b) =>
+            (b.created_at || "").localeCompare(a.created_at || "")
+          );
+          setSessions(sorted);
+          setTotal(res.total);
+          setPage(res.page);
+        }
+      } catch {
+        // ignore
+      } finally {
+        isRefreshing = false;
+      }
+    };
+
+    // 1. 每 3 秒自动轮询拉取最新会话列表
+    const intervalId = setInterval(silentRefresh, 3000);
+
+    // 2. 跨页面或同页面监听到客户端发起新会话时，0ms 立即静默拉取
+    const handlePing = () => {
+      silentRefresh();
+    };
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "ticket_hub_reception_session_ping") {
+        silentRefresh();
+      }
+    };
+
+    window.addEventListener("reception:session_created", handlePing);
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+      window.removeEventListener("reception:session_created", handlePing);
+      window.removeEventListener("storage", handleStorage);
+    };
   }, []);
 
   useEffect(() => {
@@ -520,6 +632,28 @@ export function SessionListPage() {
               </svg>
               <span>{exporting ? "导出中..." : selectedIds.length > 0 ? `导出 (${selectedIds.length})` : "导出"}</span>
             </button>
+            <button
+              type="button"
+              onClick={() => loadData(page)}
+              disabled={loading}
+              className="w-[80px] h-[25px] border border-slate-300 text-slate-700 rounded-[5px] text-[13px] bg-white hover:bg-slate-50 transition cursor-pointer flex items-center justify-center gap-1.5 font-medium shadow-2xs disabled:opacity-60"
+              title="刷新会话列表"
+            >
+              <svg
+                className={`w-3.5 h-3.5 text-slate-500 ${loading ? "animate-spin" : ""}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+              <span>{loading ? "刷新中..." : "刷新"}</span>
+            </button>
             {selectedIds.length > 0 && (
               <span className="text-[12px] text-slate-500">
                 已勾选 <strong className="text-[rgb(35,94,212)] font-semibold">{selectedIds.length}</strong> 项
@@ -660,7 +794,7 @@ export function SessionListPage() {
                       {s.contact_phone ?? "—"}
                     </td>
                     <td className="px-3.5 py-2.5 font-mono text-slate-500 whitespace-nowrap">
-                      {s.created_at.slice(0, 16)}
+                      {formatDateTime(s.created_at)}
                     </td>
                     <td className="px-3.5 py-2.5 text-center whitespace-nowrap">
                       {renderStatusBadge(s.status)}
@@ -867,8 +1001,8 @@ export function SessionListPage() {
                   </div>
                   <div className="space-y-0.5 min-w-0">
                     <div className="text-[10px] text-slate-400 font-normal whitespace-nowrap">创建时间</div>
-                    <div className="text-[13px] font-normal font-mono text-slate-700 whitespace-nowrap truncate" title={selectedSession.created_at.slice(0, 16)}>
-                      {selectedSession.created_at.slice(0, 16)}
+                    <div className="text-[13px] font-normal font-mono text-slate-700 whitespace-nowrap truncate" title={formatDateTime(selectedSession.created_at)}>
+                      {formatDateTime(selectedSession.created_at)}
                     </div>
                   </div>
                   <div className="space-y-0.5 min-w-0">

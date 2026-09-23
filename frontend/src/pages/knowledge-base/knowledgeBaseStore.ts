@@ -49,58 +49,21 @@ export const KNOWLEDGE_BASE_UPDATED_EVENT = "fpy_knowledge_base_updated";
 
 const INITIAL_MOCK_ITEMS: KnowledgeItem[] = [
   {
-    id: "FPYFAQ202609020001",
-    title: "数电票开票时提示「税控设备未连接或端口被占用」排查手册",
+    id: "FPYFAQ202609060005",
+    title: "税企直连银税互联历史版本协议对接常见问题",
     content:
-      "数电发票开具时若弹出税控设备未连接，通常为底层数电助手服务未正常监听 9801 端口，或开票插件与本地杀毒软件防护驱动冲突。处理方案：1. 检查任务管理器中 InvoiceHelper 守护进程是否处于运行态；2. 执行 netstat -ano 确认端口绑定；3. 重启助手服务并重新登录税控底座验证。",
-    type: "FAQ",
-    product_line_code: "invoice_cloud",
-    product_line_name: "数电票/全电发票系统",
-    module_code: "issue",
-    module_name: "发票开具与开票服务",
-    applicable_customer: "全部客户",
-    status: "active",
-    created_by: "张工 (8021)",
-    created_at: "2026-09-02 09:30:15",
-    reviewed_by: "王运营 (7011)",
-    reviewed_at: "2026-09-02 11:20:00",
-    total_calls: 142,
-    recent_calls: 38,
-  },
-  {
-    id: "FPYFAQ202609030002",
-    title: "进项发票勾选平台税期截止日批量认证超时解决方案",
-    content:
-      "每逢大征期月底最后一天，进项勾选接口请求量激增可能造成网关拥堵。处理流程：1. 指导客户开启分批确认模式，单批次勾选发票数量限制在 200 张以内；2. 若返回 504 错误，不要重复点击提交，等待 3 分钟后在「已勾选结果复核」中刷新状态；3. 紧急工单可登记税号后走内部快速通道。",
+      "旧版税银通通道已下线，新对接系统请统一采用数电底座开放 OpenAPI 2.0 规范，不再受理 V1.2 私有协议联调申请。",
     type: "操作手册",
-    product_line_code: "invoice_cloud",
-    product_line_name: "数电票/全电发票系统",
-    module_code: "deduct",
-    module_name: "进项勾选与认证抵扣",
-    status: "active",
-    created_by: "李晓敏 (8043)",
-    created_at: "2026-09-03 14:15:22",
+    product_line_code: "finance_bridge",
+    product_line_name: "财务金融直联套件",
+    module_code: "bank_tax",
+    module_name: "银税互联前置机",
+    status: "offline",
+    created_by: "孙工 (8033)",
+    created_at: "2026-09-06 08:30:00",
     reviewed_by: "王运营 (7011)",
-    reviewed_at: "2026-09-03 15:00:10",
-    total_calls: 89,
-    recent_calls: 21,
-  },
-  {
-    id: "FPYFAQ202609040003",
-    title: "企业租户新开通数电票交付标准初始化配置规范",
-    content:
-      "交付配置指南：1. 确认税局电子税务局已完成数字账户与开票员权限授权；2. 进入票云管理后台【企业档案】维护纳税人识别号与开票限额；3. 配置 ERP 业务系统推送秘钥 AppKey/AppSecret；4. 打印机格式模板绑定与 PDF/OFD 双格式交付回传测试。",
-    type: "交付配置",
-    product_line_code: "cloud_erp",
-    product_line_name: "票云企业ERP集成",
-    module_code: "tenant_init",
-    module_name: "租户开通与初始配置",
-    status: "pending_review",
-    created_by: "陈实施 (8055)",
-    created_at: "2026-09-04 16:45:00",
-    reviewed_by: null,
-    reviewed_at: null,
-    total_calls: 0,
+    reviewed_at: "2026-09-06 09:00:00",
+    total_calls: 53,
     recent_calls: 0,
   },
   {
@@ -122,41 +85,122 @@ const INITIAL_MOCK_ITEMS: KnowledgeItem[] = [
     recent_calls: 3,
   },
   {
-    id: "FPYFAQ202609060005",
-    title: "税企直连银税互联历史版本协议对接常见问题",
+    id: "FPYFAQ202609040003",
+    title: "企业租户新开通数电票交付标准初始化配置规范",
     content:
-      "旧版税银通通道已下线，新对接系统请统一采用数电底座开放 OpenAPI 2.0 规范，不再受理 V1.2 私有协议联调申请。",
-    type: "操作手册",
-    product_line_code: "finance_bridge",
-    product_line_name: "财务金融直联套件",
-    module_code: "bank_tax",
-    module_name: "银税互联前置机",
-    status: "offline",
-    created_by: "孙工 (8033)",
-    created_at: "2026-09-06 08:30:00",
-    reviewed_by: "王运营 (7011)",
-    reviewed_at: "2026-09-06 09:00:00",
-    total_calls: 53,
+      "交付配置指南：1. 确认税局电子税务局已完成数字账户与开票员权限授权；2. 进入票云管理后台【企业档案】维护纳税人识别号与开票限额；3. 配置 ERP 业务系统推送秘钥 AppKey/AppSecret；4. 打印机格式模板绑定与 PDF/OFD 双格式交付回传测试。",
+    type: "交付配置",
+    product_line_code: "cloud_erp",
+    product_line_name: "票云企业ERP集成",
+    module_code: "tenant_init",
+    module_name: "租户开通与初始配置",
+    status: "pending_review",
+    created_by: "陈实施 (8055)",
+    created_at: "2026-09-04 16:45:00",
+    reviewed_by: null,
+    reviewed_at: null,
+    total_calls: 0,
     recent_calls: 0,
   },
+  {
+    id: "FPYFAQ202609030002",
+    title: "进项发票勾选平台税期截止日批量认证超时解决方案",
+    content:
+      "每逢大征期月底最后一天，进项勾选接口请求量激增可能造成网关拥堵。处理流程：1. 指导客户开启分批确认模式，单批次勾选发票数量限制在 200 张以内；2. 若返回 504 错误，不要重复点击提交，等待 3 分钟后在「已勾选结果复核」中刷新状态；3. 紧急工单可登记税号后走内部快速通道。",
+    type: "操作手册",
+    product_line_code: "invoice_cloud",
+    product_line_name: "数电票/全电发票系统",
+    module_code: "deduct",
+    module_name: "进项勾选与认证抵扣",
+    status: "active",
+    created_by: "李晓敏 (8043)",
+    created_at: "2026-09-03 14:15:22",
+    reviewed_by: "王运营 (7011)",
+    reviewed_at: "2026-09-03 15:00:10",
+    total_calls: 89,
+    recent_calls: 21,
+  },
+  {
+    id: "FPYFAQ202609020001",
+    title: "数电票开票时提示「税控设备未连接或端口被占用」排查手册",
+    content:
+      "数电发票开具时若弹出税控设备未连接，通常为底层数电助手服务未正常监听 9801 端口，或开票插件与本地杀毒软件防护驱动冲突。处理方案：1. 检查任务管理器中 InvoiceHelper 守护进程是否处于运行态；2. 执行 netstat -ano 确认端口绑定；3. 重启助手服务并重新登录税控底座验证。",
+    type: "FAQ",
+    product_line_code: "invoice_cloud",
+    product_line_name: "数电票/全电发票系统",
+    module_code: "issue",
+    module_name: "发票开具与开票服务",
+    applicable_customer: "全部客户",
+    status: "active",
+    created_by: "张工 (8021)",
+    created_at: "2026-09-02 09:30:15",
+    reviewed_by: "王运营 (7011)",
+    reviewed_at: "2026-09-02 11:20:00",
+    total_calls: 142,
+    recent_calls: 38,
+  },
 ];
+
+/**
+ * 格式化知识库创建与审核时间，前端展示严格按照 yyyy-mm-dd hh:mm
+ * 去除 ISO 8601 中的 "T"，去除秒数
+ */
+export function formatDateTime(raw?: string | null): string {
+  if (!raw || !raw.trim()) return "—";
+  const s = raw.trim().replace("T", " ");
+  // 匹配 YYYY-MM-DD HH:mm 开头的标准日期格式
+  if (/^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}/.test(s)) {
+    return s.slice(0, 16);
+  }
+  try {
+    const d = new Date(raw);
+    if (!isNaN(d.getTime())) {
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const y = d.getFullYear();
+      const m = pad(d.getMonth() + 1);
+      const day = pad(d.getDate());
+      const h = pad(d.getHours());
+      const min = pad(d.getMinutes());
+      return `${y}-${m}-${day} ${h}:${min}`;
+    }
+  } catch {
+    // ignore
+  }
+  return s.slice(0, 16);
+}
+
+/**
+ * 时间字符串归一化（将 T 替换为空格，用于字符串排序与比较）
+ */
+export function normalizeDateTime(raw?: string | null): string {
+  if (!raw) return "";
+  return raw.trim().replace("T", " ");
+}
+
+export function sortKnowledgeItemsDesc(items: KnowledgeItem[]): KnowledgeItem[] {
+  return [...items].sort((a, b) =>
+    normalizeDateTime(b.created_at).localeCompare(normalizeDateTime(a.created_at))
+  );
+}
 
 export function getKnowledgeItems(): KnowledgeItem[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_MOCK_ITEMS));
-      return INITIAL_MOCK_ITEMS;
+      return sortKnowledgeItemsDesc(INITIAL_MOCK_ITEMS);
     }
-    return JSON.parse(raw);
+    const list: KnowledgeItem[] = JSON.parse(raw);
+    return sortKnowledgeItemsDesc(list);
   } catch {
-    return INITIAL_MOCK_ITEMS;
+    return sortKnowledgeItemsDesc(INITIAL_MOCK_ITEMS);
   }
 }
 
 export function saveKnowledgeItems(items: KnowledgeItem[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    const sorted = sortKnowledgeItemsDesc(items);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sorted));
     window.dispatchEvent(new CustomEvent(KNOWLEDGE_BASE_UPDATED_EVENT));
   } catch (e) {
     console.error("Failed to save knowledge items to localStorage", e);

@@ -5,6 +5,7 @@ import { PortalSearchSelect } from "@/components/PortalSearchSelect";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import {
   addKnowledgeItem,
+  formatDateTime,
   type KnowledgeAttachment,
   type KnowledgeItem,
   type KnowledgeType,
@@ -476,7 +477,7 @@ export function KnowledgeBaseDrawer({
                 </div>
                 <div>
                   <span className="text-slate-400 mr-1.5">创建时间:</span>
-                  <span className="text-slate-600 font-mono">{item.created_at}</span>
+                  <span className="text-slate-600 font-mono">{formatDateTime(item.created_at)}</span>
                 </div>
                 <div>
                   <span className="text-slate-400 mr-1.5">审核人:</span>
@@ -484,7 +485,7 @@ export function KnowledgeBaseDrawer({
                 </div>
                 <div>
                   <span className="text-slate-400 mr-1.5">审核时间:</span>
-                  <span className="text-slate-600 font-mono">{item.reviewed_at ?? "—"}</span>
+                  <span className="text-slate-600 font-mono">{formatDateTime(item.reviewed_at)}</span>
                 </div>
                 <div>
                   <span className="text-slate-400 mr-1.5">总调用次数:</span>

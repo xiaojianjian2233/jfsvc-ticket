@@ -44,6 +44,23 @@ def get_rpa_config(env: str = "sit") -> dict[str, str]:
     }
 
 
+def get_company_title_config() -> dict[str, str]:
+    """Get company title query platform config (single environment)."""
+    raw = load_raw_config().get("company_title", {})
+    return {
+        "host": os.getenv("COMPANY_TITLE_HOST", raw.get("host", "https://title.piaozone.com")),
+        "endpoint": os.getenv(
+            "COMPANY_TITLE_ENDPOINT",
+            raw.get("endpoint", "/bill/query/querytitles"),
+        ),
+        "client_id": os.getenv("COMPANY_TITLE_CLIENT_ID", raw.get("client_id", "XXzM8oZ1FQGLJxZ-YK_svomMUA8")),
+        "client_secret": os.getenv("COMPANY_TITLE_CLIENT_SECRET", raw.get("client_secret", "5KcLc2OK2hIrsnbZOR4EzzM1dEM")),
+        "encrypt_key": os.getenv("COMPANY_TITLE_ENCRYPT_KEY", raw.get("encrypt_key", "kgr92kHxXNKIU6Cw")),
+    }
+
+
 # Convenience pre-loaded configs
 RPA_SIT_CONFIG = get_rpa_config("sit")
 RPA_PROD_CONFIG = get_rpa_config("prod")
+COMPANY_TITLE_CONFIG = get_company_title_config()
+

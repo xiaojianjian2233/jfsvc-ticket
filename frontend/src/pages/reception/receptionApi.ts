@@ -403,9 +403,9 @@ const SEED_MESSAGES: Record<string, MessageItem[]> = {
 function getLocalStore<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(`reception_${key}`);
-    return raw ? JSON.parse(raw) : fallback;
+    return raw ? JSON.parse(raw) : JSON.parse(JSON.stringify(fallback));
   } catch {
-    return fallback;
+    return JSON.parse(JSON.stringify(fallback));
   }
 }
 
@@ -591,7 +591,38 @@ export async function fetchSessions(params?: {
       page: number;
       page_size: number;
     }>("/api/reception/sessions", query);
-    if (res && Array.isArray(res.items)) return res;
+    if (res && Array.isArray(res.items)) {
+      // 检查 localStore 中的 sessions，若有本地创建但服务端尚未包含的会话，智能置顶合并
+      const localSessions = getLocalStore<SessionItem[]>("sessions", []);
+      let allItems = [...res.items];
+      if (localSessions.length > 0) {
+        const serverIds = new Set(res.items.map((x) => x.id));
+        const extraLocal = localSessions.filter((x) => !serverIds.has(x.id));
+        if (extraLocal.length > 0) {
+          let filteredExtra = extraLocal;
+          if (params?.company_name?.trim()) {
+            const q = params.company_name.trim().toLowerCase();
+            filteredExtra = filteredExtra.filter((s) => s.company_name.toLowerCase().includes(q));
+          }
+          if (params?.contact_phone?.trim()) {
+            const q = params.contact_phone.trim();
+            filteredExtra = filteredExtra.filter((s) => (s.contact_phone || "").includes(q));
+          }
+          if (filteredExtra.length > 0) {
+            allItems = [...filteredExtra, ...allItems];
+          }
+        }
+      }
+      // 严格按照创建时间倒序排
+      allItems.sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+      const pSize = Number(query.page_size) || 20;
+      return {
+        items: allItems.slice(0, pSize),
+        total: Math.max(res.total, allItems.length),
+        page: res.page,
+        page_size: res.page_size,
+      };
+    }
   } catch {
     // fallback
   }
@@ -624,6 +655,9 @@ export async function fetchSessions(params?: {
     const q = params.agent_name.trim().toLowerCase();
     list = list.filter((s) => s.agent_name.toLowerCase().includes(q));
   }
+
+  // 严格按照创建时间倒序排
+  list.sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
 
   const p = params?.page || 1;
   const pSize = params?.page_size || 20;
@@ -1416,6 +1450,24 @@ export async function clientFetchTenantProfile(
 }
 
 /**
+ * 广播新会话创建事件（用于跨标签页、跨组件实时刷新坐席端会话列表与工作台）
+ */
+export function notifySessionCreated(session: SessionItem) {
+  try {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("reception:session_created", { detail: session }));
+      try {
+        localStorage.setItem("ticket_hub_reception_session_ping", String(Date.now()));
+      } catch {
+        // ignore
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/**
  * 客户端：初始化/提交会话
  */
 export async function clientInitSession(
@@ -1426,6 +1478,19 @@ export async function clientInitSession(
       "/api/reception/client/init-session",
       payload
     );
+    if (res?.session) {
+      const sessions = getLocalStore<SessionItem[]>("sessions", SEED_SESSIONS);
+      if (!sessions.some((s) => s.id === res.session.id)) {
+        sessions.unshift(res.session);
+        setLocalStore("sessions", sessions);
+      }
+      if (res.messages && res.messages.length > 0) {
+        const allMessages = getLocalStore<Record<string, MessageItem[]>>("messages", SEED_MESSAGES);
+        allMessages[res.session.id] = res.messages;
+        setLocalStore("messages", allMessages);
+      }
+      notifySessionCreated(res.session);
+    }
     return res;
   } catch {
     const phone = payload.contact_phone.trim();
@@ -1494,6 +1559,7 @@ export async function clientInitSession(
 
     // 触发自动分发
     autoDispatchQueueSessions().catch(() => {});
+    notifySessionCreated(newSession);
 
     return { session: newSession, messages: [welcomeMsg] };
   }
@@ -1556,7 +1622,10 @@ export async function clientSendMessage(
       content,
       sender_name: senderName,
     });
-  } catch {
+  } catch (err: any) {
+    if (err?.status === 404 || err?.message?.includes("404") || err?.message?.includes("不存在")) {
+      throw err;
+    }
     const nowStr = new Date().toISOString().replace("T", " ").slice(0, 19);
     const allMessages = getLocalStore<Record<string, MessageItem[]>>("messages", SEED_MESSAGES);
     const list = allMessages[sessionId] || [];
@@ -1668,11 +1737,52 @@ export interface ClientNoticeItem {
   publish_time: string;
   publisher?: string;
   category?: string;
+  popup_prompt?: boolean;
+}
+
+export interface ReceptionNoticeItem {
+  id: number;
+  notice_no: string;
+  title: string;
+  content: string;
+  start_time: string;
+  end_time: string;
+  start_date: string;
+  end_date: string;
+  popup_prompt: boolean;
+  status: "published" | "unpublished";
+  effective_status: "published" | "unpublished";
+  created_by: string;
+  created_at: string;
+  updated_by: string;
+  updated_at: string;
+}
+
+export interface NoticeFilterParams {
+  statuses?: string[];
+  start_time?: string;
+  end_time?: string;
+}
+
+export interface CreateNoticePayload {
+  title: string;
+  start_date: string;
+  end_date: string;
+  popup_prompt: boolean;
+  content: string;
+}
+
+export interface UpdateNoticePayload {
+  title?: string;
+  start_date?: string;
+  end_date?: string;
+  popup_prompt?: boolean;
+  content?: string;
 }
 
 export const SEED_CLIENT_NOTICES: ClientNoticeItem[] = [
   {
-    id: "NOTICE-20260921-01",
+    id: "INF202609210001",
     title: "关于数电发票乐企直连通道升级维护的通知",
     content:
       "尊敬的纳税人用户：为了提供更稳定优质的数电发票乐企对接服务，国家税务总局定于本周五晚 22:00 至周六早 06:00 进行乐企平台与电子底账系统底层升级。升级期间开票、受票及勾选认证服务可能出现短时响应延迟或连接波动。建议各企业财务提前做好发票开具与勾选安排，紧急开票可使用离线开票备用模式。升级完成后服务将自动恢复，如有疑问请随时联系本在线技术支持团队。",
@@ -1680,9 +1790,10 @@ export const SEED_CLIENT_NOTICES: ClientNoticeItem[] = [
     publish_time: "2026-09-21 10:00",
     publisher: "国家税务总局运维中心",
     category: "系统维护",
+    popup_prompt: false,
   },
   {
-    id: "NOTICE-20260918-02",
+    id: "INF202609180002",
     title: "金蝶发票云 2026 年第 3 季度征期服务保障方案",
     content:
       "为全力保障 9 月大征期期间企业税控与数电发票系统平稳运行，金蝶发票云售后技术团队已启动 7×24 小时征期应急响应机制。专家坐席全量在线，针对批量开票卡顿、税控盘升级校验、红字信息表开具异常等常见问题提供 1 对 1 快速排障支持，确保企业纳税申报与发票交付万无一失。",
@@ -1690,9 +1801,10 @@ export const SEED_CLIENT_NOTICES: ClientNoticeItem[] = [
     publish_time: "2026-09-18 09:30",
     publisher: "金蝶发票云服务团队",
     category: "征期保障",
+    popup_prompt: false,
   },
   {
-    id: "NOTICE-20260915-03",
+    id: "INF202609150003",
     title: "关于近期增值税发票合规开具与风险防范温馨提示",
     content:
       "近期各省税务局加大对异常大额发票及开票品目与企业经营范围不符的动态监控力度。金蝶发票云已全新上线「AI 智能风控开票插件」，支持开票前自动校验黑名单客户、异常开票额度预警。建议企业开票人员在系统设置中开启合规自检功能，确保业务发票合规开具与入账。",
@@ -1700,29 +1812,384 @@ export const SEED_CLIENT_NOTICES: ClientNoticeItem[] = [
     publish_time: "2026-09-15 14:20",
     publisher: "税务合规运营中心",
     category: "业务指引",
-  },
-  {
-    id: "NOTICE-20260910-04",
-    title: "金蝶发票云在线技术支持客户端升级公告",
-    content:
-      "发票云在线技术支持客户端已全面完成升级，支持历史会话无缝续接、多企业身份快速切换、工单进度实时追踪及图文附件拖拽发送。同时新增重要通知实时播报面板，欢迎广大企业客户体验更高效、敏捷的专家支持服务！",
-    is_important: false,
-    publish_time: "2026-09-10 11:00",
-    publisher: "产品发布中心",
-    category: "产品动态",
+    popup_prompt: false,
   },
 ];
+
+const LOCAL_NOTICES_KEY = "ticket_hub_reception_notices_local";
+
+function getLocalNotices(): ReceptionNoticeItem[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_NOTICES_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // ignore
+  }
+  const defaults: ReceptionNoticeItem[] = [
+    {
+      id: 1,
+      notice_no: "INF202609210001",
+      title: "关于数电发票乐企直连通道升级维护的通知",
+      content:
+        "尊敬的纳税人用户：为了提供更稳定优质的数电发票乐企对接服务，国家税务总局定于本周五晚 22:00 至周六早 06:00 进行乐企平台与电子底账系统底层升级。升级期间开票、受票及勾选认证服务可能出现短时响应延迟或连接波动。建议各企业财务提前做好发票开具与勾选安排，紧急开票可使用离线开票备用模式。升级完成后服务将自动恢复，如有疑问请随时联系本在线技术支持团队。",
+      start_time: "2026-09-20 00:00:00",
+      end_time: "2026-09-30 23:59:59",
+      start_date: "2026-09-20",
+      end_date: "2026-09-30",
+      popup_prompt: true,
+      status: "published",
+      effective_status: "published",
+      created_by: "杨慧丽",
+      created_at: "2026-09-20 09:30:00",
+      updated_by: "杨慧丽",
+      updated_at: "2026-09-20 09:30:00",
+    },
+    {
+      id: 2,
+      notice_no: "INF202609180002",
+      title: "金蝶发票云 2026 年第 3 季度征期服务保障方案",
+      content:
+        "为全力保障 9 月大征期期间企业税控与数电发票系统平稳运行，金蝶发票云售后技术团队已启动 7×24 小时征期应急响应机制。专家坐席全量在线，针对批量开票卡顿、税控盘升级校验、红字信息表开具异常等常见问题提供 1 对 1 快速排障支持，确保企业纳税申报与发票交付万无一失。",
+      start_time: "2026-09-18 00:00:00",
+      end_time: "2026-09-28 23:59:59",
+      start_date: "2026-09-18",
+      end_date: "2026-09-28",
+      popup_prompt: false,
+      status: "published",
+      effective_status: "published",
+      created_by: "杨慧丽",
+      created_at: "2026-09-18 08:30:00",
+      updated_by: "杨慧丽",
+      updated_at: "2026-09-18 08:30:00",
+    },
+    {
+      id: 3,
+      notice_no: "INF202609100003",
+      title: "发票云在线技术支持客户端全面升级公告",
+      content:
+        "发票云在线技术支持客户端已全面完成升级，支持历史会话无缝续接、多企业身份快速切换、工单进度实时追踪及图文附件拖拽发送。同时新增重要通知实时播报面板，欢迎广大企业客户体验更高效、敏捷的专家支持服务！",
+      start_time: "2026-09-01 00:00:00",
+      end_time: "2026-09-15 23:59:59",
+      start_date: "2026-09-01",
+      end_date: "2026-09-15",
+      popup_prompt: false,
+      status: "unpublished",
+      effective_status: "unpublished",
+      created_by: "管理员",
+      created_at: "2026-09-01 10:00:00",
+      updated_by: "管理员",
+      updated_at: "2026-09-15 23:59:59",
+    },
+  ];
+  try {
+    localStorage.setItem(LOCAL_NOTICES_KEY, JSON.stringify(defaults));
+  } catch {
+    // ignore
+  }
+  return defaults;
+}
+
+function saveLocalNotices(items: ReceptionNoticeItem[]) {
+  try {
+    localStorage.setItem(LOCAL_NOTICES_KEY, JSON.stringify(items));
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * 获取消息通知列表，支持状态多选及创建时间区间筛选
+ */
+export async function fetchNotices(
+  filters?: NoticeFilterParams
+): Promise<ReceptionNoticeItem[]> {
+  let list = getLocalNotices();
+  try {
+    const query: Record<string, any> = {};
+    if (filters?.statuses && filters.statuses.length > 0) {
+      query.statuses = filters.statuses;
+    }
+    if (filters?.start_time) {
+      query.start_time = filters.start_time;
+    }
+    if (filters?.end_time) {
+      query.end_time = filters.end_time;
+    }
+    const res = await httpGet<ReceptionNoticeItem[]>("/api/reception/notices", query);
+    if (Array.isArray(res) && res.length > 0) {
+      const map = new Map<string | number, ReceptionNoticeItem>();
+      for (const item of list) {
+        map.set(item.notice_no || item.id, item);
+      }
+      for (const item of res) {
+        map.set(item.notice_no || item.id, item);
+      }
+      list = Array.from(map.values());
+      saveLocalNotices(list);
+    }
+  } catch {
+    // 降级使用本地存储
+  }
+
+  if (filters?.statuses && filters.statuses.length > 0) {
+    const stSet = new Set(filters.statuses);
+    if (!stSet.has("all") && !stSet.has("不限")) {
+      list = list.filter((n) => stSet.has(n.effective_status) || stSet.has(n.status));
+    }
+  }
+  if (filters?.start_time) {
+    list = list.filter((n) => (n.created_at || "") >= filters.start_time!);
+  }
+  if (filters?.end_time) {
+    list = list.filter((n) => (n.created_at || "") <= filters.end_time!);
+  }
+  return list.sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+}
+
+/**
+ * 获取消息通知详情
+ */
+export async function fetchNoticeDetail(id: number): Promise<ReceptionNoticeItem> {
+  try {
+    const res = await httpGet<ReceptionNoticeItem>(`/api/reception/notices/${id}`);
+    if (res && res.id) return res;
+  } catch {
+    // 降级本地
+  }
+  const list = getLocalNotices();
+  const found = list.find((n) => n.id === id);
+  if (found) return found;
+  throw new Error("通知记录不存在");
+}
+
+/**
+ * 新建消息通知
+ */
+export async function createNotice(
+  payload: CreateNoticePayload
+): Promise<ReceptionNoticeItem> {
+  const list = getLocalNotices();
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const y = now.getFullYear();
+  const m = pad(now.getMonth() + 1);
+  const d = pad(now.getDate());
+  const hh = pad(now.getHours());
+  const mm = pad(now.getMinutes());
+  const ss = pad(now.getSeconds());
+  const todayStr = `${y}${m}${d}`;
+  const nextSeq = list.length + 1;
+  const noticeNo = `INF${todayStr}${String(nextSeq).padStart(4, "0")}`;
+  const nowStr = `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
+
+  const newItem: ReceptionNoticeItem = {
+    id: Date.now(),
+    notice_no: noticeNo,
+    title: payload.title,
+    content: payload.content,
+    start_time: `${payload.start_date} 00:00:00`,
+    end_time: `${payload.end_date} 23:59:59`,
+    start_date: payload.start_date,
+    end_date: payload.end_date,
+    popup_prompt: !!payload.popup_prompt,
+    status: "published",
+    effective_status: "published",
+    created_by: "当前坐席",
+    created_at: nowStr,
+    updated_by: "当前坐席",
+    updated_at: nowStr,
+  };
+
+  // 优先写入本地缓存，确保 0ms 立即生效展示
+  saveLocalNotices([newItem, ...list]);
+
+  try {
+    const res = await httpPost<ReceptionNoticeItem>("/api/reception/notices", payload);
+    if (res && res.id) {
+      const current = getLocalNotices();
+      const updated = current.map((n) => (n.id === newItem.id ? res : n));
+      if (!updated.some((n) => n.id === res.id)) {
+        updated.unshift(res);
+      }
+      saveLocalNotices(updated);
+      return res;
+    }
+  } catch {
+    // 降级使用本地新建
+  }
+
+  return newItem;
+}
+
+/**
+ * 更新/修改消息通知
+ */
+export async function updateNotice(
+  id: number,
+  payload: UpdateNoticePayload
+): Promise<ReceptionNoticeItem> {
+  try {
+    const res = await httpPut<ReceptionNoticeItem>(`/api/reception/notices/${id}`, payload);
+    if (res && res.id) {
+      const list = getLocalNotices().map((n) => (n.id === id ? res : n));
+      saveLocalNotices(list);
+      return res;
+    }
+  } catch {
+    // 降级本地
+  }
+
+  const list = getLocalNotices();
+  const idx = list.findIndex((n) => n.id === id);
+  if (idx < 0) throw new Error("通知不存在");
+
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const nowStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
+    now.getDate()
+  )} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+
+  const current = list[idx];
+  const updated: ReceptionNoticeItem = {
+    ...current,
+    title: payload.title ?? current.title,
+    content: payload.content ?? current.content,
+    start_date: payload.start_date ?? current.start_date,
+    end_date: payload.end_date ?? current.end_date,
+    start_time: payload.start_date ? `${payload.start_date} 00:00:00` : current.start_time,
+    end_time: payload.end_date ? `${payload.end_date} 23:59:59` : current.end_time,
+    popup_prompt: payload.popup_prompt ?? current.popup_prompt,
+    updated_by: "当前用户",
+    updated_at: nowStr,
+  };
+  list[idx] = updated;
+  saveLocalNotices(list);
+  return updated;
+}
+
+/**
+ * 批量上架消息通知
+ */
+export async function batchPublishNotices(ids: number[]): Promise<void> {
+  try {
+    await httpPost("/api/reception/notices/batch-publish", { ids });
+  } catch {
+    // 降级
+  }
+  const list = getLocalNotices().map((n) => {
+    if (ids.includes(n.id)) {
+      return {
+        ...n,
+        status: "published" as const,
+        effective_status: "published" as const,
+        updated_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+      };
+    }
+    return n;
+  });
+  saveLocalNotices(list);
+}
+
+/**
+ * 批量下架消息通知
+ */
+export async function batchUnpublishNotices(ids: number[]): Promise<void> {
+  try {
+    await httpPost("/api/reception/notices/batch-unpublish", { ids });
+  } catch {
+    // 降级
+  }
+  const list = getLocalNotices().map((n) => {
+    if (ids.includes(n.id)) {
+      return {
+        ...n,
+        status: "unpublished" as const,
+        effective_status: "unpublished" as const,
+        updated_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+      };
+    }
+    return n;
+  });
+  saveLocalNotices(list);
+}
+
+/**
+ * 批量删除消息通知（仅限下架状态）
+ */
+export async function batchDeleteNotices(ids: number[]): Promise<void> {
+  try {
+    await httpPost("/api/reception/notices/batch-delete", { ids });
+  } catch (err: any) {
+    if (err?.message?.includes("处于上架状态") || err?.response?.data?.detail?.includes("处于上架状态")) {
+      throw err;
+    }
+  }
+  const list = getLocalNotices().filter((n) => !ids.includes(n.id));
+  saveLocalNotices(list);
+}
 
 /**
  * 客户端：获取重要通知列表
  */
 export async function clientFetchNotices(): Promise<ClientNoticeItem[]> {
+  let serverNotices: ClientNoticeItem[] = [];
   try {
     const res = await httpGet<ClientNoticeItem[]>("/api/reception/client/notices");
-    if (Array.isArray(res) && res.length > 0) return res;
+    if (Array.isArray(res) && res.length > 0) {
+      serverNotices = res;
+    }
   } catch {
     // ignore
   }
-  return SEED_CLIENT_NOTICES;
+
+  // 从本地持久缓存提取所有上架且有效的通知
+  const localList = getLocalNotices();
+  const nowStr = new Date().toISOString().slice(0, 10);
+  const localPublished: ClientNoticeItem[] = localList
+    .filter((n) => {
+      if (n.effective_status !== "published" && n.status !== "published") return false;
+      const s = n.start_date || (n.start_time ? n.start_time.slice(0, 10) : "");
+      const e = n.end_date || (n.end_time ? n.end_time.slice(0, 10) : "");
+      if (s && s > nowStr) return false;
+      if (e && e < nowStr) return false;
+      return true;
+    })
+    .map((n) => ({
+      id: n.notice_no || String(n.id),
+      title: n.title,
+      content: n.content,
+      is_important: true,
+      publish_time:
+        n.start_date || (n.start_time ? n.start_time.slice(0, 16) : "") || (n.created_at || "").slice(0, 16),
+      publisher: n.created_by || "发票云服务团队",
+      category: "系统公告",
+      popup_prompt: !!n.popup_prompt,
+    }));
+
+  // 合并本地与服务端数据：以本地最新发布的通知为先，去重
+  const seenNos = new Set<string>();
+  const combined: ClientNoticeItem[] = [];
+
+  for (const item of localPublished) {
+    const key = String(item.id);
+    if (!seenNos.has(key)) {
+      seenNos.add(key);
+      combined.push(item);
+    }
+  }
+
+  for (const item of serverNotices) {
+    const key = String(item.id);
+    if (!seenNos.has(key)) {
+      seenNos.add(key);
+      combined.push(item);
+    }
+  }
+
+  if (combined.length === 0) {
+    return SEED_CLIENT_NOTICES;
+  }
+  return combined;
 }
+
 

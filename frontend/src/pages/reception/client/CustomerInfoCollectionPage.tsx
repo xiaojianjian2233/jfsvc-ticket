@@ -5,6 +5,7 @@ import {
   type SessionItem,
   type MessageItem,
   clientFetchTenantProfile,
+  clientInitSession,
   clientLookupPhone,
   clientSearchEnterprises,
 } from "../receptionApi";
@@ -43,7 +44,7 @@ export function CustomerInfoCollectionPage({ onSuccess }: CustomerInfoCollection
   const [historyDropdownOpen, setHistoryDropdownOpen] = useState(false);
   const [selectedHistoryEnterprise, setSelectedHistoryEnterprise] = useState<ClientLookupCompany | null>(null);
 
-  // 工商局接口新企业联想推荐
+  // 企业抬头接口联想推荐（录入超过2个字触发，内容变动自动重新查询）
   const [searchLoading, setSearchLoading] = useState(false);
   const [enterpriseSuggestions, setEnterpriseSuggestions] = useState<EnterpriseSearchResult[]>([]);
   const [suggestionDropdownOpen, setSuggestionDropdownOpen] = useState(false);
@@ -53,6 +54,7 @@ export function CustomerInfoCollectionPage({ onSuccess }: CustomerInfoCollection
   const [submitError, setSubmitError] = useState("");
 
   const searchDebounceRef = useRef<any>(null);
+  const searchSeqRef = useRef(0);
 
   // 手机号格式与非法号码校验
   const validatePhone = (value: string): boolean => {
@@ -107,7 +109,29 @@ export function CustomerInfoCollectionPage({ onSuccess }: CustomerInfoCollection
     }
   }, [phone]);
 
-  // 当客户手动录入企业名称时，触发工商局接口联想推荐（仅在未选择历史企业或使用新企业时）
+  // 调用企业抬头接口进行查询
+  const fetchSuggestions = async (kw: string) => {
+    const seq = ++searchSeqRef.current;
+    setSearchLoading(true);
+    try {
+      const results = await clientSearchEnterprises(kw);
+      if (seq === searchSeqRef.current) {
+        setEnterpriseSuggestions(results);
+        setSuggestionDropdownOpen(results.length > 0);
+      }
+    } catch {
+      if (seq === searchSeqRef.current) {
+        setEnterpriseSuggestions([]);
+        setSuggestionDropdownOpen(false);
+      }
+    } finally {
+      if (seq === searchSeqRef.current) {
+        setSearchLoading(false);
+      }
+    }
+  };
+
+  // 当客户手动录入企业名称时，录入超过2个字后自动触发查询，若内容变动则以最新内容重新查询
   const handleCompanyNameChange = (value: string) => {
     setCompanyName(value);
     setSelectedHistoryEnterprise(null); // 用户手动输入则视为可能的新企业
@@ -119,18 +143,27 @@ export function CustomerInfoCollectionPage({ onSuccess }: CustomerInfoCollection
     const kw = value.trim();
     if (kw.length >= 2) {
       setSearchLoading(true);
-      searchDebounceRef.current = setTimeout(async () => {
-        try {
-          const results = await clientSearchEnterprises(kw);
-          setEnterpriseSuggestions(results);
-          setSuggestionDropdownOpen(results.length > 0);
-        } finally {
-          setSearchLoading(false);
-        }
-      }, 300);
+      searchDebounceRef.current = setTimeout(() => {
+        fetchSuggestions(kw);
+      }, 250);
     } else {
       setEnterpriseSuggestions([]);
       setSuggestionDropdownOpen(false);
+      setSearchLoading(false);
+    }
+  };
+
+  // 支持回车立即触发查询（不需要等防抖，同时阻止表单误触提交）
+  const handleCompanyNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const kw = companyName.trim();
+      if (kw.length >= 2) {
+        if (searchDebounceRef.current) {
+          clearTimeout(searchDebounceRef.current);
+        }
+        fetchSuggestions(kw);
+      }
     }
   };
 
@@ -198,8 +231,29 @@ export function CustomerInfoCollectionPage({ onSuccess }: CustomerInfoCollection
         is_historical: isHistorical,
       };
 
+      // 核心：录入信息登录后，立即初始化建立在线会话，直接进入会话窗口
+      let session: SessionItem | null = null;
+      let messages: MessageItem[] = [];
+      try {
+        const initRes = await clientInitSession({
+          company_name: customerProfile.company_name,
+          tax_no: customerProfile.tax_no,
+          contact_name: customerProfile.contact_name,
+          contact_phone: customerProfile.contact_phone,
+          tenant_name: customerProfile.tenant_name,
+          tenant_no: customerProfile.tenant_no,
+          purchased_products: customerProfile.purchased_products,
+        });
+        session = initRes.session;
+        messages = initRes.messages;
+      } catch (e) {
+        console.warn("clientInitSession error, fallback handled", e);
+      }
+
       onSuccess({
         profile: customerProfile,
+        session,
+        messages,
       });
     } catch (err: any) {
       console.error("提交失败:", err);
@@ -352,19 +406,67 @@ export function CustomerInfoCollectionPage({ onSuccess }: CustomerInfoCollection
           <label className="w-[120px] text-right text-[13px] font-medium text-slate-700 flex-none pt-1">
             企业名称 <span className="text-rose-500">*</span>
           </label>
-          <div className="w-[500px] flex-none relative space-y-1">
-            <input
-              type="text"
-              value={companyName}
-              onChange={(e) => handleCompanyNameChange(e.target.value)}
-              onFocus={() => {
-                if (enterpriseSuggestions.length > 0 && !selectedHistoryEnterprise) {
-                  setSuggestionDropdownOpen(true);
-                }
-              }}
-              placeholder="请输入本次咨询的企业全称"
-              className="w-[500px] h-[30px] px-3 border border-slate-200 rounded-[4px] text-slate-800 text-[13px] placeholder:text-slate-400 focus:outline-none focus:border-[rgb(35,94,212)] focus:ring-1 focus:ring-[rgb(35,94,212)]/20 transition"
-            />
+          <div className="w-[500px] flex-none space-y-1">
+            <div className="relative w-[500px]">
+              <input
+                type="text"
+                value={companyName}
+                onChange={(e) => handleCompanyNameChange(e.target.value)}
+                onKeyDown={handleCompanyNameKeyDown}
+                onFocus={() => {
+                  if (enterpriseSuggestions.length > 0 && !selectedHistoryEnterprise) {
+                    setSuggestionDropdownOpen(true);
+                  }
+                }}
+                placeholder="请输入本次咨询的企业全称"
+                className={`w-[500px] h-[30px] px-3 border border-slate-200 text-slate-800 text-[13px] placeholder:text-slate-400 focus:outline-none focus:border-[rgb(35,94,212)] focus:ring-1 focus:ring-[rgb(35,94,212)]/20 transition ${
+                  suggestionDropdownOpen && enterpriseSuggestions.length > 0
+                    ? "rounded-t-[4px] rounded-b-none border-b-transparent focus:border-b-transparent"
+                    : "rounded-[4px]"
+                }`}
+              />
+
+              {/* 企业查询推荐下拉面板（默认展示5条数据高度，顶部与录入框无缝紧贴，0间隙对齐） */}
+              {suggestionDropdownOpen && enterpriseSuggestions.length > 0 && (
+                <div className="absolute left-0 w-[500px] top-[30px] bg-white border border-[rgb(35,94,212)] border-t-0 rounded-b-lg shadow-[0_12px_28px_rgba(0,0,0,0.18)] z-30 overflow-hidden">
+                  <div className="h-[30px] px-3 bg-blue-50/90 border-b border-blue-100 text-[11.5px] font-medium text-[#666666] flex items-center justify-between">
+                    <div className="flex items-center gap-1">
+                      <span>根据录入信息查询企业信息</span>
+                      <span className="text-slate-400 font-normal">
+                        （共 {enterpriseSuggestions.length} 条，点击直接录入）
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSuggestionDropdownOpen(false)}
+                      className="text-[#666666] hover:text-slate-900 cursor-pointer text-xs"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="max-h-[280px] overflow-y-auto divide-y divide-slate-100">
+                    {enterpriseSuggestions.map((item, idx) => (
+                      <div
+                        key={`${item.company_name}_${idx}`}
+                        onClick={() => handleSelectSuggestion(item)}
+                        className="h-[56px] px-3 flex flex-col justify-center hover:bg-blue-50/70 cursor-pointer transition border-l-2 border-l-transparent hover:border-l-[rgb(35,94,212)]"
+                      >
+                        <div className="font-semibold text-slate-800 text-[14px] leading-tight truncate">
+                          {item.company_name}
+                        </div>
+                        <div className="text-[13px] text-[#666666] font-mono flex items-center justify-between mt-0.5">
+                          <span>统一社会信用代码: {item.tax_no}</span>
+                          <span className="text-teal-700 bg-teal-50 px-1.5 py-0.5 rounded text-[11px] font-medium font-sans">
+                            {item.status || "存续"}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="flex items-center justify-between text-[11px]">
               {selectedHistoryEnterprise ? (
                 <button
@@ -384,39 +486,6 @@ export function CustomerInfoCollectionPage({ onSuccess }: CustomerInfoCollection
                 <span className="text-[11px] text-[#666666]">支持输入关键字查询企业信息</span>
               )}
             </div>
-
-            {/* 企业查询推荐下拉面板（明显展示框，标题修改为“根据录入信息查询企业信息”） */}
-            {suggestionDropdownOpen && enterpriseSuggestions.length > 0 && (
-              <div className="absolute left-0 w-[500px] top-[34px] bg-white border-2 border-[rgb(35,94,212)]/50 rounded-lg shadow-[0_12px_28px_rgba(0,0,0,0.15)] z-30 max-h-60 overflow-y-auto divide-y divide-slate-200">
-                <div className="p-2.5 bg-blue-50/80 border-b border-blue-100 text-[12px] font-medium text-[#666666] flex items-center justify-between">
-                  <span>根据录入信息查询企业信息</span>
-                  <button
-                    type="button"
-                    onClick={() => setSuggestionDropdownOpen(false)}
-                    className="text-[#666666] hover:text-slate-900 cursor-pointer text-xs"
-                  >
-                    ✕
-                  </button>
-                </div>
-                {enterpriseSuggestions.map((item, idx) => (
-                  <div
-                    key={`${item.company_name}_${idx}`}
-                    onClick={() => handleSelectSuggestion(item)}
-                    className="p-3 hover:bg-blue-50/70 cursor-pointer transition flex flex-col gap-[3px] border-l-2 border-l-transparent hover:border-l-[rgb(35,94,212)]"
-                  >
-                    <div className="font-semibold text-slate-800 text-[14px] leading-tight">
-                      {item.company_name}
-                    </div>
-                    <div className="text-[13px] text-[#666666] font-mono flex items-center justify-between">
-                      <span>统一社会信用代码: {item.tax_no}</span>
-                      <span className="text-teal-700 bg-teal-50 px-1.5 py-0.5 rounded text-[11px] font-medium font-sans">
-                        {item.status || "存续"}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
           <div className="w-[120px] flex-none" />
         </div>

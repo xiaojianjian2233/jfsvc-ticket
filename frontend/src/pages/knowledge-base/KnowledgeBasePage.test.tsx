@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { KnowledgeBasePage } from "./KnowledgeBasePage";
-import { getKnowledgeItems } from "./knowledgeBaseStore";
+import { formatDateTime, getKnowledgeItems } from "./knowledgeBaseStore";
 
 const server = setupServer(
   http.get("*/api/admin/product-lines", () =>
@@ -308,5 +308,106 @@ describe("KnowledgeBasePage 知识库模块", () => {
     await user.clear(customerInput);
     await user.type(customerInput, "航天信息股份有限公司");
     expect(customerInput.value).toBe("航天信息股份有限公司");
+  });
+
+  it("知识库列表按照创建时间倒序显示，且时间格式严格按照 yyyy-mm-dd hh:mm（去除T和秒数）", async () => {
+    // 1. 验证 formatDateTime 工具函数
+    expect(formatDateTime("2026-09-23T18:20:15.123+08:00")).toBe("2026-09-23 18:20");
+    expect(formatDateTime("2026-09-06T08:30:00")).toBe("2026-09-06 08:30");
+    expect(formatDateTime("2026-09-02 09:30:15")).toBe("2026-09-02 09:30");
+    expect(formatDateTime("")).toBe("—");
+    expect(formatDateTime(null)).toBe("—");
+
+    // 2. 模拟包含带 T 的 ISO 8601 格式和非标准格式的知识库数据写入 localStorage
+    const testItems = [
+      {
+        id: "FPYFAQ202609010001",
+        title: "历史发票云开票插件故障排查",
+        content: "排查步骤一二三",
+        type: "FAQ" as const,
+        product_line_code: "pl-invoice",
+        product_line_name: "发票服务云",
+        module_code: "m-open-issue",
+        module_name: "数电开票与交付",
+        status: "active" as const,
+        created_by: "测试员A",
+        created_at: "2026-09-01T09:15:30.000Z", // 带 T 早期记录
+        reviewed_by: "主管B",
+        reviewed_at: "2026-09-01T10:00:00.000Z",
+        total_calls: 10,
+        recent_calls: 2,
+      },
+      {
+        id: "FPYFAQ202609230002",
+        title: "最新数电乐企2.0平台联调接口指南",
+        content: "最新升级指南",
+        type: "操作手册" as const,
+        product_line_code: "pl-invoice",
+        product_line_name: "发票服务云",
+        module_code: "m-open-issue",
+        module_name: "数电开票与交付",
+        status: "active" as const,
+        created_by: "测试员C",
+        created_at: "2026-09-23T18:30:00", // 带 T 最新记录
+        reviewed_by: null,
+        reviewed_at: null,
+        total_calls: 5,
+        recent_calls: 5,
+      },
+      {
+        id: "FPYFAQ202609150003",
+        title: "月中批量勾选抵扣异常指导",
+        content: "处理方法说明",
+        type: "FAQ" as const,
+        product_line_code: "pl-invoice",
+        product_line_name: "发票服务云",
+        module_code: "m-sync-data",
+        module_name: "底账同步模块",
+        status: "active" as const,
+        created_by: "测试员D",
+        created_at: "2026-09-15 14:20:00", // 中间记录
+        reviewed_by: "主管E",
+        reviewed_at: "2026-09-15 15:00:00",
+        total_calls: 8,
+        recent_calls: 1,
+      },
+    ];
+    localStorage.setItem("fpy_knowledge_base_items_v20260908", JSON.stringify(testItems));
+
+    // 3. 渲染页面
+    renderComponent();
+
+    // 等待数据加载完成
+    await screen.findByText("FPYFAQ202609230002");
+
+    // 4. 获取表格中全部的知识编号（按自上而下的渲染顺序）
+    const idButtons = screen.getAllByRole("button", { name: /^FPYFAQ/ });
+    const renderedIds = idButtons.map((btn) => btn.textContent);
+    // 验证严格倒序排列：2026-09-23 最新排第1，2026-09-15 排第2，2026-09-01 排第3
+    expect(renderedIds[0]).toBe("FPYFAQ202609230002");
+    expect(renderedIds[1]).toBe("FPYFAQ202609150003");
+    expect(renderedIds[2]).toBe("FPYFAQ202609010001");
+
+    // 5. 校验表格内所有渲染的时间文本，严格匹配 yyyy-mm-dd hh:mm 且绝无 T
+    const timeCells = screen.getAllByText(/^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}$/);
+    expect(timeCells.length).toBeGreaterThanOrEqual(3);
+    timeCells.forEach((cell) => {
+      const text = cell.textContent || "";
+      expect(text).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+      expect(text).not.toContain("T");
+      expect(text.length).toBe(16);
+    });
+
+    // 6. 验证点击知识编号滑出的只读抽屉中，创建时间与审核时间同样不含 T 且符合 yyyy-mm-dd hh:mm
+    fireEvent.click(idButtons[0]);
+    expect(await screen.findByText("知识库操作面板")).toBeInTheDocument();
+
+    const matches = screen.getAllByText("2026-09-23 18:30");
+    // 包含表格中一行以及滑出抽屉中一行
+    expect(matches.length).toBe(2);
+    matches.forEach((el) => {
+      expect(el.textContent).not.toContain("T");
+      expect(el.textContent?.length).toBe(16);
+    });
   });
 });

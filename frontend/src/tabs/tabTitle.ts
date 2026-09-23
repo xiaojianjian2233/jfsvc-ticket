@@ -23,6 +23,7 @@ const STATIC: Record<string, string> = {
   "/reception/agents": "坐席设置",
   "/reception/sessions": "会话记录列表",
   "/reception/workbench": "在线接待工作台",
+  "/reception/notices": "消息通知配置",
 };
 
 // 详情路由前缀 → 占位标题（拿到数据前）

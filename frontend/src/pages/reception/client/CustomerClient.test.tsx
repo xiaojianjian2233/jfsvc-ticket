@@ -330,6 +330,60 @@ describe("Customer Client Online Support H5 / Web App", () => {
       expect((taxInput as HTMLInputElement).value).toBe("91110105MA11TAX2026");
     });
 
+    it("dynamically queries enterprise titles when typing >2 chars and displays multiple records as company_name + tax_no", async () => {
+      const onSuccess = vi.fn();
+      vi.spyOn(receptionApi, "clientLookupPhone").mockResolvedValue({
+        phone: "13900001111",
+        exists: false,
+        count: 0,
+        items: [],
+      });
+      const searchMock = vi.spyOn(receptionApi, "clientSearchEnterprises").mockResolvedValue([
+        {
+          company_name: "广西中油能源有限公司",
+          tax_no: "9145060075372154XH",
+        },
+        {
+          company_name: "广西中油能源有限公司柳州分公司",
+          tax_no: "91450203MA5K9DYEX2",
+        },
+      ]);
+
+      render(<CustomerInfoCollectionPage onSuccess={onSuccess} />);
+
+      const companyInput = screen.getByPlaceholderText(/请输入本次咨询的企业全称/);
+      // Type 1 char: should NOT query
+      fireEvent.change(companyInput, { target: { value: "广" } });
+      expect(searchMock).not.toHaveBeenCalled();
+
+      // Type >=2 chars: should query and display all records
+      fireEvent.change(companyInput, { target: { value: "广西中油" } });
+
+      await waitFor(() => {
+        expect(screen.getByText("广西中油能源有限公司")).toBeInTheDocument();
+        expect(screen.getByText("广西中油能源有限公司柳州分公司")).toBeInTheDocument();
+        expect(screen.getByText(/9145060075372154XH/)).toBeInTheDocument();
+        expect(screen.getByText(/91450203MA5K9DYEX2/)).toBeInTheDocument();
+
+        // 验证下拉框紧贴录入框底部（top-[30px]，0间隔对齐），且高度容纳5条数据（max-h-[280px]）
+        const dropdown = screen.getByText("根据录入信息查询企业信息").closest(".absolute");
+        expect(dropdown).toHaveClass("top-[30px]");
+        expect(screen.getByText("广西中油能源有限公司").closest(".max-h-\\[280px\\]")).toBeInTheDocument();
+      });
+
+      // Press Enter to trigger search immediately
+      fireEvent.keyDown(companyInput, { key: "Enter" });
+      expect(searchMock).toHaveBeenCalledWith("广西中油");
+
+      // Select the first record
+      fireEvent.click(screen.getByText("广西中油能源有限公司"));
+
+      // Verify name and creditCode are populated
+      expect((companyInput as HTMLInputElement).value).toBe("广西中油能源有限公司");
+      const taxInput = screen.getByPlaceholderText(/请输入统一社会信用代码/);
+      expect((taxInput as HTMLInputElement).value).toBe("9145060075372154XH");
+    });
+
     it("completes submission and calls onSuccess with profile", async () => {
       const onSuccess = vi.fn();
 
@@ -363,14 +417,16 @@ describe("Customer Client Online Support H5 / Web App", () => {
       await waitFor(() => {
         expect(onSuccess).toHaveBeenCalledTimes(1);
       });
-      expect(onSuccess).toHaveBeenCalledWith({
-        profile: expect.objectContaining({
-          contact_name: "陈女士",
-          contact_phone: "13812345678",
-          company_name: "新联科技有限公司",
-          tax_no: "91110108MA88888888",
-        }),
-      });
+      expect(onSuccess).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profile: expect.objectContaining({
+            contact_name: "陈女士",
+            contact_phone: "13812345678",
+            company_name: "新联科技有限公司",
+            tax_no: "91110108MA88888888",
+          }),
+        })
+      );
     });
   });
 
@@ -1076,11 +1132,15 @@ describe("Customer Client Online Support H5 / Web App", () => {
       await waitFor(() => {
         expect(screen.getByText("周工")).toBeInTheDocument();
         expect(
-          screen.getByText(
-            "你好，欢迎使用金蝶发票云在线支持，有什么可以帮助您？你可以直接给我发送您遇到的问题。"
-          )
+          screen.getByText(/您好！欢迎使用发票云售后在线支持。系统已为您建立会话/)
         ).toBeInTheDocument();
       });
+
+      // 关闭弹出的重要通知
+      const closePopupBtn = screen.queryByRole("button", { name: "我知道了" });
+      if (closePopupBtn) {
+        fireEvent.click(closePopupBtn);
+      }
 
       // Right panel defaults to "重要通知", can switch to "客户信息" and verify company name
       const profileTab = screen.getByRole("button", { name: /客户信息/ });

@@ -24,6 +24,7 @@ from app.db import get_session
 from app.models import (
     ReceptionAgent,
     ReceptionMessage,
+    ReceptionNotice,
     ReceptionSession,
     SystemSetting,
     User,
@@ -475,6 +476,15 @@ def get_session_detail(
     session = db.query(ReceptionSession).filter(ReceptionSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="会话记录不存在")
+
+    if (session.unread_count or 0) > 0:
+        session.unread_count = 0
+        db.query(ReceptionMessage).filter(
+            ReceptionMessage.session_id == session_id,
+            ReceptionMessage.is_read.is_(False),
+        ).update({"is_read": True})
+        db.commit()
+        db.refresh(session)
 
     messages = (
         db.query(ReceptionMessage)
@@ -1160,7 +1170,7 @@ def client_lookup_phone(
                     tax_no=s.tax_no or "",
                     tenant_name=s.tenant_name,
                     tenant_no=s.tenant_no,
-                    purchased_products=s.purchased_products or [],
+                    purchased_products=getattr(s, "purchased_products", None) or ["发票云标准版", "数电发票乐企模块"],
                     contact_name=s.contact_name,
                 )
             )
@@ -1173,17 +1183,79 @@ def client_lookup_phone(
     )
 
 
+def query_enterprise_titles_external(keyword: str) -> list[EnterpriseSearchResult]:
+    """根据企业名称模糊查询企业名称与企业税号 (对接发票云企业抬头真实接口)"""
+    cfg = get_company_title_config()
+    host = (cfg.get("host") or "https://title.piaozone.com").rstrip("/")
+    endpoint = cfg.get("endpoint") or "/bill/query/querytitles"
+    client_id = cfg.get("client_id") or ""
+    client_secret = cfg.get("client_secret") or ""
+
+    if not host or not client_id or not client_secret:
+        return []
+
+    t = str(int(time.time() * 1000))
+    # 字典升序排序 clientSecret, t, clientId 进行 SHA-1 加密
+    raw_str = "".join(sorted([client_secret, t, client_id]))
+    token = hashlib.sha1(raw_str.encode("utf-8")).hexdigest()
+
+    url = f"{host}{endpoint}"
+    params = {
+        "t": t,
+        "clientId": client_id,
+        "token": token,
+        "name": keyword.strip(),
+    }
+
+    results: list[EnterpriseSearchResult] = []
+    seen = set()
+
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            resp = client.get(url, params=params)
+            if resp.status_code == 200:
+                res_json = resp.json()
+                code = res_json.get("code")
+                # 状态码为 0 或 0000 视为成功
+                if code in (0, "0", "0000") or res_json.get("errcode") == "0000":
+                    items = res_json.get("result") or res_json.get("data") or []
+                    for item in items:
+                        name = (item.get("name") or "").strip()
+                        credit_code = (item.get("creditCode") or item.get("taxNo") or "").strip()
+                        if name and name not in seen:
+                            seen.add(name)
+                            results.append(
+                                EnterpriseSearchResult(
+                                    company_name=name,
+                                    tax_no=credit_code,
+                                    status="存续",
+                                )
+                            )
+    except Exception as e:
+        logger.warning("query_enterprise_titles_external_failed", exc_info=e)
+
+    return results
+
+
 @router.get("/client/search-enterprises", response_model=list[EnterpriseSearchResult])
 def client_search_enterprises(
     keyword: str = Query(..., min_length=1),
     db: Session = Depends(get_session),
 ) -> list[EnterpriseSearchResult]:
-    """工商局企业模糊联想搜索适配接口"""
+    """企业名称及税号模糊联想搜索接口（优先对接发票云企业抬头真实接口）"""
     kw = keyword.strip()
+    if not kw:
+        return []
+
+    # 1. 优先调用发票云企业抬头真实接口（模糊匹配企业名称与税号）
+    external_results = query_enterprise_titles_external(kw)
+    if external_results:
+        return external_results[:20]
+
     results: list[EnterpriseSearchResult] = []
     seen = set()
 
-    # 1. 优先从数据库既有会话企业中模糊匹配
+    # 2. 外部接口未命中或离线时，降级从数据库既有会话企业中模糊匹配
     db_companies = (
         db.query(ReceptionSession.company_name, ReceptionSession.tax_no)
         .filter(ReceptionSession.company_name.ilike(f"%{kw}%"))
@@ -1202,13 +1274,13 @@ def client_search_enterprises(
                 )
             )
 
-    # 2. 从工商局种子推荐中查找
+    # 3. 兜底推荐
     for item in MOCK_ENTERPRISES:
         if kw in item["company_name"] and item["company_name"] not in seen:
             seen.add(item["company_name"])
             results.append(EnterpriseSearchResult(**item))
 
-    # 3. 如未完全匹配，动态生成一条规范纳税人识别号供客户一键录入
+    # 4. 如未完全匹配，动态生成一条规范纳税人识别号供客户一键录入
     if not any(r.company_name == kw for r in results) and len(kw) >= 2:
         code_suffix = "".join([str(ord(c) % 10) for c in kw[:6]]).ljust(10, "8")
         results.insert(
@@ -1228,8 +1300,10 @@ def client_search_enterprises(
 # -----------------------------------------------------------------------------
 
 from app.piaozone_config import (
+    COMPANY_TITLE_CONFIG,
     RPA_PROD_CONFIG,
     RPA_SIT_CONFIG,
+    get_company_title_config,
     get_rpa_config,
 )
 
@@ -1357,7 +1431,7 @@ def client_fetch_tenant_profile(
         return TenantProfileResponse(
             tenant_no=existing.tenant_no,
             tenant_name=existing.tenant_name,
-            purchased_products=existing.purchased_products or ["发票云标准版", "数电发票采集模块"],
+            purchased_products=getattr(existing, "purchased_products", None) or ["发票云标准版", "数电发票采集模块"],
         )
 
     # 3. 兜底默认生成
@@ -1422,21 +1496,19 @@ def client_init_session(
         tenant_no=tenant_no,
         contact_name=contact_name,
         contact_phone=phone,
-        purchased_products=purchased_products or ["发票云标准版"],
-        is_in_service="服务期内",
         unread_count=0,
-        last_message="客户发起了新的在线咨询",
         last_message_at=now,
         created_at=now,
         updated_at=now,
     )
     db.add(session)
+    db.flush()
 
     welcome_msg = ReceptionMessage(
-        session_id=session_id,
+        session_id=session.id,
         sender_type="system",
         sender_name="发票云小助手",
-        content=f"您好！欢迎使用发票云售后在线支持。系统已为您建立会话【{session_id}】，正在为您接入在线专业客服，请稍候...",
+        content=f"您好！欢迎使用发票云售后在线支持。系统已为您建立会话【{session.id}】，正在为您接入在线专业客服，请稍候...",
         is_read=True,
         created_at=now,
     )
@@ -1601,6 +1673,331 @@ def client_evaluate_session(
     return {"status": "ok", "evaluation": body.model_dump()}
 
 
+# -----------------------------------------------------------------------------
+# 消息通知配置 (Notice Management & Client Notices)
+# -----------------------------------------------------------------------------
+
+
+class NoticeItemOut(BaseModel):
+    id: int
+    notice_no: str
+    title: str
+    content: str
+    start_time: str
+    end_time: str
+    start_date: str
+    end_date: str
+    popup_prompt: bool
+    status: str
+    effective_status: str
+    created_by: str
+    created_at: str
+    updated_by: str
+    updated_at: str
+
+
+class NoticeCreateBody(BaseModel):
+    title: str = Field(..., max_length=50)
+    start_date: str
+    end_date: str
+    popup_prompt: bool = True
+    content: str
+
+
+class NoticeUpdateBody(BaseModel):
+    title: str | None = Field(None, max_length=50)
+    start_date: str | None = None
+    end_date: str | None = None
+    popup_prompt: bool | None = None
+    content: str | None = None
+
+
+class BatchNoticeIdsBody(BaseModel):
+    ids: list[int]
+
+
+def generate_notice_no(db: Session) -> str:
+    """生成系统唯一消息编号: INFYYYYMMDD0000"""
+    today_str = datetime.now(UTC).strftime("%Y%m%d")
+    prefix = f"INF{today_str}"
+    last_notice = (
+        db.query(ReceptionNotice.notice_no)
+        .filter(ReceptionNotice.notice_no.like(f"{prefix}%"))
+        .order_by(desc(ReceptionNotice.notice_no))
+        .first()
+    )
+    if last_notice and len(last_notice[0]) >= 15:
+        seq_str = last_notice[0][len(prefix) :]
+        try:
+            seq = int(seq_str) + 1
+        except ValueError:
+            seq = 0
+    else:
+        seq = 0
+    return f"{prefix}{seq:04d}"
+
+
+def parse_date_to_datetime(date_str: str, is_end: bool = False) -> datetime:
+    clean = date_str.strip()
+    if " " in clean:
+        clean = clean.split(" ")[0]
+    if "T" in clean:
+        clean = clean.split("T")[0]
+    parts = [int(p) for p in clean.split("-")]
+    if is_end:
+        return datetime(parts[0], parts[1], parts[2], 23, 59, 59, tzinfo=UTC)
+    else:
+        return datetime(parts[0], parts[1], parts[2], 0, 0, 0, tzinfo=UTC)
+
+
+def format_notice_out(n: ReceptionNotice) -> NoticeItemOut:
+    now = datetime.now(UTC)
+    nst = n.start_time if n.start_time.tzinfo else n.start_time.replace(tzinfo=UTC)
+    net = n.end_time if n.end_time.tzinfo else n.end_time.replace(tzinfo=UTC)
+    is_active = (n.status == "published") and (nst <= now <= net)
+    eff_status = "published" if is_active else "unpublished"
+
+    return NoticeItemOut(
+        id=n.id,
+        notice_no=n.notice_no,
+        title=n.title,
+        content=n.content,
+        start_time=nst.strftime("%Y-%m-%d %H:%M:%S"),
+        end_time=net.strftime("%Y-%m-%d %H:%M:%S"),
+        start_date=nst.strftime("%Y-%m-%d"),
+        end_date=net.strftime("%Y-%m-%d"),
+        popup_prompt=n.popup_prompt,
+        status=n.status,
+        effective_status=eff_status,
+        created_by=n.created_by,
+        created_at=n.created_at.strftime("%Y-%m-%d %H:%M:%S") if n.created_at else "",
+        updated_by=n.updated_by,
+        updated_at=n.updated_at.strftime("%Y-%m-%d %H:%M:%S") if n.updated_at else "",
+    )
+
+
+@router.get("/notices", response_model=list[NoticeItemOut])
+def list_notices(
+    statuses: list[str] = Query(None),
+    start_time: str | None = None,
+    end_time: str | None = None,
+    db: Session = Depends(get_session),
+    _user: AuthedUser = Depends(require_user),
+) -> list[NoticeItemOut]:
+    """获取消息通知列表，支持按状态和创建时间区间筛选，按创建时间倒序返回"""
+    q = db.query(ReceptionNotice)
+    if start_time:
+        try:
+            st = datetime.fromisoformat(start_time.strip().replace(" ", "T"))
+            if st.tzinfo is None:
+                st = st.replace(tzinfo=UTC)
+            q = q.filter(ReceptionNotice.created_at >= st)
+        except Exception:
+            pass
+    if end_time:
+        try:
+            et = datetime.fromisoformat(end_time.strip().replace(" ", "T"))
+            if et.tzinfo is None:
+                et = et.replace(tzinfo=UTC)
+            q = q.filter(ReceptionNotice.created_at <= et)
+        except Exception:
+            pass
+
+    records = q.order_by(desc(ReceptionNotice.created_at)).all()
+    results: list[NoticeItemOut] = []
+
+    valid_statuses = set()
+    if statuses:
+        for s in statuses:
+            if s and s != "all" and s != "不限":
+                valid_statuses.add(s)
+
+    for n in records:
+        item = format_notice_out(n)
+        if valid_statuses and item.effective_status not in valid_statuses:
+            continue
+        results.append(item)
+    return results
+
+
+@router.post("/notices", response_model=NoticeItemOut)
+def create_notice(
+    body: NoticeCreateBody,
+    db: Session = Depends(get_session),
+    user: AuthedUser = Depends(require_user),
+) -> NoticeItemOut:
+    """新建消息通知记录"""
+    if not body.title.strip():
+        raise HTTPException(status_code=400, detail="通知标题不能为空")
+    if not body.start_date.strip() or not body.end_date.strip():
+        raise HTTPException(status_code=400, detail="生效开始日期与结束日期不能为空")
+    if not body.content.strip():
+        raise HTTPException(status_code=400, detail="消息通知内容不能为空")
+
+    st = parse_date_to_datetime(body.start_date, is_end=False)
+    et = parse_date_to_datetime(body.end_date, is_end=True)
+    if st > et:
+        raise HTTPException(status_code=400, detail="生效开始日期不能晚于结束日期")
+
+    notice_no = generate_notice_no(db)
+    now = datetime.now(UTC)
+    operator_name = user.name or "系统管理员"
+
+    notice = ReceptionNotice(
+        notice_no=notice_no,
+        title=body.title.strip(),
+        content=body.content,
+        start_time=st,
+        end_time=et,
+        popup_prompt=body.popup_prompt,
+        status="published",
+        created_by=operator_name,
+        created_at=now,
+        updated_by=operator_name,
+        updated_at=now,
+    )
+    db.add(notice)
+    db.commit()
+    db.refresh(notice)
+    return format_notice_out(notice)
+
+
+@router.get("/notices/{notice_id}", response_model=NoticeItemOut)
+def get_notice_detail(
+    notice_id: int,
+    db: Session = Depends(get_session),
+    _user: AuthedUser = Depends(require_user),
+) -> NoticeItemOut:
+    """获取消息通知详情"""
+    n = db.query(ReceptionNotice).filter(ReceptionNotice.id == notice_id).first()
+    if not n:
+        raise HTTPException(status_code=404, detail="消息通知记录不存在")
+    return format_notice_out(n)
+
+
+@router.put("/notices/{notice_id}", response_model=NoticeItemOut)
+def update_notice(
+    notice_id: int,
+    body: NoticeUpdateBody,
+    db: Session = Depends(get_session),
+    user: AuthedUser = Depends(require_user),
+) -> NoticeItemOut:
+    """编辑/更新消息通知记录"""
+    notice = db.query(ReceptionNotice).filter(ReceptionNotice.id == notice_id).first()
+    if not notice:
+        raise HTTPException(status_code=404, detail="消息通知记录不存在")
+
+    now = datetime.now(UTC)
+    operator_name = user.name or "系统管理员"
+
+    if body.title is not None:
+        if not body.title.strip():
+            raise HTTPException(status_code=400, detail="通知标题不能为空")
+        notice.title = body.title.strip()
+
+    if body.start_date is not None and body.end_date is not None:
+        st = parse_date_to_datetime(body.start_date, is_end=False)
+        et = parse_date_to_datetime(body.end_date, is_end=True)
+        if st > et:
+            raise HTTPException(status_code=400, detail="生效开始日期不能晚于结束日期")
+        notice.start_time = st
+        notice.end_time = et
+
+    if body.popup_prompt is not None:
+        notice.popup_prompt = body.popup_prompt
+
+    if body.content is not None:
+        if not body.content.strip():
+            raise HTTPException(status_code=400, detail="消息通知内容不能为空")
+        notice.content = body.content
+
+    notice.updated_by = operator_name
+    notice.updated_at = now
+    db.commit()
+    db.refresh(notice)
+    return format_notice_out(notice)
+
+
+@router.post("/notices/batch-publish")
+def batch_publish_notices(
+    body: BatchNoticeIdsBody,
+    db: Session = Depends(get_session),
+    user: AuthedUser = Depends(require_user),
+) -> dict[str, Any]:
+    """批量上架消息通知"""
+    if not body.ids:
+        return {"status": "ok", "updated_count": 0}
+
+    now = datetime.now(UTC)
+    operator_name = user.name or "系统管理员"
+    notices = db.query(ReceptionNotice).filter(ReceptionNotice.id.in_(body.ids)).all()
+
+    for n in notices:
+        n.status = "published"
+        net = n.end_time if n.end_time.tzinfo else n.end_time.replace(tzinfo=UTC)
+        if net < now:
+            n.end_time = datetime(now.year, now.month, now.day, 23, 59, 59, tzinfo=UTC)
+        n.updated_by = operator_name
+        n.updated_at = now
+
+    db.commit()
+    return {"status": "ok", "updated_count": len(notices)}
+
+
+@router.post("/notices/batch-unpublish")
+def batch_unpublish_notices(
+    body: BatchNoticeIdsBody,
+    db: Session = Depends(get_session),
+    user: AuthedUser = Depends(require_user),
+) -> dict[str, Any]:
+    """批量下架消息通知"""
+    if not body.ids:
+        return {"status": "ok", "updated_count": 0}
+
+    now = datetime.now(UTC)
+    operator_name = user.name or "系统管理员"
+    notices = db.query(ReceptionNotice).filter(ReceptionNotice.id.in_(body.ids)).all()
+
+    for n in notices:
+        n.status = "unpublished"
+        n.updated_by = operator_name
+        n.updated_at = now
+
+    db.commit()
+    return {"status": "ok", "updated_count": len(notices)}
+
+
+@router.post("/notices/batch-delete")
+def batch_delete_notices(
+    body: BatchNoticeIdsBody,
+    db: Session = Depends(get_session),
+    _user: AuthedUser = Depends(require_user),
+) -> dict[str, Any]:
+    """批量删除已下架的消息通知（若选中的记录包含上架状态则拒绝删除）"""
+    if not body.ids:
+        return {"status": "ok", "deleted_count": 0}
+
+    now = datetime.now(UTC)
+    notices = db.query(ReceptionNotice).filter(ReceptionNotice.id.in_(body.ids)).all()
+
+    for n in notices:
+        nst = n.start_time if n.start_time.tzinfo else n.start_time.replace(tzinfo=UTC)
+        net = n.end_time if n.end_time.tzinfo else n.end_time.replace(tzinfo=UTC)
+        is_active = (n.status == "published") and (nst <= now <= net)
+        if is_active:
+            raise HTTPException(
+                status_code=400,
+                detail=f"消息【{n.notice_no}】当前处于上架状态，请先下架后再删除！",
+            )
+
+    deleted_count = len(notices)
+    for n in notices:
+        db.delete(n)
+
+    db.commit()
+    return {"status": "ok", "deleted_count": deleted_count}
+
+
 class ClientNoticeOut(BaseModel):
     id: str
     title: str
@@ -1609,11 +2006,42 @@ class ClientNoticeOut(BaseModel):
     publish_time: str
     publisher: str = "金蝶发票云服务团队"
     category: str = "系统通知"
+    popup_prompt: bool = True
 
 
 @router.get("/client/notices", response_model=list[ClientNoticeOut])
-def client_get_notices() -> list[ClientNoticeOut]:
-    """获取面向客户端的重要通知列表（卡片展示与详情弹窗，特别重要通知标记 is_important=True）"""
+def client_get_notices(db: Session = Depends(get_session)) -> list[ClientNoticeOut]:
+    """获取面向客户端的重要通知列表（从数据库拉取当前上架且在生效期内的通知）"""
+    now = datetime.now(UTC)
+    notices = (
+        db.query(ReceptionNotice)
+        .filter(
+            ReceptionNotice.status == "published",
+            ReceptionNotice.start_time <= now,
+            ReceptionNotice.end_time >= now,
+        )
+        .order_by(desc(ReceptionNotice.created_at))
+        .all()
+    )
+    if notices:
+        results: list[ClientNoticeOut] = []
+        for n in notices:
+            st = n.start_time if n.start_time.tzinfo else n.start_time.replace(tzinfo=UTC)
+            results.append(
+                ClientNoticeOut(
+                    id=n.notice_no,
+                    title=n.title,
+                    content=n.content,
+                    is_important=True,
+                    publish_time=st.strftime("%Y-%m-%d %H:%M"),
+                    publisher=n.created_by or "金蝶发票云服务团队",
+                    category="重要通知",
+                    popup_prompt=n.popup_prompt,
+                )
+            )
+        return results
+
+    # 数据库尚无记录时的默认种子通知
     return [
         ClientNoticeOut(
             id="NOTICE-20260921-01",
@@ -1623,6 +2051,7 @@ def client_get_notices() -> list[ClientNoticeOut]:
             publish_time="2026-09-21 10:00",
             publisher="国家税务总局运维中心",
             category="系统维护",
+            popup_prompt=False,
         ),
         ClientNoticeOut(
             id="NOTICE-20260918-02",
@@ -1632,23 +2061,7 @@ def client_get_notices() -> list[ClientNoticeOut]:
             publish_time="2026-09-18 09:30",
             publisher="金蝶发票云服务团队",
             category="征期保障",
-        ),
-        ClientNoticeOut(
-            id="NOTICE-20260915-03",
-            title="关于近期增值税发票合规开具与风险防范温馨提示",
-            content="近期各省税务局加大对异常大额发票及开票品目与企业经营范围不符的动态监控力度。金蝶发票云已全新上线「AI 智能风控开票插件」，支持开票前自动校验黑名单客户、异常开票额度预警。建议企业开票人员在系统设置中开启合规自检功能，确保业务发票合规开具与入账。",
-            is_important=False,
-            publish_time="2026-09-15 14:20",
-            publisher="税务合规运营中心",
-            category="业务指引",
-        ),
-        ClientNoticeOut(
-            id="NOTICE-20260910-04",
-            title="金蝶发票云在线技术支持客户端升级公告",
-            content="发票云在线技术支持客户端已全面完成升级，支持历史会话无缝续接、多企业身份快速切换、工单进度实时追踪及图文附件拖拽发送。同时新增重要通知实时播报面板，欢迎广大企业客户体验更高效、敏捷的专家支持服务！",
-            is_important=False,
-            publish_time="2026-09-10 11:00",
-            publisher="产品发布中心",
-            category="产品动态",
+            popup_prompt=False,
         ),
     ]
+

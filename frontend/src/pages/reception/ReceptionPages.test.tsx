@@ -2,8 +2,9 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AgentsPage } from "./AgentsPage";
-import { SessionListPage } from "./SessionListPage";
+import { formatDateTime, SessionListPage } from "./SessionListPage";
 import { ReceptionWorkbenchPage } from "./ReceptionWorkbenchPage";
+import { notifySessionCreated } from "./receptionApi";
 
 describe("Reception Management Pages", () => {
   beforeEach(() => {
@@ -256,6 +257,105 @@ describe("Reception Management Pages", () => {
       });
 
       clickSpy.mockRestore();
+    });
+
+    it("renders refresh button next to export button and refreshes data on click", async () => {
+      render(
+        <MemoryRouter>
+          <SessionListPage />
+        </MemoryRouter>
+      );
+
+      // 验证导出按钮后面紧跟着刷新按钮
+      const exportBtn = screen.getByRole("button", { name: /^导出$/ });
+      const refreshBtn = screen.getByRole("button", { name: /刷新/ });
+      expect(refreshBtn).toBeInTheDocument();
+      expect(exportBtn.nextElementSibling).toBe(refreshBtn);
+
+      // 点击刷新按钮
+      fireEvent.click(refreshBtn);
+      expect(await screen.findByText("ZXHH202609180001")).toBeInTheDocument();
+    });
+
+    it("automatically updates session list when a new session is created and broadcasted", async () => {
+      render(
+        <MemoryRouter>
+          <SessionListPage />
+        </MemoryRouter>
+      );
+
+      expect(await screen.findByText("ZXHH202609180001")).toBeInTheDocument();
+
+      // 模拟客户端发起新会话并写入本地与广播
+      const newSessionItem = {
+        id: "ZXHH202609239999",
+        company_name: "实时新增测试科技有限公司",
+        tax_no: "91330100MA99TEST99",
+        tenant_name: "测试云租户",
+        tenant_no: "T-TEST-01",
+        contact_name: "王先生",
+        contact_phone: "13900001111",
+        status: "queue" as const,
+        session_type: "online" as const,
+        is_human: true,
+        agent_name: "在线待分配",
+        purchased_products: ["数电发票云"],
+        is_in_service: "服务期内",
+        unread_count: 0,
+        last_message: "发起了新咨询",
+        last_message_at: "2026-09-23 18:20:00",
+        created_at: "2026-09-23 18:20:00",
+        updated_at: "2026-09-23 18:20:00",
+      };
+
+      const curSessions = JSON.parse(localStorage.getItem("reception_sessions") || "[]");
+      curSessions.unshift(newSessionItem);
+      localStorage.setItem("reception_sessions", JSON.stringify(curSessions));
+
+      notifySessionCreated(newSessionItem);
+
+      // 验证座席端会话列表自动刷新并呈现新会话
+      await waitFor(() => {
+        expect(screen.getByText("ZXHH202609239999")).toBeInTheDocument();
+        expect(screen.getByText("实时新增测试科技有限公司")).toBeInTheDocument();
+      });
+    });
+
+    it("strictly formats created_at as yyyy-mm-dd hh:mm and displays sessions in descending order by created_at", async () => {
+      // 1. 验证 formatDateTime 函数逻辑
+      expect(formatDateTime("2026-09-23T18:20:15.123+08:00")).toBe("2026-09-23 18:20");
+      expect(formatDateTime("2026-09-18 14:40:00")).toBe("2026-09-18 14:40");
+      expect(formatDateTime("")).toBe("—");
+      expect(formatDateTime(null)).toBe("—");
+
+      // 2. 验证前端列表展示的时间格式
+      render(
+        <MemoryRouter>
+          <SessionListPage />
+        </MemoryRouter>
+      );
+
+      // 等待第一条渲染完成
+      await screen.findByText("ZXHH202609180001");
+
+      // 提取表格中所有的创建时间单元格
+      const timeCells = screen.getAllByText(/^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}$/);
+      expect(timeCells.length).toBeGreaterThan(0);
+
+      // 确保每一个渲染出的时间格式严格为 16 位字符且无 T
+      timeCells.forEach((cell) => {
+        const text = cell.textContent || "";
+        expect(text).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+        expect(text).not.toContain("T");
+        expect(text.length).toBe(16);
+      });
+
+      // 3. 验证列表按照创建时间倒序排列（第 i 条时间 >= 第 i+1 条时间）
+      for (let i = 0; i < timeCells.length - 1; i++) {
+        const t1 = timeCells[i].textContent || "";
+        const t2 = timeCells[i + 1].textContent || "";
+        expect(t1.localeCompare(t2)).toBeGreaterThanOrEqual(0);
+      }
     });
   });
 

@@ -255,6 +255,11 @@ export function CustomerChatWorkbenchPage({
         setSessionsGroup(sessionsRes);
         if (noticesRes && noticesRes.length > 0) {
           setNotices(noticesRes);
+          // 弹窗提示：若存在上架且配置为弹窗提示的通知，客户进入工作台时直接打开弹窗
+          const popupNotice = noticesRes.find((n) => n.popup_prompt);
+          if (popupNotice) {
+            setSelectedNotice(popupNotice);
+          }
         }
 
         // 1. 尝试识别当前操作窗口绑定的活动会话（页面刷新/重载/未关闭窗口生命周期）
@@ -286,6 +291,19 @@ export function CustomerChatWorkbenchPage({
             if (isMounted) setMessages(msgs.length ? msgs : initialMessages);
             setTimeout(scrollToBottom, 50);
             return;
+          } else if (!fresh) {
+            // 如果刚从录入页建立会话或服务端尚未落库，优先激活当前窗口绑定的初始会话
+            if (initialSession && initialSession.id === activeSessionInWindow.id) {
+              setCurrentSession(initialSession);
+              syncSessionToStorage(initialSession);
+              if (initialMessages && initialMessages.length > 0) {
+                setMessages(initialMessages);
+              }
+              setTimeout(scrollToBottom, 50);
+              return;
+            }
+            sessionStorage.removeItem(STORAGE_SESSION_KEY);
+            setCurrentSession(null);
           }
         }
 
@@ -455,13 +473,45 @@ export function CustomerChatWorkbenchPage({
           const quoteContent = quotedMessage.content.replace(/\n/g, " ").slice(0, 100);
           textToSend = `「引用 ${quoteSender}: ${quoteContent}」\n${textToSend}`;
         }
-        const textMsg = await clientSendMessage(
-          activeSession.id,
-          textToSend,
-          profile.contact_name
-        );
-        setMessages((prev) => [...prev, textMsg]);
-        setQuotedMessage(null);
+        try {
+          const textMsg = await clientSendMessage(
+            activeSession.id,
+            textToSend,
+            profile.contact_name
+          );
+          setMessages((prev) => [...prev, textMsg]);
+          setQuotedMessage(null);
+        } catch (sendErr: any) {
+          // 如果发送消息报会话不存在（比如本地旧的异常假会话），则自动重新初始化真实会话并重试发送！
+          if (
+            sendErr?.status === 404 ||
+            sendErr?.message?.includes("会话不存在") ||
+            sendErr?.message?.includes("404")
+          ) {
+            const reInit = await clientInitSession({
+              contact_name: profile.contact_name,
+              contact_phone: profile.contact_phone,
+              company_name: profile.company_name,
+              tax_no: profile.tax_no,
+              tenant_name: profile.tenant_name,
+              tenant_no: profile.tenant_no,
+              purchased_products: profile.purchased_products,
+              is_historical: false,
+            });
+            activeSession = reInit.session;
+            setCurrentSession(activeSession);
+            syncSessionToStorage(activeSession);
+            const retryMsg = await clientSendMessage(
+              activeSession.id,
+              textToSend,
+              profile.contact_name
+            );
+            setMessages((prev) => [...prev, retryMsg]);
+            setQuotedMessage(null);
+          } else {
+            throw sendErr;
+          }
+        }
       }
 
       // 发送附件
@@ -759,7 +809,7 @@ export function CustomerChatWorkbenchPage({
                   </div>
 
                   <p className="text-[13px] text-[#666666] line-clamp-2 leading-relaxed">
-                    {notice.content}
+                    {notice.content.replace(/<[^>]+>/g, "").trim()}
                   </p>
 
                   <div className="flex items-center justify-between text-[12px] text-slate-400 pt-1.5 border-t border-slate-100">
@@ -1450,10 +1500,11 @@ export function CustomerChatWorkbenchPage({
               </button>
             </div>
 
-            {/* 弹窗正文（自适应滚动） */}
-            <div className="flex-1 overflow-y-auto p-8 text-[15px] text-slate-700 leading-relaxed whitespace-pre-wrap">
-              {selectedNotice.content}
-            </div>
+            {/* 弹窗正文（自适应滚动，支持富文本/HTML格式） */}
+            <div
+              className="flex-1 overflow-y-auto p-8 text-[15px] text-slate-700 leading-relaxed break-words"
+              dangerouslySetInnerHTML={{ __html: selectedNotice.content }}
+            />
 
             {/* 弹窗底部操作 */}
             <div className="border-t border-slate-200 px-6 py-4 flex justify-end bg-slate-50 flex-none">

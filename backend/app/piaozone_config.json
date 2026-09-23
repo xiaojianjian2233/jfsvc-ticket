@@ -1,6 +1,14 @@
 {
-  "_description": "基础平台-RPA订单系统接口配置（按企业名称或税号查询租户信息）",
+  "_description": "基础平台-RPA订单系统及企业抬头接口配置",
   "active_env": "sit",
+  "company_title": {
+    "host": "https://title.piaozone.com",
+    "endpoint": "/bill/query/querytitles",
+    "client_id": "XXzM8oZ1FQGLJxZ-YK_svomMUA8",
+    "client_secret": "5KcLc2OK2hIrsnbZOR4EzzM1dEM",
+    "encrypt_key": "kgr92kHxXNKIU6Cw",
+    "description": "发票云企业抬头及税号模糊查询接口（单一环境）"
+  },
   "rpa_platform": {
     "sit": {
       "host": "https://api-sit.piaozone.com",

@@ -8,6 +8,9 @@ import {
   batchReviewKnowledge,
   batchOfflineKnowledge,
   batchOnlineKnowledge,
+  formatDateTime,
+  normalizeDateTime,
+  sortKnowledgeItemsDesc,
   KNOWLEDGE_BASE_UPDATED_EVENT,
   type KnowledgeItem,
   KNOWLEDGE_STATUS_LABELS,
@@ -263,8 +266,9 @@ export function KnowledgeBasePage() {
       .then((res: any) => {
         if (cancelled) return;
         if (res && Array.isArray(res.items) && res.items.length > 0) {
-          setItems(res.items);
-          saveKnowledgeItems(res.items);
+          const sorted = sortKnowledgeItemsDesc(res.items);
+          setItems(sorted);
+          saveKnowledgeItems(sorted);
         }
       })
       .catch((err) => {
@@ -330,7 +334,7 @@ export function KnowledgeBasePage() {
 
   // ---- 数据过滤 ----
   const displayedItems = useMemo(() => {
-    return items.filter((item) => {
+    const filtered = items.filter((item) => {
       // 1. 产品线多选平铺过滤
       if (
         selectedProductLines.length > 0 &&
@@ -354,11 +358,12 @@ export function KnowledgeBasePage() {
       if (creatorFilter.trim() && !item.created_by.includes(creatorFilter.trim())) {
         return false;
       }
-      // 5. 创建时间起止区间过滤
-      if (createStartDate && item.created_at < `${createStartDate} 00:00:00`) {
+      // 5. 创建时间起止区间过滤（归一化去除 T，避免 ASCII 比较错误）
+      const itemCreated = normalizeDateTime(item.created_at);
+      if (createStartDate && itemCreated < `${createStartDate} 00:00:00`) {
         return false;
       }
-      if (createEndDate && item.created_at > `${createEndDate} 23:59:59`) {
+      if (createEndDate && itemCreated > `${createEndDate} 23:59:59`) {
         return false;
       }
       // 6. 审核人过滤
@@ -369,17 +374,20 @@ export function KnowledgeBasePage() {
         return false;
       }
       // 7. 审核通过时间起止区间过滤
+      const itemReviewed = normalizeDateTime(item.reviewed_at);
       if (
         reviewStartDate &&
-        (!item.reviewed_at || item.reviewed_at < `${reviewStartDate} 00:00:00`)
+        (!itemReviewed || itemReviewed < `${reviewStartDate} 00:00:00`)
       ) {
         return false;
       }
-      if (reviewEndDate && (!item.reviewed_at || item.reviewed_at > `${reviewEndDate} 23:59:59`)) {
+      if (reviewEndDate && (!itemReviewed || itemReviewed > `${reviewEndDate} 23:59:59`)) {
         return false;
       }
       return true;
     });
+    // 严格按照创建时间倒序排
+    return sortKnowledgeItemsDesc(filtered);
   }, [
     items,
     selectedProductLines,
@@ -952,7 +960,9 @@ export function KnowledgeBasePage() {
                         style={{ width: 150, minWidth: 150, maxWidth: 150 }}
                         className="px-3 py-2 border-b border-hub-borderLight text-slate-500 font-mono text-[11.5px] whitespace-nowrap overflow-hidden text-ellipsis"
                       >
-                        <span className="truncate block">{item.created_at}</span>
+                        <span className="truncate block" title={formatDateTime(item.created_at)}>
+                          {formatDateTime(item.created_at)}
+                        </span>
                       </td>
 
                       {/* 11. 审核人 */}
@@ -968,7 +978,9 @@ export function KnowledgeBasePage() {
                         style={{ width: 150, minWidth: 150, maxWidth: 150 }}
                         className="px-3 py-2 border-b border-hub-borderLight text-slate-500 font-mono text-[11.5px] whitespace-nowrap overflow-hidden text-ellipsis"
                       >
-                        <span className="truncate block">{item.reviewed_at ?? "—"}</span>
+                        <span className="truncate block" title={formatDateTime(item.reviewed_at)}>
+                          {formatDateTime(item.reviewed_at)}
+                        </span>
                       </td>
 
                       {/* 13. 总调用次数 */}
