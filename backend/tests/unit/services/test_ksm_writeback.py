@@ -1056,3 +1056,196 @@ def test_reply_does_not_override_node_when_refresh_succeeds(world: Session) -> N
     report = drain_ksm_outbox(world, client=client, notice_store=store, settings=_settings())
     assert report.sent == 1
     assert client.handles[0].node_id == "NODE-NEW"
+
+
+# Same-node return compensation: match the ticket handler's KSM number, not name.
+def _compensation_step(**overrides: object) -> dict:
+    return {
+        "nodeName": "受理",
+        "nodeId": "NODE-OLD",
+        "opercacheId": "ACCEPT-LATEST",
+        "handleDateTime": "2026-09-22 18:02:02",
+        "assignUser": {"number": "B-62454", "realname": "颜明霞"},
+        "handleInfo": {"action": ""},
+        **overrides,
+    }
+
+
+def _compensation_world(world: Session, **user_overrides: object):
+    from app.models import User
+
+    user = User(
+        **{
+            "feishu_uid": "return-handler",
+            "name": "颜明霞",
+            "employee_no": "B-62454",
+            "role": "assignee",
+            **user_overrides,
+        }
+    )
+    world.add(user)
+    world.commit()
+    hub = _hub(world)
+    ticket = _ticket(world, hub, handler_user_id=user.id, ksm_takeover_status="handled")
+    row = _outbox(world, ticket, hub, kind="return", payload={"deal_opinion": "转出"})
+    return ticket, row
+
+
+def test_same_node_return_compensates_to_latest_handler_acceptance(world: Session) -> None:
+    ticket, row = _compensation_world(world)
+    client = FakeKSMClient(
+        detail={
+            **_SUBSCRIBE,
+            "handleSteps": [
+                _compensation_step(),
+                _compensation_step(opercacheId="OLDER", handleDateTime="2026-09-22 18:02:00"),
+                _compensation_step(
+                    opercacheId="SYSTEM",
+                    handleDateTime="2026-09-22 18:03:00",
+                    handleInfo={"action": "智能分单"},
+                ),
+            ],
+        }
+    )
+    report = drain_ksm_outbox(
+        world, client=client, notice_store=_return_notice_store(), settings=_settings()
+    )
+    assert report.sent == 1
+    assert not client.locks
+    assert client.returns[0].opercache_id == "ACCEPT-LATEST"
+    assert ticket.status == "transferred_return"
+    assert row.payload["_ksm_return_compensation_account"] == "B-62454"
+    assert row.payload["_ksm_return_target_node_id"] == "NODE-OLD"
+    assert row.payload["_ksm_return_opercache_id"] == "ACCEPT-LATEST"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"assignUser": {"number": "OTHER", "realname": "颜明霞"}},
+        {"assignUser": None},
+        {"nodeName": "协同处理"},
+        {"nodeName": None},
+        {"handleInfo": {"action": "模块变更"}},
+        {"opercacheId": ""},
+        {"handleDateTime": "bad-date"},
+    ],
+)
+def test_compensation_rejects_unusable_or_other_handler_records(
+    world: Session, overrides: dict
+) -> None:
+    ticket, row = _compensation_world(world)
+    client = FakeKSMClient(detail={**_SUBSCRIBE, "handleSteps": [_compensation_step(**overrides)]})
+    report = drain_ksm_outbox(
+        world, client=client, notice_store=_return_notice_store(), settings=_settings()
+    )
+    assert report.sent == 0
+    assert not client.returns
+    assert ticket.status == "received"
+    assert "_ksm_return_compensation_account" not in row.payload
+
+
+def test_compensation_never_uses_global_identity(world: Session) -> None:
+    _compensation_world(world, employee_no=None)
+    client = FakeKSMClient(
+        detail={**_SUBSCRIBE, "handleSteps": [_compensation_step(assignUser={"number": "10086"})]}
+    )
+    report = drain_ksm_outbox(
+        world, client=client, notice_store=_return_notice_store(), settings=_settings()
+    )
+    assert report.sent == 0
+    assert not client.returns
+
+
+def test_compensation_prefers_explicit_ksm_account(world: Session) -> None:
+    _compensation_world(world, ksm_account="KSM-1")
+    client = FakeKSMClient(
+        detail={**_SUBSCRIBE, "handleSteps": [_compensation_step(assignUser={"number": "KSM-1"})]}
+    )
+    assert (
+        drain_ksm_outbox(
+            world, client=client, notice_store=_return_notice_store(), settings=_settings()
+        ).sent
+        == 1
+    )
+
+
+def test_normal_return_target_takes_precedence(world: Session) -> None:
+    _, row = _compensation_world(world)
+    client = FakeKSMClient(
+        detail={
+            **_SUBSCRIBE,
+            "handleSteps": [
+                _compensation_step(),
+                _compensation_step(
+                    nodeId="PREVIOUS", opercacheId="NORMAL", assignUser={"number": "OTHER"}
+                ),
+            ],
+        }
+    )
+    assert (
+        drain_ksm_outbox(
+            world, client=client, notice_store=_return_notice_store(), settings=_settings()
+        ).sent
+        == 1
+    )
+    assert client.returns[0].opercache_id == "NORMAL"
+    assert row.payload["_ksm_return_compensation_account"] == ""
+
+
+def test_compensation_does_not_use_stale_snapshot(world: Session) -> None:
+    ticket, _ = _compensation_world(world)
+    ticket.source_payload = {
+        "_subscribe_callback": {**_SUBSCRIBE, "handleSteps": [_compensation_step()]}
+    }
+    world.commit()
+    client = FakeKSMClient()
+    report = drain_ksm_outbox(
+        world, client=client, notice_store=FakeNoticeStore(), settings=_settings()
+    )
+    assert report.sent == 0
+    assert not client.returns
+
+
+def test_compensation_does_not_guess_between_tied_targets(world: Session) -> None:
+    _compensation_world(world)
+    client = FakeKSMClient(
+        detail={
+            **_SUBSCRIBE,
+            "handleSteps": [_compensation_step(), _compensation_step(opercacheId="TIED")],
+        }
+    )
+    assert (
+        drain_ksm_outbox(
+            world, client=client, notice_store=_return_notice_store(), settings=_settings()
+        ).sent
+        == 0
+    )
+    assert not client.returns
+
+
+def test_compensation_requires_target_node_id() -> None:
+    from app.services.ksm.writeback import _handler_return_target
+
+    with pytest.raises(ValueError, match="有效 KSM 受理记录"):
+        _handler_return_target({"handleSteps": [_compensation_step(nodeId="")]}, "B-62454")
+
+
+def test_compensation_external_failure_does_not_mark_success(world: Session, monkeypatch) -> None:
+    from adapters.ksm import KSMError
+
+    ticket, row = _compensation_world(world)
+    client = FakeKSMClient(detail={**_SUBSCRIBE, "handleSteps": [_compensation_step()]})
+
+    def fail_return(req):
+        raise KSMError("KSM rejected return")
+
+    monkeypatch.setattr(client, "return_order", fail_return)
+    report = drain_ksm_outbox(
+        world, client=client, notice_store=_return_notice_store(), settings=_settings()
+    )
+    assert report.sent == 0
+    assert ticket.status == "received"
+    assert row.sent_at is None
+    assert "_ksm_return_compensation_account" not in row.payload
+    assert "KSM rejected return" in row.last_error

@@ -110,6 +110,7 @@ class _KSMFields:
     # 与 opercache_id 对应的退回目标节点。成功退回后写入 outbox
     # payload，供入站回推区分「退回动作本身的回声」与「后续真实重新分派」。
     return_target_node_id: str = ""
+    return_compensation_account: str = ""
 
 
 def _s(v: Any) -> str:
@@ -155,6 +156,44 @@ def _previous_node_target(detail: dict[str, Any]) -> tuple[str, str]:
     candidates.sort(key=lambda h: _s(h.get("handleDateTime")))
     target = candidates[-1]
     return _s(target.get("opercacheId")), _s(target.get("nodeId"))
+
+
+def _handler_return_target(detail: dict[str, Any], account_number: str) -> tuple[str, str]:
+    """补偿目标只取当前处理人的真实受理操作，不按姓名或全局账号猜测。"""
+    steps = detail.get("handleSteps")
+    candidates = []
+    for step in steps if isinstance(steps, list) else []:
+        if not isinstance(step, dict):
+            continue
+        user = step.get("assignUser")
+        info = step.get("handleInfo") or {}
+        if (
+            not account_number.strip()
+            or not isinstance(user, dict)
+            or _s(user.get("number")).strip() != account_number.strip()
+            or _s(step.get("nodeName")).strip() != "受理"
+            or not isinstance(info, dict)
+            or _s(info.get("action")).strip() not in ("", "受理", "接管")
+            or not _s(step.get("nodeId")).strip()
+            or not _s(step.get("opercacheId")).strip()
+        ):
+            continue
+        try:
+            timestamp = datetime.strptime(_s(step.get("handleDateTime")), "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+        candidates.append((timestamp, step))
+    if not candidates:
+        raise ValueError("未找到当前工单处理人的有效 KSM 受理记录，无法补偿退回")
+    latest_time = max(timestamp for timestamp, _ in candidates)
+    targets = {
+        (_s(step["opercacheId"]), _s(step["nodeId"]))
+        for timestamp, step in candidates
+        if timestamp == latest_time
+    }
+    if len(targets) != 1:
+        raise ValueError("当前处理人最新受理记录存在多个目标，无法确定补偿退回节点")
+    return targets.pop()
 
 
 def _previous_node_opercache_id(detail: dict[str, Any]) -> str:
@@ -449,6 +488,8 @@ class KSMWritebackSender:
             # 不能把未生效的目标节点写入 outbox 并被后续回推误用。
             row.payload = {
                 **(row.payload or {}),
+                "_ksm_return_opercache_id": fresh.opercache_id,
+                "_ksm_return_compensation_account": fresh.return_compensation_account,
                 "_ksm_return_source_node_id": fresh.node_id,
                 "_ksm_return_target_node_id": fresh.return_target_node_id,
                 "_ksm_return_product_id": fresh.product_id,
@@ -646,10 +687,33 @@ class KSMWritebackSender:
         node = detail.get("node")
         if isinstance(node, dict):
             node_id = _s(node.get("id"))
+        compensation_account = ""
         try:
             opercache_id, target_node_id = _previous_node_target(detail)
-        except ValueError as e:
-            raise KSMError(f"{e}: bill_id={fields.bill_id}") from e
+        except ValueError as normal_error:
+            identity = (
+                resolve_ksm_identity(self._db, ticket, self._settings)
+                if ticket is not None
+                else None
+            )
+            if identity is None or identity.source != "handler":
+                raise KSMError(
+                    f"{normal_error}；当前处理人缺少有效 KSM 账号，无法补偿退回: bill_id={fields.bill_id}"
+                ) from normal_error
+            try:
+                opercache_id, target_node_id = _handler_return_target(
+                    detail, identity.account_number
+                )
+            except ValueError as e:
+                raise KSMError(f"{e}: bill_id={fields.bill_id}") from e
+            compensation_account = identity.account_number
+            logger.info(
+                "ksm_return_handler_compensation",
+                bill_id=fields.bill_id,
+                ticket_id=ticket.id if ticket else None,
+                target_opercache_id=opercache_id,
+                target_node_id=target_node_id,
+            )
         if not node_id:
             raise KSMError(f"退回目标节点计算失败（缺当前节点 id）: bill_id={fields.bill_id}")
         return replace(
@@ -657,6 +721,7 @@ class KSMWritebackSender:
             node_id=node_id,
             opercache_id=opercache_id,
             return_target_node_id=target_node_id,
+            return_compensation_account=compensation_account,
         )
 
     def _return_target_from_snapshot(
