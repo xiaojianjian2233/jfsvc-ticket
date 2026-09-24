@@ -623,7 +623,7 @@ describe("Reception Management Pages", () => {
       expect(expireDateCells[0]).toHaveClass("text-[12px]", "font-normal", "whitespace-nowrap");
     });
 
-    it("switches to pending tab when clicking suspend and switches to closed tab when clicking close", async () => {
+    it("stays on in_progress tab when clicking suspend or close", async () => {
       // Mock window.confirm
       window.confirm = () => true;
 
@@ -640,10 +640,12 @@ describe("Reception Management Pages", () => {
       // 点击挂起
       fireEvent.click(suspendBtn);
 
-      // 验证是否切换到了「挂起」Tab
+      // 验证仍然停留在「进行中」Tab，不跳转到挂起或已结束
       await waitFor(() => {
+        const inProgressTabBtn = screen.getByRole("button", { name: /进行中 \(\d+\)/ });
+        expect(inProgressTabBtn).toHaveClass("border-teal-600");
         const pendingTabBtn = screen.getByRole("button", { name: /挂起 \(\d+\)/ });
-        expect(pendingTabBtn).toHaveClass("border-teal-600");
+        expect(pendingTabBtn).not.toHaveClass("border-teal-600");
       });
     });
   });

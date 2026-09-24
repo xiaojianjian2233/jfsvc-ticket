@@ -179,18 +179,6 @@ export function ReceptionWorkbenchPage() {
           selectSession(foundInTab);
           return;
         }
-        // 全局搜索
-        const found =
-          data.sessions.online_in_progress.find((x) => x.id === preserveActiveId) ||
-          data.sessions.online_queue.find((x) => x.id === preserveActiveId) ||
-          data.sessions.online_pending.find((x) => x.id === preserveActiveId) ||
-          data.sessions.online_closed.find((x) => x.id === preserveActiveId) ||
-          data.sessions.hotline_answered.find((x) => x.id === preserveActiveId) ||
-          data.sessions.hotline_missed.find((x) => x.id === preserveActiveId);
-        if (found) {
-          selectSession(found);
-          return;
-        }
       }
 
       if (candidateList.length > 0) {
@@ -237,21 +225,34 @@ export function ReceptionWorkbenchPage() {
         if (isMounted && wbData) {
           setWorkbenchData(wbData);
 
+          let candidateList: SessionItem[] = [];
+          if (mainTab === "online") {
+            if (onlineSubTab === "in_progress") candidateList = wbData.sessions.online_in_progress;
+            else if (onlineSubTab === "queue") candidateList = wbData.sessions.online_queue;
+            else if (onlineSubTab === "pending") candidateList = wbData.sessions.online_pending;
+            else candidateList = wbData.sessions.online_closed;
+          } else {
+            if (hotlineSubTab === "answered") candidateList = wbData.sessions.hotline_answered;
+            else candidateList = wbData.sessions.hotline_missed;
+          }
+
           // 若当前没有任何选中的会话，且当前列表有候选项，自动选中第一项
           if (!curSessionId) {
-            let candidateList: SessionItem[] = [];
-            if (mainTab === "online") {
-              if (onlineSubTab === "in_progress") candidateList = wbData.sessions.online_in_progress;
-              else if (onlineSubTab === "queue") candidateList = wbData.sessions.online_queue;
-              else if (onlineSubTab === "pending") candidateList = wbData.sessions.online_pending;
-              else candidateList = wbData.sessions.online_closed;
-            } else {
-              if (hotlineSubTab === "answered") candidateList = wbData.sessions.hotline_answered;
-              else candidateList = wbData.sessions.hotline_missed;
-            }
             if (candidateList.length > 0) {
               selectSession(candidateList[0]);
               return;
+            }
+          } else {
+            // 如果当前选中的会话已不再当前列表（例如被外部关闭或挂起）
+            const stillInList = candidateList.some((x) => x.id === curSessionId);
+            if (!stillInList) {
+              if (candidateList.length > 0) {
+                selectSession(candidateList[0]);
+                return;
+              } else {
+                setActiveSession(null);
+                setActiveMessages([]);
+              }
             }
           }
         }
@@ -583,9 +584,8 @@ export function ReceptionWorkbenchPage() {
     if (!activeSession) return;
     const sessionId = activeSession.id;
     await suspendSession(sessionId);
-    isActionSwitchingRef.current = true;
-    setOnlineSubTab("pending");
-    await loadWorkbench(sessionId, "pending");
+    // 挂起后停留在当前会话列表（进行中），不跳转到挂起会话列表
+    await loadWorkbench();
   };
 
   // 操作区：激活
@@ -606,9 +606,8 @@ export function ReceptionWorkbenchPage() {
     await closeSession(sessionId);
     // 释放容量后触发自动补位分流
     await autoDispatchQueueSessions().catch(() => {});
-    isActionSwitchingRef.current = true;
-    setOnlineSubTab("closed");
-    await loadWorkbench(sessionId, "closed");
+    // 关闭后停留在当前会话列表（进行中），不跳转到已结束会话列表
+    await loadWorkbench();
   };
 
   // 操作区：转工单（转工单后自动补位排队会话）
@@ -619,9 +618,8 @@ export function ReceptionWorkbenchPage() {
     await transferTicket(sessionId, { title: activeSession.summary || "在线会话转派" });
     // 释放容量后触发自动补位分流
     await autoDispatchQueueSessions().catch(() => {});
-    isActionSwitchingRef.current = true;
-    setOnlineSubTab("closed");
-    await loadWorkbench(sessionId, "closed");
+    // 转工单后停留在当前会话列表（进行中），不跳转到已结束会话列表
+    await loadWorkbench();
   };
 
   // --------------------------------------------------------------------------
