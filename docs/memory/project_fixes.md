@@ -91,3 +91,15 @@ metadata:
 **问题**：在线接待工作台的“挂起会话”和“转工单”接口读取 `AuthedUser.id`，但登录用户对象只提供 `user_id`，调用时触发 `AttributeError` 并返回 HTTP 500；“转工单”接口还误用了不存在的请求模型 `ConvertTicketBody`，导致合法请求返回 HTTP 422。
 
 **修复**：两处坐席查询统一改用 `user.user_id`，与其它接待接口和鉴权模型字段保持一致；转工单请求模型改为已定义且与前端契约一致的 `TransferTicketBody`，并通过接待工作台全流程回归测试。
+
+## KSM 退回后被误重新接管（2026-09-24）
+
+**问题**：工单调用 `returnKsmOrder` 成功后，KSM 会紧接着回推两条 `status=2` 的流转通知。入站逻辑把「已退回后的任意非 4/6 回推」都视为真实重新分派，将本地状态从 `transferred_return` 恢复为 `processing`，随后又执行 `lockKsmOrder`/`handleKsmOrder`，把 KSM 节点从退回目标拽回「协同处理」。
+
+**修复**：
+- 退回成功后在 return outbox 中记录退回源节点、目标节点以及当时的产品/版本/模块 id。
+- 已退回工单收到回推时，若仍在退回目标节点且目录未变，判定为退回回声，保持 `transferred_return/returned` 且禁止重新接管。
+- 节点真正离开退回目标，或产品/模块确实变更时，仍允许原有重新接入流程。
+- 接管阶段按 ticket 增加 PostgreSQL 事务级串行锁，避免同一 bill 的并发回推重复 `lock/handle`。
+
+**验证**：KSM 退回、回推、接管相关回归测试通过；后端完整单测 `1568 passed`。

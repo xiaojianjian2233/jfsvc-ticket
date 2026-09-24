@@ -17,6 +17,7 @@ from app.models import (
     SlaLevel,
     Source,
     StatusHistory,
+    SyncOutbox,
     Ticket,
     User,
 )
@@ -763,6 +764,164 @@ def test_ingest_reopens_transferred_return_ticket(db_session, monkeypatch) -> No
     assert hub.linear_uuid is None
     assert hub.linear_identifier is None
     assert hub.op_status is None
+
+
+def test_ingest_ignores_status_2_echo_at_return_target(db_session, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """returnKsmOrder 会紧接着回推 status=2；仍在退回目标节点时不得重开。"""
+    from app.services.hub_issues.op_status import OP_TRANSFERRED_RETURN
+    from app.services.ingest import ksm_ingester as mod
+
+    existing, hub = _seed_existing_with_hub(
+        db_session,
+        op_status=OP_TRANSFERRED_RETURN,
+        bill_id="bill-return-echo-1",
+        short_code="TKT-RET-ECHO-1",
+        hub_short_code="HUB-RET-ECHO-1",
+    )
+    existing.status = "transferred_return"
+    hub.status = "returned"
+    row = SyncOutbox(
+        kind="return",
+        target_source_code="ksm",
+        ticket_id=existing.id,
+        source_ticket_id=existing.source_ticket_id,
+        hub_issue_id=hub.id,
+        payload={
+            "deal_opinion": "退回重新分派",
+            "_ksm_return_source_node_id": "NODE-COOP",
+            "_ksm_return_target_node_id": "NODE-TECH",
+            "_ksm_return_module_id": "MODULE-OLD",
+        },
+        status="sent",
+        attempts=1,
+    )
+    db_session.add(row)
+    db_session.commit()
+
+    called = {"n": 0}
+    monkeypatch.setattr(mod, "apply_content_refresh", lambda *a, **k: called.__setitem__("n", 1))
+
+    result = mod.KSMIngester(db_session).ingest(
+        {
+            "billId": existing.source_ticket_id,
+            "sourceStatus": "2",
+            "status": "2",
+            "_subscribe_callback": {
+                "status": "2",
+                "node": {"id": "NODE-TECH", "name": "技术分析"},
+                "module": {"id": "MODULE-OLD", "name": "收票管理"},
+            },
+        }
+    )
+    db_session.commit()
+
+    assert result.deduped is True
+    assert called["n"] == 0
+    db_session.refresh(existing)
+    db_session.refresh(hub)
+    assert existing.status == "transferred_return"
+    assert existing.ksm_takeover_status is None
+    assert hub.status == "returned"
+    assert hub.op_status == OP_TRANSFERRED_RETURN
+
+
+def test_ingest_reopens_when_catalog_changes_at_return_target(db_session, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """退回目标节点未变，但 KSM 模块确实变更时，仍是真实重新分派。"""
+    from app.services.hub_issues.op_status import OP_TRANSFERRED_RETURN
+    from app.services.ingest import ksm_ingester as mod
+
+    existing, hub = _seed_existing_with_hub(
+        db_session,
+        op_status=OP_TRANSFERRED_RETURN,
+        bill_id="bill-return-new-module-1",
+        short_code="TKT-RET-NEW-MODULE-1",
+        hub_short_code="HUB-RET-NEW-MODULE-1",
+    )
+    existing.status = "transferred_return"
+    hub.status = "returned"
+    db_session.add(
+        SyncOutbox(
+            kind="return",
+            target_source_code="ksm",
+            ticket_id=existing.id,
+            source_ticket_id=existing.source_ticket_id,
+            hub_issue_id=hub.id,
+            payload={
+                "_ksm_return_target_node_id": "NODE-TECH",
+                "_ksm_return_module_id": "MODULE-OLD",
+            },
+            status="sent",
+            attempts=1,
+        )
+    )
+    db_session.commit()
+
+    monkeypatch.setattr(mod, "apply_content_refresh", lambda *a, **k: True)
+    result = mod.KSMIngester(db_session).ingest(
+        {
+            "billId": existing.source_ticket_id,
+            "sourceStatus": "2",
+            "status": "2",
+            "_subscribe_callback": {
+                "status": "2",
+                "node": {"id": "NODE-TECH", "name": "技术分析"},
+                "module": {"id": "MODULE-NEW", "name": "新模块"},
+            },
+        }
+    )
+    db_session.commit()
+
+    assert result.deduped is False
+    db_session.refresh(existing)
+    assert existing.status == "processing"
+
+
+def test_ingest_reopens_after_ksm_leaves_return_target(db_session, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """退回后 KSM 真正流转到新节点时，仍允许原有重新分派逻辑执行。"""
+    from app.services.hub_issues.op_status import OP_TRANSFERRED_RETURN
+    from app.services.ingest import ksm_ingester as mod
+
+    existing, hub = _seed_existing_with_hub(
+        db_session,
+        op_status=OP_TRANSFERRED_RETURN,
+        bill_id="bill-return-reassigned-1",
+        short_code="TKT-RET-REASSIGNED-1",
+        hub_short_code="HUB-RET-REASSIGNED-1",
+    )
+    existing.status = "transferred_return"
+    hub.status = "returned"
+    db_session.add(
+        SyncOutbox(
+            kind="return",
+            target_source_code="ksm",
+            ticket_id=existing.id,
+            source_ticket_id=existing.source_ticket_id,
+            hub_issue_id=hub.id,
+            payload={"_ksm_return_target_node_id": "NODE-TECH"},
+            status="sent",
+            attempts=1,
+        )
+    )
+    db_session.commit()
+
+    monkeypatch.setattr(mod, "apply_content_refresh", lambda *a, **k: True)
+    result = mod.KSMIngester(db_session).ingest(
+        {
+            "billId": existing.source_ticket_id,
+            "sourceStatus": "2",
+            "status": "2",
+            "_subscribe_callback": {
+                "status": "2",
+                "node": {"id": "NODE-NEW-ASSIGNMENT", "name": "新分派节点"},
+            },
+        }
+    )
+    db_session.commit()
+
+    assert result.deduped is False
+    assert result.routing_decision == "reopened_transferred_return"
+    db_session.refresh(existing)
+    assert existing.status == "processing"
 
 
 def test_ingest_status_6_reconciles_returned_state_and_stops_outbox(db_session) -> None:  # type: ignore[no-untyped-def]

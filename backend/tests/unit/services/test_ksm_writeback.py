@@ -318,7 +318,7 @@ def test_return_refreshes_then_returns_without_lock(world: Session) -> None:
     """退回不先 lock，强制 refresh 后直接 returnKsmOrder：源=最新 node，目标=倒数第二条 opercacheId。"""
     hub = _hub(world)
     t = _ticket(world, hub, ksm_takeover_status="handled")
-    _outbox(world, t, hub, kind="return", payload={"deal_opinion": "转错模块，退回重分派"})
+    row = _outbox(world, t, hub, kind="return", payload={"deal_opinion": "转错模块，退回重分派"})
     fresh = {
         **_SUBSCRIBE,
         "node": {"id": "NODE-NEW", "name": "协同处理"},
@@ -349,6 +349,12 @@ def test_return_refreshes_then_returns_without_lock(world: Session) -> None:
     assert r.deal_opinion == "转错模块，退回重分派"
     assert r.current_node_id == "NODE-NEW"  # 源节点 = refresh 后最新 node
     assert r.opercache_id == "OPCACHE-ACCEPT"  # 目标 = 最新节点的上一个节点
+    world.refresh(row)
+    assert row.payload["_ksm_return_source_node_id"] == "NODE-NEW"
+    assert row.payload["_ksm_return_target_node_id"] == "NODE-OLD"
+    assert row.payload["_ksm_return_product_id"] == "PROD-1"
+    assert row.payload["_ksm_return_version_id"] == "VER-1"
+    assert row.payload["_ksm_return_module_id"] == "MOD-1"
 
 
 def test_return_target_picks_node_before_latest_by_time(world: Session) -> None:

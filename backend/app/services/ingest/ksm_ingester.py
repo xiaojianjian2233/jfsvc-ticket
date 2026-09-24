@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.core.logging import get_logger
 from app.core.storage.minio_store import classify_attachment_kind, filename_from_url
-from app.models import Attachment, HubIssue, SlaLevel, Ticket
+from app.models import Attachment, HubIssue, SlaLevel, SyncOutbox, Ticket
 from app.repositories.status_history import StatusHistoryRepository
 from app.repositories.ticket import TicketRepository
 from app.services.dispatch import dispatch_handler
@@ -75,6 +75,27 @@ _KSM_SLA_FALLBACK: dict[str, str] = {
 }
 
 _KSM_TIMEZONE = ZoneInfo("Asia/Shanghai")
+
+
+def _ksm_current_node_id(payload: dict[str, Any]) -> str:
+    raw = payload.get("_subscribe_callback")
+    raw = raw if isinstance(raw, dict) else {}
+    node = raw.get("node")
+    if not isinstance(node, dict):
+        return ""
+    value = node.get("id")
+    return "" if value is None else str(value)
+
+
+def _ksm_catalog_ids(payload: dict[str, Any]) -> dict[str, str]:
+    raw = payload.get("_subscribe_callback")
+    raw = raw if isinstance(raw, dict) else {}
+    result: dict[str, str] = {}
+    for key in ("product", "version", "module"):
+        obj = raw.get(key)
+        value = obj.get("id") if isinstance(obj, dict) else None
+        result[key] = "" if value is None else str(value)
+    return result
 
 
 def parse_ksm_create_datetime(value: Any) -> datetime | None:
@@ -290,6 +311,21 @@ class KSMIngester:
                 or (hub is not None and hub.status == "returned")
             )
             if is_reopened_from_returned:
+                # returnKsmOrder 成功后 KSM 会立即推一次 status=2；此时
+                # 当前节点正是我们刚退回到的目标节点，这只是退回回声，
+                # 不是客户变更模块/上游重新分派。若在这里重开，后续
+                # webhook 主链会立即再次 lock+handle，把工单从退回目标
+                # 拽回「协同处理」。只有 KSM 节点真正离开退回目标后
+                # 才允许走下面的 reopen 分支。
+                if self._is_return_echo(existing, payload):
+                    logger.info(
+                        "ksm_ingest_return_echo_ignored",
+                        bill_id=bill_id,
+                        existing_ticket_id=existing.id,
+                        current_node_id=_ksm_current_node_id(payload),
+                    )
+                    return self._dedup_result(existing)
+
                 # 客户调整模块/重新分派回流（此时 KSM 状态非结案）：
                 apply_content_refresh(self._db, existing, payload)
                 raw_feat = payload.get("featureName") or payload.get("feature")
@@ -496,6 +532,48 @@ class KSMIngester:
             resolved_sl = self._resolve_service_level(raw_sl)
             if resolved_sl:
                 ticket.service_level = resolved_sl
+
+    def _is_return_echo(self, ticket: Ticket, payload: dict[str, Any]) -> bool:
+        """当前 KSM 节点仍等于最近一次成功退回的目标节点时，
+        该回推是 returnKsmOrder 自身的回声，不构成重新分派。
+
+        旧 outbox 没有目标节点元数据时返回 False，不凭时间窗口
+        猜测，避免压掉真实的重新分派。
+        """
+
+        latest_return = (
+            self._db.query(SyncOutbox)
+            .filter(
+                SyncOutbox.ticket_id == ticket.id,
+                SyncOutbox.kind == "return",
+                SyncOutbox.status == "sent",
+            )
+            .order_by(SyncOutbox.sent_at.desc(), SyncOutbox.id.desc())
+            .first()
+        )
+        if latest_return is None:
+            return False
+        return_meta = latest_return.payload or {}
+        target_node_id = return_meta.get("_ksm_return_target_node_id")
+        if not target_node_id:
+            return False
+
+        current_node_id = _ksm_current_node_id(payload)
+        if current_node_id and str(target_node_id) != current_node_id:
+            return False
+
+        # KSM 可能在退回目标节点内直接改产品/模块再推送，
+        # 节点 id 没变但分类事实已变，仍应视为真实重新分派。
+        incoming_catalog = _ksm_catalog_ids(payload)
+        for key in ("product", "version", "module"):
+            returned_value = return_meta.get(f"_ksm_return_{key}_id")
+            incoming_value = incoming_catalog[key]
+            if returned_value and incoming_value and str(returned_value) != incoming_value:
+                return False
+
+        # 当前节点仍是退回目标，或回推缺节点且没有任何
+        # 可证明重新分派的目录变化：保守地保持已退回。
+        return True
 
     @staticmethod
     def _require_str(payload: dict[str, Any], key: str) -> str:

@@ -302,6 +302,12 @@ def _run_ksm_takeover(
     """派单后立即接管（用刚分配好的处理人身份），独立 try 保证接管失败不影响
     入库/后续 triage/人工审核。commits。"""
     try:
+        # 同一 bill 可能在数毫秒内连续推送多条通知。ingest 阶段
+        # 的事务锁在 commit 后已释放，接管阶段必须单独串行化，
+        # 否则两个回调会同时通过 ksm_takeover_status 检查并重复 lock/handle。
+        if db.get_bind().dialect.name == "postgresql":
+            lock_key = f"ksm-takeover:{ticket_id}"
+            db.execute(select(func.pg_advisory_xact_lock(func.hashtext(lock_key))))
         ticket = db.get(Ticket, ticket_id)
         if ticket is None:
             return

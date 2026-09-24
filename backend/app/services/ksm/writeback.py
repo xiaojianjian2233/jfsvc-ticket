@@ -107,14 +107,17 @@ class _KSMFields:
     # 退回目标 opercacheId：不在这里算，只能基于「刚实时拉取」的 handleSteps 现算
     # （见 _previous_node_opercache_id + KSMWritebackSender._refresh_for_return）。
     opercache_id: str = ""
+    # 与 opercache_id 对应的退回目标节点。成功退回后写入 outbox
+    # payload，供入站回推区分「退回动作本身的回声」与「后续真实重新分派」。
+    return_target_node_id: str = ""
 
 
 def _s(v: Any) -> str:
     return "" if v is None else str(v)
 
 
-def _previous_node_opercache_id(detail: dict[str, Any]) -> str:
-    """退回目标节点的操作缓存 id（returnKsmOrder 的 opercacheID）。
+def _previous_node_target(detail: dict[str, Any]) -> tuple[str, str]:
+    """退回目标的 ``(opercacheId, nodeId)``。
 
     2026-09 改判：不再固定退回「受理」节点，改为「最新节点的上一个节点」。要求
     detail 必须是**刚刚实时拉取**的（调用方负责 refresh，本函数不兜底旧快照），
@@ -150,7 +153,14 @@ def _previous_node_opercache_id(detail: dict[str, Any]) -> str:
     if not candidates:
         raise ValueError("未找到可退回的目标节点，无法退回")
     candidates.sort(key=lambda h: _s(h.get("handleDateTime")))
-    return _s(candidates[-1].get("opercacheId"))
+    target = candidates[-1]
+    return _s(target.get("opercacheId")), _s(target.get("nodeId"))
+
+
+def _previous_node_opercache_id(detail: dict[str, Any]) -> str:
+    """兼容现有调用方：只返回 ``returnKsmOrder`` 需要的 opercacheID。"""
+
+    return _previous_node_target(detail)[0]
 
 
 def _extract_ksm_fields(
@@ -210,6 +220,7 @@ def _merge_refreshed(base: _KSMFields, detail: dict[str, Any]) -> _KSMFields:
         email=_s(customer.get("email")) or base.email,
         mobile=_s(customer.get("mobile")) or base.mobile,
         opercache_id=base.opercache_id,
+        return_target_node_id=base.return_target_node_id,
     )
 
 
@@ -434,6 +445,16 @@ class KSMWritebackSender:
         if action == "return":
             fresh = self._refresh_for_return(fields, ticket=ticket)
             self._return(fresh, identity, _s((row.payload or {}).get("deal_opinion")).strip())
+            # 只在 returnKsmOrder 成功返回后留痕；若外部调用失败，
+            # 不能把未生效的目标节点写入 outbox 并被后续回推误用。
+            row.payload = {
+                **(row.payload or {}),
+                "_ksm_return_source_node_id": fresh.node_id,
+                "_ksm_return_target_node_id": fresh.return_target_node_id,
+                "_ksm_return_product_id": fresh.product_id,
+                "_ksm_return_version_id": fresh.version_id,
+                "_ksm_return_module_id": fresh.module_id,
+            }
             return
         # all remaining actions need a fresh node → lock then refresh
         self._lock(fields, identity)
@@ -626,12 +647,17 @@ class KSMWritebackSender:
         if isinstance(node, dict):
             node_id = _s(node.get("id"))
         try:
-            opercache_id = _previous_node_opercache_id(detail)
+            opercache_id, target_node_id = _previous_node_target(detail)
         except ValueError as e:
             raise KSMError(f"{e}: bill_id={fields.bill_id}") from e
         if not node_id:
             raise KSMError(f"退回目标节点计算失败（缺当前节点 id）: bill_id={fields.bill_id}")
-        return replace(fields, node_id=node_id, opercache_id=opercache_id)
+        return replace(
+            fields,
+            node_id=node_id,
+            opercache_id=opercache_id,
+            return_target_node_id=target_node_id,
+        )
 
     def _return_target_from_snapshot(
         self, fields: _KSMFields, *, ticket: Ticket | None
@@ -649,12 +675,17 @@ class KSMWritebackSender:
         if isinstance(node, dict):
             node_id = _s(node.get("id"))
         try:
-            opercache_id = _previous_node_opercache_id(raw)
+            opercache_id, target_node_id = _previous_node_target(raw)
         except ValueError:
             return None
         if not node_id:
             return None
-        return replace(fields, node_id=node_id, opercache_id=opercache_id)
+        return replace(
+            fields,
+            node_id=node_id,
+            opercache_id=opercache_id,
+            return_target_node_id=target_node_id,
+        )
 
     # ---- text builders -------------------------------------------------
 
