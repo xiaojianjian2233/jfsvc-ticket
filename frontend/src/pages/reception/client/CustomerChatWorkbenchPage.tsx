@@ -3,15 +3,18 @@ import {
   type ClientEvaluationPayload,
   type ClientNoticeItem,
   type ClientSessionsGrouped,
+  type ClientTicketItem,
   type MessageItem,
   type SessionItem,
-  SEED_CLIENT_NOTICES,
   clientCloseSession,
+  clientConfirmTicket,
   clientEvaluateSession,
   clientFetchMessages,
   clientFetchNotices,
   clientFetchSessions,
+  clientFetchTickets,
   clientInitSession,
+  clientRemindTicket,
   clientSendMessage,
 } from "../receptionApi";
 import { type CustomerProfile } from "./CustomerInfoCollectionPage";
@@ -143,10 +146,26 @@ export function CustomerChatWorkbenchPage({
     }));
   };
 
-  // 左侧面板 Tab 切换（默认选中“重要通知”）
-  const [rightTab, setRightTab] = useState<"notices" | "profile">("notices");
-  const [notices, setNotices] = useState<ClientNoticeItem[]>(SEED_CLIENT_NOTICES);
+  // 左侧面板 Tab 切换（顺序：客户信息 -> 重要通知 -> 工单信息）
+  const [rightTab, setRightTab] = useState<"profile" | "notices" | "tickets">("notices");
+  const [notices, setNotices] = useState<ClientNoticeItem[]>([]);
   const [selectedNotice, setSelectedNotice] = useState<ClientNoticeItem | null>(null);
+
+  // 工单信息状态
+  const [tickets, setTickets] = useState<ClientTicketItem[]>([]);
+  const [, setLoadingTickets] = useState(false);
+  const [ticketSubTab, setTicketSubTab] = useState<"processing" | "reviewing" | "closed">("processing");
+  const [selectedConfirmTicket, setSelectedConfirmTicket] = useState<ClientTicketItem | null>(null);
+  const [selectedViewTicket, setSelectedViewTicket] = useState<ClientTicketItem | null>(null);
+  const [showReturnInput, setShowReturnInput] = useState(false);
+  const [returnReason, setReturnReason] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
+  const [remindFeedback, setRemindFeedback] = useState<{
+    title: string;
+    ticketNumber: string;
+    message: string;
+    isSuccess: boolean;
+  } | null>(null);
 
   // 引用回复状态
   const [quotedMessage, setQuotedMessage] = useState<MessageItem | null>(null);
@@ -241,22 +260,102 @@ export function CustomerChatWorkbenchPage({
     };
   }, [currentSession?.id, currentSession?.status, profile.contact_phone]);
 
-  // 初始化工作台：拉取会话列表并执行 24 小时未结束会话智能检测
+  const loadTickets = async () => {
+    if (!profile.contact_phone) return;
+    setLoadingTickets(true);
+    try {
+      const list = await clientFetchTickets(profile.contact_phone);
+      setTickets(list);
+    } catch (err) {
+      console.error("加载工单列表失败:", err);
+    } finally {
+      setLoadingTickets(false);
+    }
+  };
+
+  const handleRemind = async (t: ClientTicketItem) => {
+    try {
+      const res = await clientRemindTicket(t.id, profile.contact_phone);
+      setRemindFeedback({
+        title: res.notified ? "催单成功" : "催单提示",
+        ticketNumber: t.ticket_number,
+        message: res.message,
+        isSuccess: res.notified,
+      });
+    } catch (e: any) {
+      setRemindFeedback({
+        title: "催单提示",
+        ticketNumber: t.ticket_number,
+        message: e?.message || "催单请求已记录，工作人员正在加快处理中。",
+        isSuccess: true,
+      });
+    }
+  };
+
+  const handleDoConfirm = async (t: ClientTicketItem) => {
+    setActionLoading(true);
+    try {
+      const res = await clientConfirmTicket(t.id, profile.contact_phone, "confirm");
+      setSelectedConfirmTicket(null);
+      setRemindFeedback({
+        title: "确认解决成功",
+        ticketNumber: t.ticket_number,
+        message: res.message,
+        isSuccess: true,
+      });
+      await loadTickets();
+      setTicketSubTab("closed");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDoReturn = async (t: ClientTicketItem) => {
+    setActionLoading(true);
+    try {
+      const res = await clientConfirmTicket(t.id, profile.contact_phone, "return", returnReason);
+      setSelectedConfirmTicket(null);
+      setShowReturnInput(false);
+      setReturnReason("");
+      setRemindFeedback({
+        title: "退回跟进成功",
+        ticketNumber: t.ticket_number,
+        message: res.message,
+        isSuccess: true,
+      });
+      await loadTickets();
+      setTicketSubTab("processing");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // 初始化工作台：拉取会话列表、重要通知与工单信息
   useEffect(() => {
     let isMounted = true;
     const initData = async () => {
       try {
-        const [sessionsRes, noticesRes] = await Promise.all([
+        const [sessionsRes, noticesRes, ticketsRes] = await Promise.all([
           clientFetchSessions(profile.contact_phone),
-          clientFetchNotices().catch(() => SEED_CLIENT_NOTICES),
+          clientFetchNotices().catch(() => []),
+          clientFetchTickets(profile.contact_phone).catch(() => []),
         ]);
 
         if (!isMounted) return;
         setSessionsGroup(sessionsRes);
-        if (noticesRes && noticesRes.length > 0) {
-          setNotices(noticesRes);
-          // 弹窗提示：若存在上架且配置为弹窗提示的通知，客户进入工作台时直接打开弹窗
-          const popupNotice = noticesRes.find((n) => n.popup_prompt);
+        if (ticketsRes) {
+          setTickets(ticketsRes);
+        }
+
+        const validNotices = noticesRes || [];
+        setNotices(validNotices);
+
+        // 需求2：如果后端没有上架状态的消息（通知数为0），则默认选中客户信息；只要有≥1条信息，默认选中重要通知
+        if (validNotices.length === 0) {
+          setRightTab("profile");
+        } else {
+          setRightTab("notices");
+          const popupNotice = validNotices.find((n) => n.popup_prompt);
           if (popupNotice) {
             setSelectedNotice(popupNotice);
           }
@@ -755,8 +854,20 @@ export function CustomerChatWorkbenchPage({
             mobileDrawerTab === "info" ? "flex" : "hidden md:flex"
           }`}
         >
-          {/* 顶部多标签切换 Table：重要通知 vs 客户信息（默认选中重要通知） */}
+          {/* 顶部多标签切换 Table：调整顺序为：客户信息、重要通知、工单信息 */}
           <div className="h-12 border-b border-slate-200 bg-slate-50/80 px-4 flex items-center gap-6 flex-none">
+            <button
+              type="button"
+              onClick={() => setRightTab("profile")}
+              className={`h-full border-b-2 text-[15px] font-bold transition cursor-pointer flex items-center gap-2 ${
+                rightTab === "profile"
+                  ? "border-[rgb(35,94,212)] text-[rgb(35,94,212)]"
+                  : "border-transparent text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              <span>🏢 客户信息</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setRightTab("notices")}
@@ -776,62 +887,23 @@ export function CustomerChatWorkbenchPage({
 
             <button
               type="button"
-              onClick={() => setRightTab("profile")}
+              onClick={() => setRightTab("tickets")}
               className={`h-full border-b-2 text-[15px] font-bold transition cursor-pointer flex items-center gap-2 ${
-                rightTab === "profile"
+                rightTab === "tickets"
                   ? "border-[rgb(35,94,212)] text-[rgb(35,94,212)]"
                   : "border-transparent text-slate-500 hover:text-slate-800"
               }`}
             >
-              <span>🏢 客户信息</span>
+              <span>📋 工单信息</span>
+              {tickets.filter((t) => ["processing", "reviewing"].includes(t.client_category || t.category || "")).length > 0 && (
+                <span className="bg-amber-500 text-white text-[11px] px-1.5 py-0.2 rounded-full font-mono font-medium">
+                  {tickets.filter((t) => ["processing", "reviewing"].includes(t.client_category || t.category || "")).length}
+                </span>
+              )}
             </button>
           </div>
 
-          {/* 1.1 Tab 1：重要通知卡片列表（标题、部分内容、特别重要加标签，点击弹窗看完整内容） */}
-          {rightTab === "notices" && (
-            <div className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-slate-50/40">
-              {notices.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full min-h-[260px] text-slate-400 py-12 select-none">
-                  <div className="text-4xl mb-2 opacity-40">📢</div>
-                  <div className="text-[14px] font-medium text-slate-500">暂无重要通知</div>
-                  <div className="text-[12px] text-slate-400 mt-1">当前没有上架生效的重要通知</div>
-                </div>
-              ) : (
-                notices.map((notice) => (
-                  <div
-                    key={notice.id}
-                    onClick={() => setSelectedNotice(notice)}
-                    className="p-4 bg-white rounded-xl border border-slate-200/90 hover:border-[rgb(35,94,212)]/60 hover:shadow-md cursor-pointer transition space-y-2.5 group"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <h3 className="text-[15px] font-bold text-slate-800 group-hover:text-[rgb(35,94,212)] transition leading-snug line-clamp-1">
-                        {notice.title}
-                      </h3>
-                      {notice.is_important && (
-                        <span className="flex-none px-2 py-0.5 bg-rose-50 text-rose-600 border border-rose-200 rounded text-[12px] font-bold flex items-center gap-1 shadow-2xs">
-                          <span>⚡</span>
-                          <span>重要</span>
-                        </span>
-                      )}
-                    </div>
-
-                    <p className="text-[13px] text-[#666666] line-clamp-2 leading-relaxed">
-                      {notice.content.replace(/<[^>]+>/g, "").trim()}
-                    </p>
-
-                    <div className="flex items-center justify-between text-[12px] text-slate-400 pt-1.5 border-t border-slate-100">
-                      <span className="font-mono">{notice.publish_time}</span>
-                      <span className="text-[rgb(35,94,212)] font-medium group-hover:underline">
-                        查看完整通知 &gt;
-                      </span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-
-          {/* 1.2 Tab 2：客户与企业信息展示 */}
+          {/* 1.1 Tab 1：客户与企业信息展示 */}
           {rightTab === "profile" && (
             <div className="flex-1 overflow-y-auto p-5 space-y-5 bg-white">
               {/* 企业信息卡片 */}
@@ -906,6 +978,219 @@ export function CustomerChatWorkbenchPage({
                     </span>
                   ))}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* 1.2 Tab 2：重要通知卡片列表（标题、部分内容、特别重要加标签，点击弹窗看完整内容） */}
+          {rightTab === "notices" && (
+            <div className="flex-1 overflow-y-auto p-4 space-y-3.5 bg-slate-50/40">
+              {notices.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full min-h-[260px] text-slate-400 py-12 select-none">
+                  <div className="text-4xl mb-2 opacity-40">📢</div>
+                  <div className="text-[14px] font-medium text-slate-500">暂无重要通知</div>
+                  <div className="text-[12px] text-slate-400 mt-1">当前没有上架生效的重要通知</div>
+                </div>
+              ) : (
+                notices.map((notice) => (
+                  <div
+                    key={notice.id}
+                    onClick={() => setSelectedNotice(notice)}
+                    className="p-4 bg-white rounded-xl border border-slate-200/90 hover:border-[rgb(35,94,212)]/60 hover:shadow-md cursor-pointer transition space-y-2.5 group"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <h3 className="text-[15px] font-bold text-slate-800 group-hover:text-[rgb(35,94,212)] transition leading-snug line-clamp-1">
+                        {notice.title}
+                      </h3>
+                      {notice.is_important && (
+                        <span className="flex-none px-2 py-0.5 bg-rose-50 text-rose-600 border border-rose-200 rounded text-[12px] font-bold flex items-center gap-1 shadow-2xs">
+                          <span>⚡</span>
+                          <span>重要</span>
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="text-[13px] text-[#666666] line-clamp-2 leading-relaxed">
+                      {notice.content.replace(/<[^>]+>/g, "").trim()}
+                    </p>
+
+                    <div className="flex items-center justify-between text-[12px] text-slate-400 pt-1.5 border-t border-slate-100">
+                      <span className="font-mono">{notice.publish_time}</span>
+                      <span className="text-[rgb(35,94,212)] font-medium group-hover:underline">
+                        查看完整通知 &gt;
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* 1.3 Tab 3：工单信息（二级切换菜单：处理中、待确认、已关闭；固定表头列表） */}
+          {rightTab === "tickets" && (
+            <div className="flex-1 flex flex-col min-h-0 bg-white">
+              {/* 二级切换菜单：处理中、已答复待确认、已关闭（水平占满宽度，字号13px） */}
+              <div className="grid grid-cols-3 gap-2 px-3 py-2.5 bg-slate-50 border-b border-slate-200 flex-none w-full">
+                <button
+                  type="button"
+                  onClick={() => setTicketSubTab("processing")}
+                  className={`w-full py-2 px-1 text-[13px] font-semibold rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                    ticketSubTab === "processing"
+                      ? "bg-[rgb(35,94,212)] text-white shadow-2xs"
+                      : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
+                  }`}
+                >
+                  <span>处理中</span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded-full text-[11px] ${
+                      ticketSubTab === "processing"
+                        ? "bg-white/20 text-white"
+                        : "bg-slate-100 text-slate-600"
+                    }`}
+                  >
+                    {tickets.filter((t) => (t.client_category || t.category) === "processing").length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setTicketSubTab("reviewing")}
+                  className={`w-full py-2 px-1 text-[13px] font-semibold rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                    ticketSubTab === "reviewing"
+                      ? "bg-[rgb(35,94,212)] text-white shadow-2xs"
+                      : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
+                  }`}
+                >
+                  <span className="truncate">已答复待确认</span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded-full text-[11px] flex-none ${
+                      ticketSubTab === "reviewing"
+                        ? "bg-white/20 text-white"
+                        : "bg-slate-100 text-slate-600"
+                    }`}
+                  >
+                    {tickets.filter((t) => (t.client_category || t.category) === "reviewing").length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setTicketSubTab("closed")}
+                  className={`w-full py-2 px-1 text-[13px] font-semibold rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                    ticketSubTab === "closed"
+                      ? "bg-[rgb(35,94,212)] text-white shadow-2xs"
+                      : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
+                  }`}
+                >
+                  <span>已关闭</span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded-full text-[11px] ${
+                      ticketSubTab === "closed"
+                        ? "bg-white/20 text-white"
+                        : "bg-slate-100 text-slate-600"
+                    }`}
+                  >
+                    {tickets.filter((t) => (t.client_category || t.category) === "closed").length}
+                  </span>
+                </button>
+              </div>
+
+              {/* 工单列表展示区：固定表头，列表内部横纵双向自适应滚动 */}
+              <div className="flex-1 overflow-auto">
+                {tickets.filter((t) => (t.client_category || t.category) === ticketSubTab).length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full min-h-[220px] text-slate-400 py-12 select-none">
+                    <div className="text-3xl mb-2 opacity-40">📋</div>
+                    <div className="text-[13px] font-medium text-slate-500">
+                      暂无{ticketSubTab === "processing" ? "处理中" : ticketSubTab === "reviewing" ? "已答复待确认" : "已关闭"}工单
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-1">当前联系人暂无此状态工单记录</div>
+                  </div>
+                ) : (
+                  <table className="w-full min-w-[480px] border-collapse text-left text-[12px]">
+                    <thead className="sticky top-0 bg-slate-100 z-10 border-b border-slate-200 text-slate-600 font-semibold shadow-2xs text-[12px]">
+                      <tr>
+                        <th className="py-3 px-3 whitespace-nowrap">工单号</th>
+                        <th className="py-3 px-3 whitespace-nowrap">提单渠道</th>
+                        <th className="py-3 px-3 whitespace-nowrap">处理人</th>
+                        <th className="py-3 px-3 whitespace-nowrap">提单时间</th>
+                        <th className="py-3 px-3 text-center whitespace-nowrap">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-[12px]">
+                      {tickets
+                        .filter((t) => (t.client_category || t.category) === ticketSubTab)
+                        .map((ticket) => (
+                          <tr key={ticket.id} className="hover:bg-slate-50/80 transition">
+                            <td
+                              className="py-3.5 px-3 max-w-[150px] align-top"
+                              title={ticket.source_ticket_id || ticket.ticket_number}
+                            >
+                              <div className="font-mono font-semibold text-slate-900 leading-snug line-clamp-1">
+                                {ticket.source_ticket_id || ticket.ticket_number}
+                              </div>
+                              {ticket.title && (
+                                <div
+                                  className="text-[12px] text-slate-400 font-normal truncate mt-1 leading-normal"
+                                  title={ticket.title}
+                                >
+                                  {ticket.title.length > 12 ? `${ticket.title.slice(0, 12)}...` : ticket.title}
+                                </div>
+                              )}
+                            </td>
+                            <td className="py-3.5 px-3 whitespace-nowrap align-top">
+                              <span className="inline-block px-2 py-0.5 rounded text-[12px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                                {ticket.source_name || ticket.source_code || "客户渠道"}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-3 whitespace-nowrap text-slate-700 align-top">
+                              <div className="font-medium text-slate-800 leading-snug">
+                                {ticket.handler_display_name || ticket.handler_name}
+                              </div>
+                              <div className="text-[11px] text-slate-400 mt-1">
+                                {ticket.process_stage || (ticket.stage === "rd" ? "产研环节" : "服务环节")}
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-3 whitespace-nowrap font-mono text-[12px] text-slate-500 align-top">
+                              {ticket.created_at}
+                            </td>
+                            <td className="py-3.5 px-3 whitespace-nowrap text-center align-top">
+                              {(ticket.client_category || ticket.category) === "processing" && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemind(ticket)}
+                                  className="px-3 py-1.5 text-[12px] font-semibold rounded bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100 transition cursor-pointer shadow-2xs"
+                                >
+                                  催单
+                                </button>
+                              )}
+                              {(ticket.client_category || ticket.category) === "reviewing" && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedConfirmTicket(ticket);
+                                    setShowReturnInput(false);
+                                    setReturnReason("");
+                                  }}
+                                  className="px-3 py-1.5 text-[12px] font-semibold rounded bg-[rgb(35,94,212)] text-white hover:opacity-90 transition cursor-pointer shadow-2xs"
+                                >
+                                  查看确认
+                                </button>
+                              )}
+                              {(ticket.client_category || ticket.category) === "closed" && (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedViewTicket(ticket)}
+                                  className="px-3 py-1.5 text-[12px] font-semibold rounded bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 transition cursor-pointer"
+                                >
+                                  查看
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
             </div>
           )}
@@ -1561,6 +1846,250 @@ export function CustomerChatWorkbenchPage({
               alt="图片预览"
               className="max-w-full max-h-[85vh] rounded object-contain"
             />
+          </div>
+        </div>
+      )}
+      {/* 催单与工单操作反馈模态窗 */}
+      {remindFeedback && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-[500px] max-w-[95vw] -translate-y-[40px] shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in duration-150">
+            <div className="p-6 text-center space-y-3">
+              <div className="w-12 h-12 mx-auto rounded-full bg-blue-50 text-[rgb(35,94,212)] flex items-center justify-center text-2xl">
+                {remindFeedback.isSuccess ? "🔔" : "ℹ️"}
+              </div>
+              <h3 className="text-[15px] font-bold text-slate-900">{remindFeedback.title}</h3>
+              <p className="text-[13px] text-slate-500 font-mono">工单号: {remindFeedback.ticketNumber}</p>
+              <div className="text-[13px] text-slate-600 bg-slate-50 p-3.5 rounded-lg border border-slate-100 leading-relaxed text-left">
+                {remindFeedback.message}
+              </div>
+            </div>
+            <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-100 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setRemindFeedback(null)}
+                className="w-full py-2 bg-[rgb(35,94,212)] text-white rounded-lg text-[13px] font-medium hover:opacity-90 transition cursor-pointer shadow-2xs"
+              >
+                我知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 待确认工单：查看确认与退回模态窗 */}
+      {selectedConfirmTicket && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-[500px] max-w-[95vw] shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[85vh] animate-in fade-in zoom-in duration-150">
+            {/* Header */}
+            <div className="p-5 border-b border-slate-200 bg-slate-50/70 flex items-center justify-between flex-none">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                    待确认
+                  </span>
+                  <span className="text-xs font-mono font-semibold text-slate-700">
+                    工单号: {selectedConfirmTicket.source_ticket_id || selectedConfirmTicket.ticket_number}
+                  </span>
+                </div>
+                <h3 className="text-base font-bold text-slate-900 mt-1">
+                  {selectedConfirmTicket.title || "工单答复确认"}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedConfirmTicket(null);
+                  setShowReturnInput(false);
+                  setReturnReason("");
+                }}
+                className="w-7 h-7 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-600 flex items-center justify-center text-sm cursor-pointer transition flex-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 text-[13px]">
+              {/* 提单信息 */}
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                <div className="font-semibold text-slate-800 text-[13px] flex items-center justify-between">
+                  <span>提单信息</span>
+                  <span className="text-slate-400 font-mono text-[12px]">{selectedConfirmTicket.created_at}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-slate-600 text-[13px]">
+                  <div>渠道: <span className="font-medium text-slate-800">{selectedConfirmTicket.source_name || selectedConfirmTicket.source_code || selectedConfirmTicket.source_system_cn}</span></div>
+                  <div>联系人: <span className="font-medium text-slate-800">{selectedConfirmTicket.contact_name} ({selectedConfirmTicket.contact_phone})</span></div>
+                </div>
+                <div className="pt-1 text-slate-700">
+                  <div className="text-slate-400 mb-0.5 text-[12px]">问题描述:</div>
+                  <div className="bg-white p-2.5 rounded border border-slate-200 text-slate-800 leading-relaxed whitespace-pre-wrap text-[13px]">
+                    {selectedConfirmTicket.description || selectedConfirmTicket.title || "无详细问题描述"}
+                  </div>
+                </div>
+              </div>
+
+              {/* 答复信息 */}
+              <div className="p-3.5 bg-blue-50/50 rounded-xl border border-blue-200 space-y-2">
+                <div className="font-semibold text-blue-900 text-[13px] flex items-center justify-between">
+                  <span>处理答复</span>
+                  <span className="text-blue-700 font-medium">处理人: {selectedConfirmTicket.handler_display_name || selectedConfirmTicket.handler_name}</span>
+                </div>
+                <div className="pt-1 text-slate-700">
+                  <div className="text-blue-800/80 mb-0.5 text-[12px]">答复方案 / 处理说明:</div>
+                  <div className="bg-white p-2.5 rounded border border-blue-100 text-slate-800 leading-relaxed whitespace-pre-wrap text-[13px]">
+                    {selectedConfirmTicket.reply_content || "处理人员已处理完毕，请确认问题是否已妥善解决。"}
+                  </div>
+                </div>
+                {selectedConfirmTicket.resolved_at && (
+                  <div className="text-[12px] text-slate-400 text-right font-mono">
+                    答复时间: {selectedConfirmTicket.resolved_at}
+                  </div>
+                )}
+              </div>
+
+              {/* 退回原因输入区 */}
+              {showReturnInput && (
+                <div className="p-3.5 bg-rose-50/50 rounded-xl border border-rose-200 space-y-2 animate-in fade-in duration-150">
+                  <div className="font-semibold text-rose-800 text-[13px]">
+                    请输入未解决退回原因
+                  </div>
+                  <textarea
+                    value={returnReason}
+                    onChange={(e) => setReturnReason(e.target.value)}
+                    placeholder="请详细说明问题为何未解决，以便处理人继续跟进..."
+                    rows={3}
+                    className="w-full p-2.5 bg-white rounded border border-rose-200 text-[13px] text-slate-800 focus:outline-none focus:ring-1 focus:ring-rose-500"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-3 flex-none">
+              {!showReturnInput ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowReturnInput(true)}
+                    disabled={actionLoading}
+                    className="px-4 py-2 rounded-lg text-[13px] font-medium text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition cursor-pointer"
+                  >
+                    未解决退回
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDoConfirm(selectedConfirmTicket)}
+                    disabled={actionLoading}
+                    className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white bg-teal-600 hover:bg-teal-700 transition cursor-pointer shadow-2xs flex items-center gap-1.5"
+                  >
+                    <span>✓</span>
+                    <span>确认已解决</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowReturnInput(false);
+                      setReturnReason("");
+                    }}
+                    disabled={actionLoading}
+                    className="px-3.5 py-1.5 rounded-lg text-[13px] font-medium text-slate-600 hover:bg-slate-200 transition cursor-pointer"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDoReturn(selectedConfirmTicket)}
+                    disabled={actionLoading || !returnReason.trim()}
+                    className="px-4 py-1.5 rounded-lg text-[13px] font-semibold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 transition cursor-pointer shadow-2xs"
+                  >
+                    {actionLoading ? "提交中..." : "确认退回给处理人"}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 已关闭工单：查看详情模态窗 */}
+      {selectedViewTicket && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-[500px] max-w-[95vw] shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[85vh] animate-in fade-in zoom-in duration-150">
+            {/* Header */}
+            <div className="p-5 border-b border-slate-200 bg-slate-50/70 flex items-center justify-between flex-none">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                    已关闭
+                  </span>
+                  <span className="text-xs font-mono font-semibold text-slate-700">
+                    工单号: {selectedViewTicket.source_ticket_id || selectedViewTicket.ticket_number}
+                  </span>
+                </div>
+                <h3 className="text-base font-bold text-slate-900 mt-1">
+                  {selectedViewTicket.title || "工单详情"}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedViewTicket(null)}
+                className="w-7 h-7 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-600 flex items-center justify-center text-sm cursor-pointer transition flex-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 text-[13px]">
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                <div className="font-semibold text-slate-800 text-[13px] flex items-center justify-between">
+                  <span>提单详情</span>
+                  <span className="text-slate-400 font-mono text-[12px]">{selectedViewTicket.created_at}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-slate-600 text-[13px]">
+                  <div>渠道: <span className="font-medium text-slate-800">{selectedViewTicket.source_name || selectedViewTicket.source_code || selectedViewTicket.source_system_cn}</span></div>
+                  <div>提单联系人: <span className="font-medium text-slate-800">{selectedViewTicket.contact_name}</span></div>
+                </div>
+                <div className="pt-1 text-slate-700">
+                  <div className="text-slate-400 mb-0.5 text-[12px]">问题描述:</div>
+                  <div className="bg-white p-2.5 rounded border border-slate-200 text-slate-800 leading-relaxed whitespace-pre-wrap text-[13px]">
+                    {selectedViewTicket.description || selectedViewTicket.title || "无详细问题描述"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-emerald-50/50 rounded-xl border border-emerald-200 space-y-2">
+                <div className="font-semibold text-emerald-900 text-[13px] flex items-center justify-between">
+                  <span>处理与解决结果</span>
+                  <span className="text-emerald-700 font-medium">处理人: {selectedViewTicket.handler_display_name || selectedViewTicket.handler_name}</span>
+                </div>
+                <div className="pt-1 text-slate-700">
+                  <div className="text-emerald-800/80 mb-0.5 text-[12px]">解决答复:</div>
+                  <div className="bg-white p-2.5 rounded border border-emerald-100 text-slate-800 leading-relaxed whitespace-pre-wrap text-[13px]">
+                    {selectedViewTicket.reply_content || "工单已处理完成并关闭。"}
+                  </div>
+                </div>
+                {selectedViewTicket.resolved_at && (
+                  <div className="text-[12px] text-slate-400 text-right font-mono">
+                    关闭时间: {selectedViewTicket.resolved_at}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-end flex-none">
+              <button
+                type="button"
+                onClick={() => setSelectedViewTicket(null)}
+                className="px-5 py-1.5 rounded-lg text-[13px] font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 transition cursor-pointer shadow-2xs"
+              >
+                关闭
+              </button>
+            </div>
           </div>
         </div>
       )}

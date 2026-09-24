@@ -1156,4 +1156,251 @@ describe("Customer Client Online Support H5 / Web App", () => {
       expect(screen.getByPlaceholderText(/请输入您的称呼/)).toBeInTheDocument();
     });
   });
+
+  describe("Ticket Information Tab & Client Notice Rules", () => {
+    const mockProfile: CustomerProfile = {
+      contact_name: "测试用户",
+      contact_phone: "13800001111",
+      company_name: "北京阳光科技有限责任公司",
+      tax_no: "91110108MA00XYZ99",
+      tenant_name: "阳光华北租户",
+      tenant_no: "T-BJ-01",
+      purchased_products: ["数电发票乐企直连模块"],
+      is_historical: false,
+    };
+
+    const mockTickets: receptionApi.ClientTicketItem[] = [
+      {
+        id: 201,
+        short_code: "TKT-009201",
+        ticket_number: "R20260924-0099",
+        source_code: "ksm",
+        source_name: "KSM系统",
+        handler_name: "张工(产研)",
+        process_stage: "产研处理",
+        status: "processing",
+        client_category: "processing",
+        title: "批量打印数电票据超时失败错误代码0x8004",
+        body: "批量开具100张数电发票时偶发请求超时",
+        created_at: "2026-09-22 14:00",
+        hours_since_created: 45.2,
+      },
+      {
+        id: 202,
+        short_code: "TKT-009202",
+        ticket_number: "R20260923-0055",
+        source_code: "zhichi",
+        source_name: "智齿客服",
+        handler_name: "李客服(服务)",
+        process_stage: "服务处理",
+        status: "reviewing",
+        client_category: "reviewing",
+        title: "税控盘驱动无法正常识别",
+        body: "更新客户端后提示驱动未安装",
+        created_at: "2026-09-23 09:30",
+        hours_since_created: 25.0,
+        reply_content: "已远程重新安装驱动补丁包，请重新插拔税控盘测试是否正常识别。",
+        reply_at: "2026-09-23 16:00",
+        reply_by: "李客服(服务)",
+      },
+      {
+        id: 203,
+        short_code: "TKT-009203",
+        ticket_number: "R20260920-0010",
+        source_code: "ksm",
+        source_name: "KSM系统",
+        handler_name: "王工程师",
+        process_stage: "完成",
+        status: "closed",
+        client_category: "closed",
+        title: "乐企直连证书续期咨询",
+        body: "咨询直连乐企平台证书续期的具体流程与审核材料",
+        created_at: "2026-09-20 11:20",
+        hours_since_created: 96.0,
+        reply_content: "已发送乐企平台证书更新指引手册至客户邮箱，客户已查收确认无误。",
+        reply_at: "2026-09-21 10:00",
+        reply_by: "王工程师",
+      },
+    ];
+
+    it("verifies tab order (客户信息 -> 重要通知 -> 工单信息) and default tab selection based on notice count", async () => {
+      // 场景 1：无任何上架通知时，进入后默认选中「客户信息」
+      vi.spyOn(receptionApi, "clientFetchNotices").mockResolvedValueOnce([]);
+      vi.spyOn(receptionApi, "clientFetchTickets").mockResolvedValueOnce(mockTickets);
+
+      const { unmount } = render(
+        <CustomerChatWorkbenchPage
+          profile={mockProfile}
+          initialSession={null}
+          onBackToLogin={vi.fn()}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("咨询企业")).toBeInTheDocument();
+      });
+
+      // 验证 Tab 标签存在且顺序正确
+      const tabButtons = screen.getAllByRole("button").filter((b) =>
+        b.textContent?.includes("客户信息") ||
+        b.textContent?.includes("重要通知") ||
+        b.textContent?.includes("工单信息")
+      );
+      expect(tabButtons.length).toBe(3);
+      expect(tabButtons[0].textContent).toContain("客户信息");
+      expect(tabButtons[1].textContent).toContain("重要通知");
+      expect(tabButtons[2].textContent).toContain("工单信息");
+
+      unmount();
+
+      // 场景 2：有 ≥1 条通知时，进入后默认选中「重要通知」
+      vi.spyOn(receptionApi, "clientFetchNotices").mockResolvedValueOnce([
+        {
+          id: "notice-1",
+          title: "国税局核心征管系统停机维护通知",
+          content: "<p>国税局将于周日凌晨进行系统维护...</p>",
+          publish_time: "2026-09-24 08:00",
+          is_important: true,
+        },
+      ]);
+      vi.spyOn(receptionApi, "clientFetchTickets").mockResolvedValueOnce(mockTickets);
+
+      render(
+        <CustomerChatWorkbenchPage
+          profile={mockProfile}
+          initialSession={null}
+          onBackToLogin={vi.fn()}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("国税局核心征管系统停机维护通知")).toBeInTheDocument();
+      });
+    });
+
+    it("renders ticket information list, handles remind, confirm, and return modals", async () => {
+      vi.spyOn(receptionApi, "clientFetchTickets").mockResolvedValue(mockTickets);
+      vi.spyOn(receptionApi, "clientRemindTicket").mockResolvedValue({
+        success: true,
+        notified: true,
+        hours_since_created: 45.2,
+        message: "提单已超过24小时，已向工单当前处理人推送催单信息！",
+      });
+      vi.spyOn(receptionApi, "clientConfirmTicket").mockResolvedValue({
+        success: true,
+        status: "closed",
+        message: "工单已确认解决并顺利关闭！",
+      });
+
+      render(
+        <CustomerChatWorkbenchPage
+          profile={mockProfile}
+          initialSession={null}
+          onBackToLogin={vi.fn()}
+        />
+      );
+
+      // 等待初始化加载完成
+      await waitFor(() => {
+        expect(receptionApi.clientFetchTickets).toHaveBeenCalled();
+      });
+
+      // 关闭弹出的通知（若有）
+      const closePopupBtn = screen.queryByRole("button", { name: "我知道了" });
+      if (closePopupBtn) {
+        fireEvent.click(closePopupBtn);
+      }
+
+      // 切换到【工单信息】Tab
+      const ticketTab = screen.getByRole("button", { name: /工单信息/ });
+      fireEvent.click(ticketTab);
+
+      // 验证固定表头
+      await waitFor(() => {
+        expect(screen.getByText("工单号")).toBeInTheDocument();
+      });
+      expect(screen.getByText("提单渠道")).toBeInTheDocument();
+      expect(screen.getByText("处理人")).toBeInTheDocument();
+      expect(screen.getByText("提单时间")).toBeInTheDocument();
+      expect(screen.getByText("操作")).toBeInTheDocument();
+
+      // 验证工单信息Tab徽标统计数等于处理中(1)+已答复待确认(1)=2
+      expect(screen.getByRole("button", { name: /工单信息/ })).toHaveTextContent("2");
+
+      // 验证二级切换菜单存在：处理中、已答复待确认、已关闭
+      expect(screen.getByRole("button", { name: /处理中/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /已答复待确认/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /已关闭/ })).toBeInTheDocument();
+
+      // 1. 处理中：显示催单按钮并测试点击（验证说明文字最多12字并用省略号截断）
+      expect(screen.getByText("R20260924-0099")).toBeInTheDocument();
+      expect(screen.getByText("批量打印数电票据超时失败...")).toBeInTheDocument();
+      const remindBtn = screen.getByRole("button", { name: "催单" });
+      fireEvent.click(remindBtn);
+
+      await waitFor(() => {
+        expect(receptionApi.clientRemindTicket).toHaveBeenCalledWith(201, "13800001111");
+        expect(screen.getByText("提单已超过24小时，已向工单当前处理人推送催单信息！")).toBeInTheDocument();
+      });
+
+      // 关闭催单模态窗
+      const confirmNoticeBtn = screen.getByRole("button", { name: "我知道了" });
+      fireEvent.click(confirmNoticeBtn);
+
+      // 2. 已答复待确认：切换并点击【查看确认】
+      const reviewingSubTab = screen.getByRole("button", { name: /已答复待确认/ });
+      fireEvent.click(reviewingSubTab);
+
+      expect(screen.getByText("R20260923-0055")).toBeInTheDocument();
+      const checkConfirmBtn = screen.getByRole("button", { name: "查看确认" });
+      fireEvent.click(checkConfirmBtn);
+
+      // 弹窗展示答复方案与确认/退回按钮
+      expect(screen.getAllByText("税控盘驱动无法正常识别").length).toBeGreaterThan(0);
+      expect(screen.getByText(/已远程重新安装驱动补丁包/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /确认已解决/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "未解决退回" })).toBeInTheDocument();
+
+      // 测试未解决退回交互
+      const returnBtn = screen.getByRole("button", { name: "未解决退回" });
+      fireEvent.click(returnBtn);
+      expect(screen.getByPlaceholderText(/请详细说明问题为何未解决/)).toBeInTheDocument();
+
+      const reasonInput = screen.getByPlaceholderText(/请详细说明问题为何未解决/);
+      fireEvent.change(reasonInput, { target: { value: "重新插拔后仍然提示错误代码0x8004" } });
+
+      const doReturnBtn = screen.getByRole("button", { name: "确认退回给处理人" });
+      fireEvent.click(doReturnBtn);
+
+      await waitFor(() => {
+        expect(receptionApi.clientConfirmTicket).toHaveBeenCalledWith(
+          202,
+          "13800001111",
+          "return",
+          "重新插拔后仍然提示错误代码0x8004"
+        );
+      });
+
+      // 3. 已关闭：切换并点击【查看】
+      const closeDialogBtn = screen.queryByRole("button", { name: "我知道了" });
+      if (closeDialogBtn) {
+        fireEvent.click(closeDialogBtn);
+      }
+
+      const closedSubTab = screen.getByRole("button", { name: /已关闭/ });
+      fireEvent.click(closedSubTab);
+
+      expect(screen.getByText("R20260920-0010")).toBeInTheDocument();
+      const viewBtn = screen.getByRole("button", { name: "查看" });
+      fireEvent.click(viewBtn);
+
+      expect(screen.getByText("提单详情")).toBeInTheDocument();
+      expect(screen.getAllByText("乐企直连证书续期咨询").length).toBeGreaterThan(0);
+      expect(screen.getByText(/已发送乐企平台证书更新指引手册/)).toBeInTheDocument();
+
+      const closeViewModalBtn = screen.getByRole("button", { name: "关闭" });
+      fireEvent.click(closeViewModalBtn);
+      expect(screen.queryByText("提单详情")).not.toBeInTheDocument();
+    });
+  });
 });

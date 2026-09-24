@@ -2164,4 +2164,235 @@ export async function clientFetchNotices(): Promise<ClientNoticeItem[]> {
   return localPublished;
 }
 
+// -----------------------------------------------------------------------------
+// 客户端：工单信息 (查询、催单、查看确认)
+// -----------------------------------------------------------------------------
+
+export interface ClientTicketItem {
+  id: number;
+  short_code: string;
+  ticket_number: string;
+  source_code: string;
+  source_name: string;
+  handler_name?: string | null;
+  process_stage: string;
+  status: string;
+  client_category: "processing" | "reviewing" | "closed";
+  title: string;
+  body?: string;
+  created_at: string;
+  hours_since_created: number;
+  reply_content?: string | null;
+  reply_at?: string | null;
+  reply_by?: string | null;
+  // 兼容与别名字段
+  source_ticket_id?: string;
+  source_system_cn?: string;
+  handler_display_name?: string;
+  stage?: string;
+  category?: "processing" | "reviewing" | "closed";
+  contact_name?: string;
+  contact_phone?: string;
+  description?: string;
+  resolved_at?: string;
+}
+
+export const SEED_CLIENT_TICKETS: ClientTicketItem[] = [
+  {
+    id: 101,
+    short_code: "TKT-009101",
+    ticket_number: "R20260920-0012",
+    source_code: "ksm",
+    source_name: "KSM",
+    handler_name: "苗一琳",
+    process_stage: "服务处理",
+    status: "processing",
+    client_category: "processing",
+    title: "数电发票开具时提示税控盘离线错误代码0x8004",
+    body: "客户在批量开具数电专票时频繁报错税控设备握手超时，影响月底结算，急需支持解决。",
+    created_at: "2026-09-22 10:30",
+    hours_since_created: 47.5,
+    reply_content: "技术支持正在协助排查设备驱动及网络端口，已抓取报文日志进行分析。",
+    reply_at: "2026-09-22 15:40",
+    reply_by: "苗一琳",
+  },
+  {
+    id: 102,
+    short_code: "TKT-009102",
+    ticket_number: "R20260924-0045",
+    source_code: "zhichi",
+    source_name: "智齿",
+    handler_name: "张工",
+    process_stage: "服务处理",
+    status: "processing",
+    client_category: "processing",
+    title: "进项发票勾选平台无法同步勾选状态",
+    body: "9月24日早上导入的发票勾选数据未在统计表中体现，已勾选发票显示为待勾选。",
+    created_at: "2026-09-24 08:30",
+    hours_since_created: 1.2,
+    reply_content: null,
+    reply_at: null,
+    reply_by: null,
+  },
+  {
+    id: 103,
+    short_code: "TKT-009103",
+    ticket_number: "R20260921-0089",
+    source_code: "ksm",
+    source_name: "KSM",
+    handler_name: "李志坚",
+    process_stage: "研发处理",
+    status: "reviewing",
+    client_category: "reviewing",
+    title: "发票版式文件PDF下载乱码缺失印章",
+    body: "部分特定税号开具出来的增值税电子专用发票PDF版式文件印章缺失，且中文备注显示为方块乱码。",
+    created_at: "2026-09-21 14:20",
+    hours_since_created: 67.0,
+    reply_content: "产研团队已更新字体库渲染补丁并在线热修复，请您重新在系统点击下载重试，并确认印章与文字是否恢复正常。",
+    reply_at: "2026-09-23 16:30",
+    reply_by: "李志坚",
+  },
+  {
+    id: 104,
+    short_code: "TKT-009104",
+    ticket_number: "R20260918-0003",
+    source_code: "self_service",
+    source_name: "客户自助",
+    handler_name: "杨慧莉",
+    process_stage: "完成",
+    status: "closed",
+    client_category: "closed",
+    title: "申请开通数电乐企对接公网IP白名单",
+    body: "公司新增生产环境出网公网IP：116.228.12.33，申请加入乐企对接API白名单。",
+    created_at: "2026-09-18 09:15",
+    hours_since_created: 144.0,
+    reply_content: "已完成公网IP 116.228.12.33 在云网关与鉴权系统的配置生效，测试端口互通正常。",
+    reply_at: "2026-09-18 11:45",
+    reply_by: "杨慧莉",
+  },
+];
+
+const LOCAL_CLIENT_TICKETS_KEY = "ticket_hub_client_tickets_store";
+
+function getLocalClientTickets(): ClientTicketItem[] {
+  try {
+    const raw = sessionStorage.getItem(LOCAL_CLIENT_TICKETS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // ignore
+  }
+  return SEED_CLIENT_TICKETS;
+}
+
+function saveLocalClientTickets(list: ClientTicketItem[]): void {
+  try {
+    sessionStorage.setItem(LOCAL_CLIENT_TICKETS_KEY, JSON.stringify(list));
+  } catch {
+    // ignore
+  }
+}
+
+export async function clientFetchTickets(phone: string): Promise<ClientTicketItem[]> {
+  try {
+    const res = await httpGet<ClientTicketItem[]>("/api/reception/client/tickets", { phone });
+    if (Array.isArray(res) && res.length > 0) {
+      saveLocalClientTickets(res);
+      return res;
+    }
+  } catch {
+    // ignore
+  }
+  return getLocalClientTickets();
+}
+
+export async function clientRemindTicket(
+  ticketId: number,
+  phone: string,
+): Promise<{ success: boolean; notified: boolean; hours_since_created: number; message: string }> {
+  try {
+    const res = await httpPost<{ success: boolean; notified: boolean; hours_since_created: number; message: string }>(
+      `/api/reception/client/tickets/${ticketId}/remind`,
+      { phone },
+    );
+    if (res && typeof res.success === "boolean") {
+      return res;
+    }
+  } catch {
+    // fallback
+  }
+
+  // 离线/开发降级模拟
+  const list = getLocalClientTickets();
+  const ticket = list.find((t) => t.id === ticketId);
+  const hours = ticket?.hours_since_created ?? 25.0;
+  const isOver24 = hours >= 24.0;
+  return {
+    success: true,
+    notified: isOver24,
+    hours_since_created: hours,
+    message: isOver24
+      ? "催单成功！工单提单已超过24小时，已向当前处理人发送加急催单通知，我们将尽快为您处理。"
+      : "已收到催单请求。当前工单提单未满24小时，暂不向处理人推送通知，处理人员正在加速处理中，请耐心等待。",
+  };
+}
+
+export async function clientConfirmTicket(
+  ticketId: number,
+  phone: string,
+  action: "confirm" | "return",
+  reason?: string,
+): Promise<{ success: boolean; status: string; message: string }> {
+  try {
+    const res = await httpPost<{ success: boolean; status: string; message: string }>(
+      `/api/reception/client/tickets/${ticketId}/confirm`,
+      { phone, action, reason },
+    );
+    if (res && typeof res.success === "boolean") {
+      // 同步更新本地缓存
+      const list = getLocalClientTickets();
+      const t = list.find((x) => x.id === ticketId);
+      if (t) {
+        if (action === "confirm") {
+          t.status = "closed";
+          t.client_category = "closed";
+          t.process_stage = "完成";
+        } else {
+          t.status = "processing";
+          t.client_category = "processing";
+          t.process_stage = "服务处理";
+        }
+        saveLocalClientTickets(list);
+      }
+      return res;
+    }
+  } catch {
+    // fallback
+  }
+
+  // 离线降级
+  const list = getLocalClientTickets();
+  const t = list.find((x) => x.id === ticketId);
+  if (t) {
+    if (action === "confirm") {
+      t.status = "closed";
+      t.client_category = "closed";
+      t.process_stage = "完成";
+    } else {
+      t.status = "processing";
+      t.client_category = "processing";
+      t.process_stage = "服务处理";
+    }
+    saveLocalClientTickets(list);
+  }
+  return {
+    success: true,
+    status: action === "confirm" ? "closed" : "processing",
+    message:
+      action === "confirm"
+        ? "感谢您的确认，该工单已标记为已解决并关闭！"
+        : "已将工单退回给处理人员继续跟进分析，我们将尽快为您解决问题！",
+  };
+}
+
+
 

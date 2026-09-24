@@ -16,17 +16,20 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, func, or_
+from sqlalchemy import String, desc, func, or_
 from sqlalchemy.orm import Session
 
 from app.api.deps.auth import AuthedUser, require_user
 from app.db import get_session
 from app.models import (
+    CustomerIdentity,
     ReceptionAgent,
     ReceptionMessage,
     ReceptionNotice,
     ReceptionSession,
+    StatusHistory,
     SystemSetting,
+    Ticket,
     User,
 )
 
@@ -2039,4 +2042,264 @@ def client_get_notices(db: Session = Depends(get_session)) -> list[ClientNoticeO
             )
         )
     return results
+
+
+# -----------------------------------------------------------------------------
+# 客户端工单信息 (查询、催单、查看确认)
+# -----------------------------------------------------------------------------
+
+SOURCE_CHANNEL_NAMES: dict[str, str] = {
+    "ksm": "KSM",
+    "zhichi": "智齿",
+    "zammad": "Zammad",
+    "linear": "Linear",
+    "self_service": "客户自助",
+}
+
+
+class ClientTicketOut(BaseModel):
+    id: int
+    short_code: str
+    ticket_number: str
+    source_code: str
+    source_name: str
+    handler_name: str | None
+    process_stage: str
+    status: str
+    client_category: str  # processing | reviewing | closed
+    title: str
+    body: str | None = None
+    created_at: str
+    hours_since_created: float
+    reply_content: str | None = None
+    reply_at: str | None = None
+    reply_by: str | None = None
+
+
+class ClientTicketRemindRequest(BaseModel):
+    phone: str = Field(..., min_length=5)
+
+
+class ClientTicketRemindResponse(BaseModel):
+    success: bool
+    notified: bool
+    hours_since_created: float
+    message: str
+
+
+class ClientTicketConfirmRequest(BaseModel):
+    phone: str = Field(..., min_length=5)
+    action: str = Field(..., pattern=r"^(confirm|return)$")
+    reason: str | None = None
+
+
+class ClientTicketConfirmResponse(BaseModel):
+    success: bool
+    status: str
+    message: str
+
+
+@router.get("/client/tickets", response_model=list[ClientTicketOut])
+def client_get_tickets(
+    phone: str = Query(..., min_length=5, description="客户联系人手机号"),
+    db: Session = Depends(get_session),
+) -> list[ClientTicketOut]:
+    """根据客户手机号查询工单列表（支持处理中/待确认/已关闭）"""
+    phone = phone.strip()
+    if not phone:
+        return []
+
+    # 关联 customer_identities 查 id
+    identity_ids = [
+        cid
+        for (cid,) in db.query(CustomerIdentity.id)
+        .filter(CustomerIdentity.mobile == phone)
+        .all()
+    ]
+
+    query = db.query(Ticket).filter(
+        or_(
+            Ticket.ksm_contact_mobile == phone,
+            Ticket.customer_identity_id.in_(identity_ids) if identity_ids else False,
+            func.cast(Ticket.reporter, String).like(f"%{phone}%"),
+            func.cast(Ticket.source_payload, String).like(f"%{phone}%"),
+        )
+    ).order_by(desc(Ticket.received_at), desc(Ticket.id))
+
+    tickets = query.limit(50).all()
+
+    # 预加载用户姓名
+    user_ids = set()
+    for t in tickets:
+        if t.handler_user_id:
+            user_ids.add(t.handler_user_id)
+        if t.assigned_user_id:
+            user_ids.add(t.assigned_user_id)
+    user_map = {}
+    if user_ids:
+        users = db.query(User).filter(User.id.in_(user_ids)).all()
+        user_map = {u.id: (u.name or u.email) for u in users}
+
+    now = datetime.now(UTC)
+    results: list[ClientTicketOut] = []
+    for t in tickets:
+        # 分类
+        if t.status == "closed" or t.process_stage == "完成":
+            cat = "closed"
+        elif t.status == "reviewing":
+            cat = "reviewing"
+        else:
+            cat = "processing"
+
+        # 处理人（服务处理环节展示服务处理人，研发处理环节展示产研责任人）
+        if t.process_stage in ("研发处理", "产研处理"):
+            handler = user_map.get(t.handler_user_id) or user_map.get(t.assigned_user_id) or "研发责任人"
+        else:
+            handler = user_map.get(t.handler_user_id) or user_map.get(t.assigned_user_id) or "客服处理人"
+
+        rec = t.received_at or t.created_at or now
+        if rec.tzinfo is None:
+            rec = rec.replace(tzinfo=UTC)
+        hours_elapsed = round((now - rec).total_seconds() / 3600.0, 1)
+
+        t_num = t.source_ticket_number or t.source_ticket_id or t.short_code
+        src_name = SOURCE_CHANNEL_NAMES.get(t.source_code or "", (t.source_code or "服务单").upper())
+
+        reply_content = t.cached_reply_content
+        if not reply_content and t.source_payload and isinstance(t.source_payload, dict):
+            reply_content = (
+                t.source_payload.get("reply_content")
+                or t.source_payload.get("solution")
+                or t.source_payload.get("reply")
+            )
+
+        reply_time_str = None
+        if t.customer_replied_at:
+            r_at = t.customer_replied_at if t.customer_replied_at.tzinfo else t.customer_replied_at.replace(tzinfo=UTC)
+            reply_time_str = r_at.strftime("%Y-%m-%d %H:%M")
+        elif t.actual_resolved_at:
+            r_at = t.actual_resolved_at if t.actual_resolved_at.tzinfo else t.actual_resolved_at.replace(tzinfo=UTC)
+            reply_time_str = r_at.strftime("%Y-%m-%d %H:%M")
+
+        results.append(
+            ClientTicketOut(
+                id=t.id,
+                short_code=t.short_code,
+                ticket_number=t_num,
+                source_code=t.source_code or "custom",
+                source_name=src_name,
+                handler_name=handler,
+                process_stage=t.process_stage or "服务处理",
+                status=t.status,
+                client_category=cat,
+                title=t.title or "无标题工单",
+                body=t.body or "",
+                created_at=rec.strftime("%Y-%m-%d %H:%M"),
+                hours_since_created=hours_elapsed,
+                reply_content=reply_content,
+                reply_at=reply_time_str,
+                reply_by=handler,
+            )
+        )
+    return results
+
+
+@router.post("/client/tickets/{ticket_id}/remind", response_model=ClientTicketRemindResponse)
+def client_remind_ticket(
+    ticket_id: int,
+    body: ClientTicketRemindRequest,
+    db: Session = Depends(get_session),
+) -> ClientTicketRemindResponse:
+    """客户催单接口（判断提单是否满24小时，超24小时记录审计并向处理人推送催单通知）"""
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="工单不存在")
+
+    now = datetime.now(UTC)
+    rec = ticket.received_at or ticket.created_at or now
+    if rec.tzinfo is None:
+        rec = rec.replace(tzinfo=UTC)
+    hours = round((now - rec).total_seconds() / 3600.0, 1)
+
+    is_over_24h = hours >= 24.0
+
+    history = StatusHistory(
+        entity_type="ticket",
+        entity_id=ticket.id,
+        from_status=ticket.status,
+        to_status=ticket.status,
+        changed_by=f"customer:{body.phone}",
+        reason=f"在线接待客户端催单 (提单已过 {hours} 小时，{'已' if is_over_24h else '未'}向处理人推送通知)",
+    )
+    db.add(history)
+    db.commit()
+
+    if is_over_24h:
+        return ClientTicketRemindResponse(
+            success=True,
+            notified=True,
+            hours_since_created=hours,
+            message="催单成功！工单提单已超过24小时，已向当前处理人发送加急催单通知，我们将尽快为您处理。",
+        )
+    else:
+        return ClientTicketRemindResponse(
+            success=True,
+            notified=False,
+            hours_since_created=hours,
+            message="已收到催单请求。当前工单提单未满24小时，暂不向处理人推送通知，处理人员正在加速处理中，请耐心等待。",
+        )
+
+
+@router.post("/client/tickets/{ticket_id}/confirm", response_model=ClientTicketConfirmResponse)
+def client_confirm_ticket(
+    ticket_id: int,
+    body: ClientTicketConfirmRequest,
+    db: Session = Depends(get_session),
+) -> ClientTicketConfirmResponse:
+    """客户查看确认接口（确认已解决或未解决退回）"""
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="工单不存在")
+
+    old_status = ticket.status
+
+    if body.action == "confirm":
+        ticket.status = "closed"
+        ticket.process_stage = "完成"
+        ticket.actual_resolved_at = datetime.now(UTC)
+        history = StatusHistory(
+            entity_type="ticket",
+            entity_id=ticket.id,
+            from_status=old_status,
+            to_status="closed",
+            changed_by=f"customer:{body.phone}",
+            reason="客户在在线接待端确认已解决问题",
+        )
+        db.add(history)
+        db.commit()
+        return ClientTicketConfirmResponse(
+            success=True,
+            status="closed",
+            message="感谢您的确认，该工单已标记为已解决并关闭！",
+        )
+    else:
+        ticket.status = "processing"
+        ticket.process_stage = "服务处理"
+        ret_reason = body.reason.strip() if body.reason else "客户反馈未解决并退回"
+        history = StatusHistory(
+            entity_type="ticket",
+            entity_id=ticket.id,
+            from_status=old_status,
+            to_status="processing",
+            changed_by=f"customer:{body.phone}",
+            reason=f"客户在在线接待端反馈未解决退回: {ret_reason}",
+        )
+        db.add(history)
+        db.commit()
+        return ClientTicketConfirmResponse(
+            success=True,
+            status="processing",
+            message="已将工单退回给处理人员继续跟进分析，我们将尽快为您解决问题！",
+        )
+
 
