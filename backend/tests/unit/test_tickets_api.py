@@ -789,8 +789,10 @@ def test_summary_product_name_ksm_uses_main_product_name(
     assert detail["product_name"] == by["TKT-KSM-MPN"]["product_name"]
 
 
-def test_summary_product_name_non_ksm_is_none(app_client: TestClient, world2: Session) -> None:
-    """非 KSM 来源：即便有 product_line_code，主产品名称也留空（不回退归类结果）。"""
+def test_summary_product_name_non_ksm_uses_source_product(
+    app_client: TestClient, world2: Session
+) -> None:
+    """非 KSM 来源取跨来源提单产品，不回退 AI 归类结果。"""
     from app.models import Ticket
 
     world2.add(
@@ -803,6 +805,7 @@ def test_summary_product_name_non_ksm_is_none(app_client: TestClient, world2: Se
             status="received",
             title="zhichi ticket",
             product_line_code="cloud-fapiao",
+            source_product_name="标准版-开票",
             received_at=datetime(2026, 5, 6, 15, 0, tzinfo=UTC),
         )
     )
@@ -810,10 +813,10 @@ def test_summary_product_name_non_ksm_is_none(app_client: TestClient, world2: Se
 
     r = app_client.get("/api/tickets", headers=_bearer())
     by = {it["short_code"]: it for it in r.json()["items"]}
-    assert by["TKT-ZHICHI-PL"]["product_name"] is None
+    assert by["TKT-ZHICHI-PL"]["product_name"] == "标准版-开票"
 
     detail = app_client.get("/api/tickets/212", headers=_bearer()).json()
-    assert detail["product_name"] is None
+    assert detail["product_name"] == "标准版-开票"
 
 
 def test_summary_graduated_uses_hub_product_and_module(

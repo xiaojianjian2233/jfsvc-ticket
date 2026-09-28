@@ -182,7 +182,8 @@ def test_webhook_zhichi_missing_ticketid_returns_400(app_client) -> None:  # typ
 _ENVELOPE = {
     "source": "zhichi",
     "raw": {
-        "ticketid": "T20260101001",
+        "ticketid": "f27c627d292a42deb4859a559bcb8970",
+        "ticket_code": "20260928000013",
         "ticket_title": "工单标题",
         "ticket_content": "问题描述内容",
         "ticket_level": 2,
@@ -191,6 +192,7 @@ _ENVELOPE = {
         "enterprise_name": "某某有限公司",
         "extend_fields_list": [
             {
+                "fieldid": "c70e65964c714dde8817983b2d3b710d",
                 "field_name": "产品分类",
                 "field_type": "6",
                 "field_text": "星空旗舰版-开票",
@@ -205,7 +207,7 @@ _ENVELOPE = {
         ],
     },
     "fields": {
-        "工单来源ID": "T20260101001",
+        "工单来源ID": "legacy-field-id",
         "主题": "工单标题",
         "问题描述": "问题描述内容",
         "产品线": "金蝶发票云",
@@ -223,7 +225,9 @@ def test_ingest_envelope_maps_fields(world: Session) -> None:
     world.commit()
     t = world.get(Ticket, res.ticket_id)
     assert t is not None
-    assert t.source_ticket_id == "T20260101001"
+    assert t.source_ticket_id == "f27c627d292a42deb4859a559bcb8970"
+    assert t.source_ticket_number == "20260928000013"
+    assert t.source_product_name == "星空旗舰版-开票"
     assert t.title == "工单标题"
     assert t.body == "问题描述内容"
     assert t.product_line_code is None
@@ -301,6 +305,7 @@ def _native_flat(**overrides) -> dict:  # type: ignore[no-untyped-def]
         "ticket_level": 0,
         "extend_fields_list": [
             {
+                "fieldid": "c70e65964c714dde8817983b2d3b710d",
                 "field_name": "产品分类",
                 "field_type": "6",
                 "field_text": "星瀚-收票",
@@ -332,6 +337,8 @@ def test_ingest_native_flat_maps_fields(world: Session) -> None:
     t = world.get(Ticket, res.ticket_id)
     assert t is not None
     assert t.source_ticket_id == "e240351f6a7e4e518df9d61d1fa5af11"
+    assert t.source_ticket_number == "20260720000001"
+    assert t.source_product_name == "星瀚-收票"
     assert t.product_line_code is None
     assert t.module is None
     assert t.reporter["name"] == "李志坚"
@@ -342,6 +349,80 @@ def test_ingest_native_flat_maps_fields(world: Session) -> None:
     # source_payload 存原样，出站回写读 deal_agent_name / ticket_level
     assert t.source_payload["ticket_code"] == "20260720000001"
     assert t.source_payload["extend_fields_list"][0]["field_name"] == "产品分类"
+
+
+def test_native_flat_product_matches_exact_field_id(world: Session) -> None:
+    """提单产品按稳定 fieldid 取可读文本，不受同名字段或机器值干扰。"""
+    fields = [
+        {
+            "fieldid": "wrong-id",
+            "field_name": "产品分类",
+            "field_type": "6",
+            "field_text": "错误产品",
+            "field_value": "wrong-value",
+        },
+        {
+            "fieldid": "c70e65964c714dde8817983b2d3b710d",
+            "field_name": "产品分类",
+            "field_type": "6",
+            "field_text": "标准版-开票",
+            "field_value": "f1aad71f377d46aaa5d06035cf793f0c",
+        },
+    ]
+    res = ZhichiIngester(world).ingest(
+        _native_flat(ticket_code="20260928000013", extend_fields_list=fields)
+    )
+    world.commit()
+
+    ticket = world.get(Ticket, res.ticket_id)
+    assert ticket is not None
+    assert ticket.source_ticket_id == "e240351f6a7e4e518df9d61d1fa5af11"
+    assert ticket.source_ticket_number == "20260928000013"
+    assert ticket.source_product_name == "标准版-开票"
+
+
+def test_native_flat_product_falls_back_to_field_value(world: Session) -> None:
+    """指定字段没有 field_text 时，保留 field_value，避免提单产品丢失。"""
+    fields = [
+        {
+            "fieldid": "c70e65964c714dde8817983b2d3b710d",
+            "field_name": "产品分类",
+            "field_type": "6",
+            "field_value": "fallback-value",
+        }
+    ]
+    res = ZhichiIngester(world).ingest(_native_flat(extend_fields_list=fields))
+    world.commit()
+
+    ticket = world.get(Ticket, res.ticket_id)
+    assert ticket is not None
+    assert ticket.source_product_name == "fallback-value"
+
+
+def test_native_flat_dedup_refreshes_source_display_fields(world: Session) -> None:
+    """历史智齿工单重推时补齐来源工单号与提单产品。"""
+    ingester = ZhichiIngester(world)
+    first = ingester.ingest(_native_flat(ticket_code=None, extend_fields_list=[]))
+    world.commit()
+
+    fields = [
+        {
+            "fieldid": "c70e65964c714dde8817983b2d3b710d",
+            "field_name": "产品分类",
+            "field_type": "6",
+            "field_text": "标准版-开票",
+            "field_value": "machine-value",
+        }
+    ]
+    second = ingester.ingest(_native_flat(ticket_code="20260928000013", extend_fields_list=fields))
+    world.commit()
+
+    assert second.deduped is True
+    assert second.ticket_id == first.ticket_id
+    ticket = world.get(Ticket, first.ticket_id)
+    assert ticket is not None
+    assert ticket.source_ticket_number == "20260928000013"
+    assert ticket.source_product_name == "标准版-开票"
 
 
 def test_native_flat_creates_attachment_from_file_str(world: Session) -> None:

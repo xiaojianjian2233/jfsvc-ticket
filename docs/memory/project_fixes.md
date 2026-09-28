@@ -103,3 +103,15 @@ metadata:
 - 接管阶段按 ticket 增加 PostgreSQL 事务级串行锁，避免同一 bill 的并发回推重复 `lock/handle`。
 
 **验证**：KSM 退回、回推、接管相关回归测试通过；后端完整单测 `1568 passed`。
+
+## 智齿来源工单号与提单产品映射修复（2026-09-28）
+
+**问题**：智齿工单此前把内部 `ticketid` 同时作为页面“来源工单号”，且“提单产品”没有稳定的跨来源落库字段，导致列表展示 UUID、智齿产品为空。
+
+**修复**：
+- 保留 `ticketid` 作为智齿内部去重和出站回写 ID；页面“来源工单号”改为落库 `ticket_code`。
+- “提单产品”按 `extend_fields_list` 中固定 `fieldid=c70e65964c714dde8817983b2d3b710d` 精确取值，优先保存可读的 `field_text`，缺失时回退 `field_value`。
+- 新增跨来源 `tickets.source_product_name` 字段；KSM 同步写入原 `version.mainproductname`，迁移时回填已有 KSM 数据，列表和详情统一由该字段输出 `product_name`。
+- 智齿历史工单再次推送时同步补齐来源工单号和提单产品，不改变原有去重键。
+
+**验证**：智齿入库与工单接口 97 项、KSM 入库 34 项通过；迁移链最新版本为 `0058_ticket_source_product_name`。

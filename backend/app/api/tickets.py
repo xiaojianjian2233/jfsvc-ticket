@@ -110,8 +110,8 @@ class TicketSummary(BaseModel):
     linear_status: str | None = (
         None  # 研发类所挂 hub 的 linear_status（镜像 Linear 列名）；「研发进度」列译中文展示
     )
-    # 主产品名称。KSM 来源：ksm_main_product_name（version.mainproductname 原样值，
-    # 未经归类映射）；其它来源暂无权威字段，留空（不回退 product_line_code→name）
+    # 提单产品名称。跨来源统一取 source_product_name；历史 KSM 数据兼容回落
+    # ksm_main_product_name。该字段不回退 AI 归类的 product_line_code→name。
     product_name: str | None = None
     reject_count: int = 0  # 客户驳回次数（所挂 hub_issue 的 reject_count；研发类/无 hub 为 0）
     children_count: int = 1  # 关联任务数（拆分子单数；单问题=1，Parent=children_ticket_ids 长度）
@@ -533,9 +533,10 @@ def list_tickets(
                 s.predicted_type = hub_type
         # 列表「产品分类」展示目录中文名，不把内部产品线编码直接暴露给用户。
         s.product_line_name = pl_name_map.get(s.product_line_code) if s.product_line_code else None
-        # 主产品：KSM 来源直接用 version.mainproductname 原样值（未经归类映射）；
-        # 其它来源暂缺权威字段来源，先留空（不回退 product_line_code→name）
-        s.product_name = t.ksm_main_product_name if t.source_code == "ksm" else None
+        # 提单产品：跨来源统一字段；历史 KSM 行兼容旧专用列。
+        s.product_name = t.source_product_name or (
+            t.ksm_main_product_name if t.source_code == "ksm" else None
+        )
         # 关联任务数：拆分子单数（Parent 持有 children_ticket_ids）；单问题工单=1
         s.children_count = len(t.children_ticket_ids or []) or 1
         # 提单人信息从 reporter JSON 解析（入库写的是 name/mobile/email）
@@ -649,10 +650,12 @@ def build_ticket_detail(db: Session, ticket: Ticket) -> TicketDetail:
             # ticket.predicted_type 从未被回写，只读 predicted_type 会让已毕业
             # 工单在详情页误判成「未分类」（前端 isOperation/isDevType 据此判断）。
             detail.predicted_type = hub.type
-    # 与 TicketSummary.product_name 保持同一语义：只表示来源工单的「主产品」。
-    # KSM 取 version.mainproductname 原样值，其它来源暂无权威字段，留空；
-    # 产品分类中文名应使用 product_line_name/目录查询，不能复用 product_name。
-    detail.product_name = ticket.ksm_main_product_name if ticket.source_code == "ksm" else None
+    # 与 TicketSummary.product_name 保持同一语义：只表示来源工单的「提单产品」。
+    # 跨来源统一字段；历史 KSM 行兼容旧专用列。产品分类中文名应使用
+    # product_line_name/目录查询，不能复用 product_name。
+    detail.product_name = ticket.source_product_name or (
+        ticket.ksm_main_product_name if ticket.source_code == "ksm" else None
+    )
     detail.source_ticket_number = _source_ticket_number(ticket)
     if ticket.customer_identity_id is not None:
         identity = db.get(CustomerIdentity, ticket.customer_identity_id)

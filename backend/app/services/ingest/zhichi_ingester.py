@@ -37,6 +37,9 @@ _MAX_TITLE_LEN = 150
 _FALLBACK_TITLE_RE = re.compile(r"^客户留言[-—]")
 _TAG_RE = re.compile(r"<[^>]+>")
 _ENTITIES = (("&nbsp;", " "), ("&lt;", "<"), ("&gt;", ">"), ("&amp;", "&"))
+# 智齿「产品分类」字段的稳定 ID。不能按 field_name 取值：模板中可能存在
+# 同名字段或后续改名，fieldid 才是上游契约里的唯一标识。
+_PRODUCT_FIELD_ID = "c70e65964c714dde8817983b2d3b710d"
 
 
 def _strip_html(s: str) -> str:
@@ -85,6 +88,26 @@ def _parse_extend_fields(raw: dict[str, Any]) -> dict[str, str]:
     return out
 
 
+def _extract_source_product_name(raw: dict[str, Any]) -> str | None:
+    """读取智齿提单产品。
+
+    指定 fieldid 的下拉字段同时包含机器值 field_value 和展示值 field_text；
+    页面「提单产品」需要可读名称，因此优先 field_text，缺失时才回退 field_value。
+    """
+    fields = raw.get("extend_fields_list")
+    if not isinstance(fields, list):
+        return None
+    for item in fields:
+        if not isinstance(item, dict) or str(item.get("fieldid") or "") != _PRODUCT_FIELD_ID:
+            continue
+        value = item.get("field_text") or item.get("field_value")
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+    return None
+
+
 def _flatten_envelope(payload: dict[str, Any]) -> dict[str, Any]:
     """智齿真实推送 {source, raw, fields} → 归一化扁平 dict。
 
@@ -116,7 +139,10 @@ def _flatten_envelope(payload: dict[str, Any]) -> dict[str, Any]:
         return None
 
     return {
-        "ticketid": pick(fields.get("工单来源ID"), raw.get("ticketid")),
+        # ticketid 是智齿内部 ID（去重/回写）；页面工单号另取 ticket_code。
+        "ticketid": pick(raw.get("ticketid"), fields.get("工单来源ID")),
+        "ticketNumber": raw.get("ticket_code"),
+        "sourceProductName": _extract_source_product_name(raw),
         "title": _derive_title(
             pick(fields.get("主题"), raw.get("ticket_title")),
             pick(fields.get("问题描述"), raw.get("ticket_content")),
@@ -156,6 +182,8 @@ def _flatten_native(payload: dict[str, Any]) -> dict[str, Any]:
     ext = _parse_extend_fields(payload)
     return {
         "ticketid": payload.get("ticketid"),
+        "ticketNumber": payload.get("ticket_code"),
+        "sourceProductName": _extract_source_product_name(payload),
         "title": _derive_title(payload.get("ticket_title"), payload.get("ticket_content")),
         "content": payload.get("ticket_content"),  # body 保留完整（含 HTML），只标题去 HTML
         "ticketStatus": payload.get("ticket_status"),
@@ -221,6 +249,7 @@ class ZhichiIngester:
 
         existing = self._tickets.find_by_source("zhichi", ticketid)
         if existing is not None:
+            self._sync_source_fields(existing, payload)
             target_op = _terminal_op_status(payload.get("ticketStatus"))
             if target_op is not None:
                 hub = (
@@ -270,6 +299,8 @@ class ZhichiIngester:
             short_code=short_code,
             source_code="zhichi",
             source_ticket_id=ticketid,
+            source_ticket_number=payload.get("ticketNumber"),
+            source_product_name=payload.get("sourceProductName"),
             type="Raw",
             status="processing",
             source_payload=payload.get("_envelope") or payload,
@@ -358,6 +389,16 @@ class ZhichiIngester:
             deduped=False,
             skip_post_ingest=skip_post_ingest,
         )
+
+    @staticmethod
+    def _sync_source_fields(ticket: Ticket, payload: dict[str, Any]) -> None:
+        """重推时补齐/刷新智齿来源展示字段，不改变内部去重 ID。"""
+        ticket_number = payload.get("ticketNumber")
+        if ticket_number:
+            ticket.source_ticket_number = str(ticket_number)
+        product_name = payload.get("sourceProductName")
+        if product_name:
+            ticket.source_product_name = str(product_name)
 
     def _dedup_result(self, existing: Ticket) -> IngestResult:
         return IngestResult(

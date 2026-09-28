@@ -516,6 +516,10 @@ class Ticket(Base):
     # product.name 不同源）。工单列表「主产品」列 KSM 来源直接展示此值。
     ksm_main_product_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
+    # 跨来源提单产品名称（页面 TicketSummary/TicketDetail.product_name 的权威值）。
+    # KSM 取 version.mainproductname；智齿取指定扩展字段的可读 field_text。
+    source_product_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+
     # KSM notice 凭证持久化（迁移 0044）：每次收到 webhook 推送时把最新
     # (noticeNum, subscribeNum) 同步落库，不设过期时间——之前只存 Redis（24h
     # TTL），过期后即使 KSM 服务端该凭证仍有效也拿不到，导致退回/重拉详情
@@ -1548,7 +1552,9 @@ class ReceptionNotice(Base):
 
     __tablename__ = "reception_notices"
     __table_args__ = (
-        CheckConstraint("status IN ('published','unpublished')", name="ck_reception_notices_status"),
+        CheckConstraint(
+            "status IN ('published','unpublished')", name="ck_reception_notices_status"
+        ),
         Index("ix_reception_notices_notice_no", "notice_no"),
         Index("ix_reception_notices_status", "status"),
         Index("ix_reception_notices_created_at", "created_at"),
@@ -1572,4 +1578,3 @@ class ReceptionNotice(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
-
