@@ -17,7 +17,7 @@ UAT_API_BASE="/ticket-hub-uat"
 UAT_REMOTE_ROOT="/data/ticket-hub-uat"
 UAT_REMOTE_BACKEND="$UAT_REMOTE_ROOT/backend"
 UAT_REMOTE_DIST="/data/ticket-hub-uat/frontend-dist"
-UAT_PUBLIC_ORIGIN="${UAT_PUBLIC_ORIGIN:-http://127.0.0.1}"
+UAT_PUBLIC_ORIGIN="${UAT_PUBLIC_ORIGIN:-http://127.0.0.1:18025}"
 
 expected_repo="https://github.com/xiaojianjian2233/jfsvc-ticket.git"
 actual_repo="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || true)"
