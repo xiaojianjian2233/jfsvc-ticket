@@ -48,6 +48,7 @@ rsync -av --delete \
   --exclude='.coverage' \
   --exclude='celerybeat-schedule' \
   --exclude='ksm-paused' \
+  --exclude='.repair-backups' \
   "$REPO_ROOT/backend/" "${UAT_HOST}:${UAT_REMOTE_BACKEND}/"
 
 echo "==> recreating UAT backend, worker, and beat"
