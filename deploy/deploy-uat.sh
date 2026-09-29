@@ -91,7 +91,8 @@ if grep -Eq '(/hub-issue/|/ticket-hub-v2/)' dist/index.html; then
   exit 1
 fi
 
-echo "==> publishing dist -> ${UAT_HOST}:${UAT_REMOTE_DIST}/"
+echo "==> ensuring permissions and publishing dist -> ${UAT_HOST}:${UAT_REMOTE_DIST}/"
+ssh "$UAT_HOST" "sudo chown -R rnd:rnd '$UAT_REMOTE_DIST' 2>/dev/null || true"
 rsync -av --delete dist/ "${UAT_HOST}:${UAT_REMOTE_DIST}/"
 
 echo "==> verifying UAT public routes"
