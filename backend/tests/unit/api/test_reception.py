@@ -294,12 +294,18 @@ def test_bot_config_and_client_escalation(app_client: TestClient, db_session: Se
     assert r_ticket.status_code == 200
     assert r_ticket.json()["ok"] is True
     assert r_ticket.json()["status"] == "converted"
-    assert "TKT-AUTO-" in r_ticket.json()["ticket_short_code"]
+    # 在线接待转出的工单进入统一 TicketRepository 编号序列，不另造 AUTO 前缀。
+    assert r_ticket.json()["ticket_short_code"].startswith("TKT-")
 
     # 9. 第三方大模型异步消息推送接口测试
     r_init2 = app_client.post(
         "/api/reception/client/init-session",
-        json={"contact_name": "李总", "company_name": "测试企业"},
+        json={
+            "contact_name": "李总",
+            "contact_phone": "13900139000",
+            "company_name": "测试企业",
+            "tax_no": "91310000TEST000001",
+        },
     )
     assert r_init2.status_code == 200
     sid2 = r_init2.json()["session"]["id"]

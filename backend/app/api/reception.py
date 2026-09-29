@@ -716,12 +716,13 @@ def create_ticket_from_reception_session(
 
     # 5. 写入状态历史变更审计
     status_hist = StatusHistory(
-        ticket_id=ticket.id,
+        entity_type="ticket",
+        entity_id=ticket.id,
         from_status="none",
         to_status="received",
         changed_by=f"reception:{session.id}",
         reason="由在线接待转工单创建",
-        created_at=now,
+        changed_at=now,
     )
     db.add(status_hist)
 
@@ -3594,5 +3595,4 @@ def client_confirm_ticket(
             status="processing",
             message="已将工单退回给处理人员继续跟进分析，我们将尽快为您解决问题！",
         )
-
 
