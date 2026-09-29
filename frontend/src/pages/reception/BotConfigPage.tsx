@@ -239,16 +239,25 @@ export function BotConfigPage() {
       newAgents = [...config.agents, profileToSave];
     }
 
-    // 若当前新增/修改为兜底智能体，同步将其设为 default_agent_id
+    // 兜底身份与 default_agent_id 保持一致：改为兜底时指向当前智能体；
+    // 原默认兜底改为正常时，切换到其他兜底智能体，若没有则清空。
     let newDefaultAgentId = config.default_agent_id;
     if (profileToSave.agent_type === "fallback") {
       newDefaultAgentId = profileToSave.id;
+    } else if (config.default_agent_id === profileToSave.id) {
+      newDefaultAgentId =
+        newAgents.find(
+          (agent) => agent.id !== profileToSave.id && agent.agent_type === "fallback"
+        )?.id || "";
     }
 
     const updatedConfig = { ...config, agents: newAgents, default_agent_id: newDefaultAgentId };
-    setConfig(updatedConfig);
+    try {
+      await handleSave(updatedConfig);
+    } catch {
+      return;
+    }
     setDrawerOpen(false);
-    await handleSave(updatedConfig);
     showToast(editingAgent ? "智能体更新成功，状态已置为禁用" : "新增智能体成功，状态已置为禁用");
   };
 
@@ -580,8 +589,7 @@ export function BotConfigPage() {
                   ) : (
                     config.agents.map((agent) => {
                       const isChecked = checkedAgentIds.includes(agent.id);
-                      const isFallback =
-                        agent.agent_type === "fallback" || config.default_agent_id === agent.id;
+                      const isFallback = agent.agent_type === "fallback";
 
                       // 智能体说明：单行最多50字，超长省略号
                       const descText = agent.description || "暂无说明";

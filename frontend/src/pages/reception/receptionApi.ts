@@ -1368,7 +1368,14 @@ export function normalizeBotConfig(raw: BotConfigData): BotConfigData {
     };
   });
 
-  return { ...raw, agents };
+  const fallbackAgentIds = agents
+    .filter((agent) => agent.agent_type === "fallback")
+    .map((agent) => agent.id);
+  const defaultAgentId = fallbackAgentIds.includes(raw.default_agent_id)
+    ? raw.default_agent_id
+    : fallbackAgentIds[0] || "";
+
+  return { ...raw, agents, default_agent_id: defaultAgentId };
 }
 
 export async function fetchBotConfig(): Promise<BotConfigData> {
@@ -1387,14 +1394,13 @@ export async function fetchBotConfig(): Promise<BotConfigData> {
 }
 
 export async function saveBotConfig(config: BotConfigData): Promise<BotConfigData> {
-  setLocalStore("bot_config", config);
-  try {
-    const res = await httpPut<BotConfigData>("/api/reception/bot-config", config);
-    if (res) return res;
-  } catch {
-    // ignore
+  const res = await httpPut<BotConfigData>("/api/reception/bot-config", config);
+  if (!res || !Array.isArray(res.agents)) {
+    throw new Error("保存智能体配置失败：服务端未返回有效配置");
   }
-  return config;
+  const normalized = normalizeBotConfig(res);
+  setLocalStore("bot_config", normalized);
+  return normalized;
 }
 
 export async function probeHumanCapacity(): Promise<ProbeCapacityResponse> {
@@ -3084,6 +3090,4 @@ export async function clientConfirmTicket(
         : "已将工单退回给处理人员继续跟进分析，我们将尽快为您解决问题！",
   };
 }
-
-
 

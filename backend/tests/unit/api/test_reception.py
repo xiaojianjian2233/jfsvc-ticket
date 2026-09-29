@@ -325,3 +325,21 @@ def test_bot_config_and_client_escalation(app_client: TestClient, db_session: Se
     r_msgs = app_client.get(f"/api/reception/client/sessions/{sid2}/messages")
     assert r_msgs.status_code == 200
     assert any("这是由外部大模型通过异步接口推送" in m["content"] for m in r_msgs.json())
+
+
+def test_bot_config_clears_default_when_fallback_becomes_normal(
+    app_client: TestClient, db_session: Session
+) -> None:
+    headers = _bearer(999, name="管理员", role="admin")
+    cfg = app_client.get("/api/reception/bot-config", headers=headers).json()
+    old_default_id = cfg["default_agent_id"]
+    old_default = next(agent for agent in cfg["agents"] if agent["id"] == old_default_id)
+    old_default["agent_type"] = "normal"
+
+    response = app_client.put("/api/reception/bot-config", json=cfg, headers=headers)
+
+    assert response.status_code == 200
+    saved = response.json()
+    assert saved["default_agent_id"] == ""
+    saved_default = next(agent for agent in saved["agents"] if agent["id"] == old_default_id)
+    assert saved_default["agent_type"] == "normal"

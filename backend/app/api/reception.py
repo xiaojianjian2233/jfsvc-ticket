@@ -288,6 +288,14 @@ DEFAULT_BOT_CONFIG = {
 }
 
 
+def normalize_bot_default_agent(config: BotConfigData) -> BotConfigData:
+    """Ensure the default pointer only targets an explicitly configured fallback agent."""
+    fallback_agent_ids = [agent.id for agent in config.agents if agent.agent_type == "fallback"]
+    if config.default_agent_id not in fallback_agent_ids:
+        config.default_agent_id = fallback_agent_ids[0] if fallback_agent_ids else ""
+    return config
+
+
 def get_db_bot_config(db: Session) -> BotConfigData:
     setting = db.query(SystemSetting).filter(SystemSetting.key == SETTING_KEY_BOT_CONFIG).first()
     config: BotConfigData | None = None
@@ -321,10 +329,13 @@ def get_db_bot_config(db: Session) -> BotConfigData:
             a.source_channels = ["全部"]
         if not a.transfer_human_rule:
             a.transfer_human_rule = "客户回复未解决且在人工工作时间有空闲坐席时触发转人工"
-    return config
+    return normalize_bot_default_agent(config)
 
 
-def save_db_bot_config(db: Session, config: BotConfigData, user_id: int | None = None) -> BotConfigData:
+def save_db_bot_config(
+    db: Session, config: BotConfigData, user_id: int | None = None
+) -> BotConfigData:
+    config = normalize_bot_default_agent(config)
     setting = db.query(SystemSetting).filter(SystemSetting.key == SETTING_KEY_BOT_CONFIG).first()
     json_val = json.dumps(config.model_dump())
     if setting:
@@ -361,12 +372,20 @@ def match_bot_agent(
             welcome_message="您好！我是发票云智能AI助手，请问有什么可以帮您？",
         )
 
-    # 兜底智能体寻找：优先标记为 fallback 的智能体，或 default_agent_id，兜底第一个
-    fallback_agent = next((a for a in enabled_agents if a.agent_type == "fallback"), None)
+    # 兜底智能体寻找：优先使用 default_agent_id 指向的显式 fallback 智能体，
+    # 再取其他 fallback；未配置兜底时才降级使用第一个启用的智能体。
+    fallback_agent = next(
+        (
+            a
+            for a in enabled_agents
+            if a.id == config.default_agent_id and a.agent_type == "fallback"
+        ),
+        None,
+    )
     if not fallback_agent:
-        fallback_agent = next(
-            (a for a in enabled_agents if a.id == config.default_agent_id), enabled_agents[0]
-        )
+        fallback_agent = next((a for a in enabled_agents if a.agent_type == "fallback"), None)
+    if not fallback_agent:
+        fallback_agent = enabled_agents[0]
 
     # 收集来访客户的产品线候选词与渠道
     prod_candidates: list[str] = []
@@ -3611,4 +3630,3 @@ def client_confirm_ticket(
             status="processing",
             message="已将工单退回给处理人员继续跟进分析，我们将尽快为您解决问题！",
         )
-

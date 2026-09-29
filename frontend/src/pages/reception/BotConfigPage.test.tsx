@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { http, HttpResponse } from "msw";
+import { server } from "../../../tests/msw-server";
 import { BotConfigPage } from "./BotConfigPage";
+import { DEFAULT_BOT_CONFIG, type BotConfigData } from "./receptionApi";
 
 describe("BotConfigPage (智能解答配置优化第二期)", () => {
   beforeEach(() => {
@@ -9,6 +12,68 @@ describe("BotConfigPage (智能解答配置优化第二期)", () => {
     vi.restoreAllMocks();
     window.alert = vi.fn();
     window.confirm = vi.fn(() => true);
+    server.use(
+      http.get("*/api/reception/bot-config", () => HttpResponse.json(DEFAULT_BOT_CONFIG)),
+      http.put("*/api/reception/bot-config", async ({ request }) =>
+        HttpResponse.json(await request.json())
+      )
+    );
+  });
+
+  it("shows the persisted agent type and clears a stale default fallback when saving", async () => {
+    const normalAgent = {
+      ...DEFAULT_BOT_CONFIG.agents.find((agent) => agent.code === "AGENT0003")!,
+      agent_type: "normal" as const,
+    };
+    const uatConfig: BotConfigData = {
+      ...DEFAULT_BOT_CONFIG,
+      agents: [normalAgent],
+      default_agent_id: normalAgent.id,
+    };
+    let savedConfig: BotConfigData | undefined;
+    server.use(
+      http.get("*/api/reception/bot-config", () => HttpResponse.json(uatConfig)),
+      http.put("*/api/reception/bot-config", async ({ request }) => {
+        savedConfig = (await request.json()) as BotConfigData;
+        return HttpResponse.json(savedConfig);
+      })
+    );
+
+    render(
+      <MemoryRouter>
+        <BotConfigPage />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "AGENT0003" }));
+    expect(screen.getByDisplayValue("正常智能体")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+
+    await waitFor(() => {
+      expect(savedConfig?.default_agent_id).toBe("");
+      expect(screen.getByText("智能体更新成功，状态已置为禁用")).toBeInTheDocument();
+    });
+    expect(screen.getByText("正常智能体")).toBeInTheDocument();
+  });
+
+  it("keeps the editor open and reports an error when saving fails", async () => {
+    server.use(
+      http.put("*/api/reception/bot-config", () =>
+        HttpResponse.json({ detail: "save failed" }, { status: 500 })
+      )
+    );
+    render(
+      <MemoryRouter>
+        <BotConfigPage />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "AGENT0001" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+
+    expect(await screen.findByText("保存配置失败，请重试")).toBeInTheDocument();
+    expect(screen.getByText("智能体维护")).toBeInTheDocument();
+    expect(screen.queryByText("智能体更新成功，状态已置为禁用")).not.toBeInTheDocument();
   });
 
   it("renders 14px tabs with white box, removes 消息分流规则 tab, shows 5 unified action buttons", async () => {
