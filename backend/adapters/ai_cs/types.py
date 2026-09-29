@@ -16,7 +16,7 @@ from typing import Any
 class AiCsConfig:
     app_id: str
     app_key: str
-    base_url: str = "http://123.207.158.7:5000/fpy_agent"
+    base_url: str = "https://apse-sg-proxy.piaozone.com/agent"
     timeout_seconds: float = 180.0  # replay 走 LLM，AI 客服服务端较慢，留足余量
     # Skills the AI 客服 side allows managing (mirror of its MANAGED_SKILLS env).
     managed_skills: tuple[str, ...] = ("customer-service", "customer-service-feishu")
@@ -30,11 +30,24 @@ class AiCsConfig:
     def from_settings(cls, settings: Any) -> AiCsConfig:
         raw = getattr(settings, "ai_cs_managed_skills", "") or ""
         skills = tuple(s.strip() for s in raw.split(",") if s.strip())
-        raw_url = str(getattr(settings, "ai_cs_base_url", "") or "http://123.207.158.7:5000/fpy_agent").strip()
+        raw_url = str(
+            getattr(settings, "ai_cs_base_url", "")
+            or "https://apse-sg-proxy.piaozone.com/agent"
+        ).strip()
         cleaned_url = raw_url.rstrip("/,").rstrip("/,")
+        app_id = (
+            getattr(settings, "ai_cs_app_id", "")
+            or getattr(settings, "open_api_app_id", "")
+            or "zc1c6hjdsiFGiz"
+        )
+        app_key = (
+            getattr(settings, "ai_cs_app_key", "")
+            or getattr(settings, "open_api_app_key", "")
+            or "1de1f420ed08409bbc3d4b9a156b4941"
+        )
         return cls(
-            app_id=getattr(settings, "ai_cs_app_id", ""),
-            app_key=getattr(settings, "ai_cs_app_key", ""),
+            app_id=app_id,
+            app_key=app_key,
             base_url=cleaned_url,
             timeout_seconds=float(getattr(settings, "ai_cs_timeout_seconds", 180.0) or 180.0),
             managed_skills=skills or ("customer-service", "customer-service-feishu"),

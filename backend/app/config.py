@@ -1,5 +1,6 @@
 """Runtime settings loaded from env / .env."""
 
+import os
 from functools import lru_cache
 from typing import Literal
 
@@ -160,9 +161,18 @@ class Settings(BaseSettings):
     # 主管从 escalation 工单反思 → 改 AI 客服 skill draft → replay 试跑对比 → 发布。
     # 默认关；配好 base_url + appid/app_key 后开。见 adapters/ai_cs/。
     knowledge_feedback_enabled: bool = False
-    ai_cs_base_url: str = "http://123.207.158.7:5000/fpy_agent"
-    ai_cs_app_id: str = "sadajfkefhksjh"  # AI 客服 open-api appid
-    ai_cs_app_key: str = "addk23-adasfsf-asdasc"  # 签名密钥 app_key (MD5(appid+create_time+app_key))
+
+    # 【正式（生产）环境配置】默认启用：
+    #   base_url: https://apse-sg-proxy.piaozone.com/agent
+    #   appid:    zc1c6hjdsiFGiz
+    #   app_key:  1de1f420ed08409bbc3d4b9a156b4941
+    # 【测试环境配置】备查：
+    #   base_url: http://123.207.158.7:5000/fpy_agent
+    #   appid:    sadajfkefhksjh
+    #   app_key:  addk23-adasfsf-asdasc
+    ai_cs_base_url: str = "https://apse-sg-proxy.piaozone.com/agent"
+    ai_cs_app_id: str = "zc1c6hjdsiFGiz"  # AI 客服 open-api appid (支持 OPEN_API_APP_ID 环境变量覆盖)
+    ai_cs_app_key: str = "1de1f420ed08409bbc3d4b9a156b4941"  # 签名密钥 (支持 OPEN_API_APP_KEY 环境变量覆盖)
     ai_cs_managed_skills: str = "customer-service,customer-service-feishu"
     # replay 走 LLM 生成，AI 客服服务端可能较慢；客户端超时（秒）。可 .env 覆盖。
     ai_cs_timeout_seconds: float = 180.0
@@ -236,6 +246,19 @@ class Settings(BaseSettings):
     def _resolve_gate_classify(self) -> "Settings":
         if self.gate_classify_enabled is None:
             object.__setattr__(self, "gate_classify_enabled", self.require_review_before_linear)
+        return self
+
+    @model_validator(mode="after")
+    def _resolve_ai_cs_credentials(self) -> "Settings":
+        env_id = os.environ.get("OPEN_API_APP_ID", "").strip() or os.environ.get("AI_CS_APP_ID", "").strip()
+        if env_id:
+            object.__setattr__(self, "ai_cs_app_id", env_id)
+        env_key = os.environ.get("OPEN_API_APP_KEY", "").strip() or os.environ.get("AI_CS_APP_KEY", "").strip()
+        if env_key:
+            object.__setattr__(self, "ai_cs_app_key", env_key)
+        env_url = os.environ.get("AI_CS_BASE_URL", "").strip()
+        if env_url:
+            object.__setattr__(self, "ai_cs_base_url", env_url)
         return self
 
 

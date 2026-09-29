@@ -667,10 +667,20 @@ export default defineConfig({
           };
         };
 
-        const CHANNEL_APP_ID = process.env.AI_CS_APP_ID || "sadajfkefhksjh";
-        const CHANNEL_APP_KEY = process.env.AI_CS_APP_KEY || "addk23-adasfsf-asdasc";
+        // 【正式（生产）环境配置】默认启用：
+        //   base_url: https://apse-sg-proxy.piaozone.com/agent
+        //   appid:    zc1c6hjdsiFGiz
+        //   app_key:  1de1f420ed08409bbc3d4b9a156b4941
+        // 【测试环境配置】备查：
+        //   base_url: http://123.207.158.7:5000/fpy_agent
+        //   appid:    sadajfkefhksjh
+        //   app_key:  addk23-adasfsf-asdasc
+        const CHANNEL_APP_ID =
+          process.env.OPEN_API_APP_ID || process.env.AI_CS_APP_ID || "zc1c6hjdsiFGiz";
+        const CHANNEL_APP_KEY =
+          process.env.OPEN_API_APP_KEY || process.env.AI_CS_APP_KEY || "1de1f420ed08409bbc3d4b9a156b4941";
         const CHANNEL_BASE_URL = (
-          process.env.AI_CS_BASE_URL || "http://123.207.158.7:5000/fpy_agent"
+          process.env.AI_CS_BASE_URL || "https://apse-sg-proxy.piaozone.com/agent"
         )
           .trim()
           .replace(/[\/,\s]+$/, "");

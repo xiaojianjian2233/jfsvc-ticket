@@ -2247,8 +2247,16 @@ def client_init_session(
     # 预创建大模型通道会话标识 ai_agent_cid（与本地会话 ID 建立 1 对 1 绑定关系）
     init_cid: str | None = None
     settings = get_settings()
-    ai_cs_app_id = (getattr(settings, "ai_cs_app_id", "") or os.environ.get("AI_CS_APP_ID", "")).strip()
-    ai_cs_app_key = (getattr(settings, "ai_cs_app_key", "") or os.environ.get("AI_CS_APP_KEY", "")).strip()
+    ai_cs_app_id = (
+        getattr(settings, "ai_cs_app_id", "")
+        or os.environ.get("OPEN_API_APP_ID", "")
+        or os.environ.get("AI_CS_APP_ID", "")
+    ).strip()
+    ai_cs_app_key = (
+        getattr(settings, "ai_cs_app_key", "")
+        or os.environ.get("OPEN_API_APP_KEY", "")
+        or os.environ.get("AI_CS_APP_KEY", "")
+    ).strip()
     if ai_cs_app_id and ai_cs_app_key:
         try:
             cfg = AiCsConfig.from_settings(settings)
@@ -2534,8 +2542,16 @@ def client_send_message(
 
             # 1. 优先调用 Open API Channel 同步问答（基于 open-api-channel.md 规范，传入智能体配置的 skill）
             settings = get_settings()
-            ai_cs_app_id = (getattr(settings, "ai_cs_app_id", "") or os.environ.get("AI_CS_APP_ID", "")).strip()
-            ai_cs_app_key = (getattr(settings, "ai_cs_app_key", "") or os.environ.get("AI_CS_APP_KEY", "")).strip()
+            ai_cs_app_id = (
+                getattr(settings, "ai_cs_app_id", "")
+                or os.environ.get("OPEN_API_APP_ID", "")
+                or os.environ.get("AI_CS_APP_ID", "")
+            ).strip()
+            ai_cs_app_key = (
+                getattr(settings, "ai_cs_app_key", "")
+                or os.environ.get("OPEN_API_APP_KEY", "")
+                or os.environ.get("AI_CS_APP_KEY", "")
+            ).strip()
             if ai_cs_app_id and ai_cs_app_key:
                 try:
                     cfg = AiCsConfig.from_settings(settings)
