@@ -9,6 +9,7 @@ from .exceptions import (
 )
 from .types import (
     AiCsConfig,
+    ChannelAnswerResult,
     DraftSummary,
     ReplayResult,
     SkillDetail,
@@ -24,6 +25,7 @@ __all__ = [
     "AiCsConfig",
     "AiCsError",
     "AiCsNetworkError",
+    "ChannelAnswerResult",
     "DraftSummary",
     "ReplayResult",
     "SkillDetail",
@@ -31,3 +33,4 @@ __all__ = [
     "SkillSummary",
     "SkillVersion",
 ]
+

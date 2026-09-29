@@ -22,16 +22,26 @@ from __future__ import annotations
 import hashlib
 import time
 from collections.abc import Callable
+import logging
 from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
 
-from app.core.logging import get_logger
+try:
+    from app.core.logging import get_logger
+    logger = get_logger(__name__)
+except Exception:
+    logger = logging.getLogger(__name__)
+
+_OK = "0000"
+# Refresh the token this many seconds before it actually expires.
+_TOKEN_REFRESH_MARGIN = 300.0
 
 from .exceptions import AiCsAuthError, AiCsBusinessError, AiCsNetworkError
 from .types import (
     AiCsConfig,
+    ChannelAnswerResult,
     DraftSummary,
     ReplayResult,
     SkillDetail,
@@ -39,12 +49,6 @@ from .types import (
     SkillSummary,
     SkillVersion,
 )
-
-logger = get_logger(__name__)
-
-_OK = "0000"
-# Refresh the token this many seconds before it actually expires.
-_TOKEN_REFRESH_MARGIN = 300.0
 
 
 class AiCsClient:
@@ -57,7 +61,7 @@ class AiCsClient:
     ) -> None:
         self._cfg = config
         self._owns_http = http_client is None
-        self._http = http_client or httpx.Client(timeout=config.timeout_seconds)
+        self._http = http_client or httpx.Client(timeout=config.timeout_seconds, trust_env=False)
         self._clock = clock
         self._token: str | None = None
         self._token_expires_at: float = 0.0
@@ -171,6 +175,81 @@ class AiCsClient:
             trace_id=str(d.get("trace_id") or ""),
         )
 
+    # ---- channel open-api (ask / session) ---------------------------
+
+    def ask_init(self) -> str:
+        """GET /open-api/ask/ask_init — 创建新会话，返回 ai_agent_cid。"""
+        initialized = self._request("GET", "/open-api/ask/ask_init")
+        cid = initialized.get("ai_agent_cid") if isinstance(initialized, dict) else None
+        if not isinstance(cid, str) or not cid:
+            raise AiCsBusinessError("AI 客服初始化会话未返回 ai_agent_cid")
+        return cid
+
+    def answer_no_stream(
+        self,
+        question: str,
+        *,
+        cid: str | None = None,
+        skill: str | None = None,
+        uid: str | None = None,
+        user_name: str | None = None,
+        show_question: str | None = None,
+        msg_type: str = "TEXT",
+        params: dict[str, Any] | None = None,
+        images: list[str] | None = None,
+    ) -> ChannelAnswerResult:
+        """POST /open-api/ask/answer_no_stream — 同步问答（非流式）。
+
+        若未传入 cid，自动调用 ask_init 初始化新会话。
+        返回包含 answer 答复文本与 transfer_result（转人工判定）的结果对象。
+        """
+        active_cid = cid or self.ask_init()
+        body: dict[str, Any] = {
+            "question": question,
+            "ai_agent_cid": active_cid,
+        }
+        if skill:
+            body["skill"] = skill
+        if uid:
+            body["uid"] = uid
+        if user_name:
+            body["user_name"] = user_name
+        if show_question:
+            body["show_question"] = show_question
+        if msg_type:
+            body["msg_type"] = msg_type
+        if params is not None:
+            body["params"] = params
+        if images is not None:
+            if not 1 <= len(images) <= 5:
+                raise ValueError("images must contain 1 to 5 URLs")
+            if any(urlsplit(url).scheme not in ("http", "https") for url in images):
+                raise ValueError("images require HTTP/HTTPS URLs")
+            body["images"] = images
+
+        data = self._request("POST", "/open-api/ask/answer_no_stream", json=body)
+        if isinstance(data, dict):
+            data = [data]
+        if not isinstance(data, list) or not data or not all(isinstance(r, dict) for r in data):
+            raise AiCsBusinessError("AI 客服同步问答返回格式错误，期望 list[dict] 或 dict")
+
+        first = data[0]
+        answer_text = "\n\n".join(str(row.get("answer") or "") for row in data)
+        return ChannelAnswerResult(
+            answer=answer_text,
+            transfer_result=str(first.get("transfer_result") or "NO_ACTION"),
+            ai_agent_cid=str(first.get("ai_agent_cid") or active_cid),
+            robot_answer_type=str(first.get("robot_answer_type") or "QA_DIRECT"),
+            robot_answer_message_type=str(first.get("robot_answer_message_type") or "MESSAGE"),
+            roundid=first.get("roundid"),
+        )
+
+    def end_session(self, cid: str) -> None:
+        """POST /open-api/ask/end_session — 销毁指定会话，释放服务端会话资源。"""
+        if not cid:
+            return
+        self._request("POST", "/open-api/ask/end_session", json={"ai_agent_cid": cid})
+
     def answer_with_images(
         self,
         *,
@@ -183,33 +262,22 @@ class AiCsClient:
         Images are a top-level array, never HTML inside replay.question. This
         endpoint does not document cited_knowledge; do not invent citations.
         """
-        if not 1 <= len(images) <= 5:
-            raise ValueError("images must contain 1 to 5 URLs")
-        if any(urlsplit(url).scheme not in ("http", "https") for url in images):
-            raise ValueError("images require HTTP/HTTPS URLs")
-        initialized = self._request("GET", "/open-api/ask/ask_init")
-        cid = initialized.get("ai_agent_cid") if isinstance(initialized, dict) else None
-        if not isinstance(cid, str) or not cid:
-            raise AiCsBusinessError("AI 客服初始化会话未返回 ai_agent_cid")
+        cid = self.ask_init()
         try:
-            body: dict[str, Any] = {"question": question, "ai_agent_cid": cid, "images": images}
-            if skill:
-                body["skill"] = skill
-            data = self._request("POST", "/open-api/ask/answer_no_stream", json=body)
-            if not isinstance(data, list) or not data or not all(isinstance(r, dict) for r in data):
-                raise AiCsBusinessError("AI 客服图片答复返回格式错误")
+            res = self.answer_no_stream(question=question, cid=cid, images=images, skill=skill)
             return ReplayResult(
-                answer="\n\n".join(str(row.get("answer") or "") for row in data),
+                answer=res.answer,
                 cited_knowledge=[],
                 skills_used=[],
                 trace_id="",
             )
         finally:
             try:
-                self._request("POST", "/open-api/ask/end_session", json={"ai_agent_cid": cid})
+                self.end_session(cid)
             except Exception as exc:
                 # Cleanup must not discard a successful answer or mask the primary error.
                 logger.warning("ai_cs_image_session_cleanup_failed", error_type=type(exc).__name__)
+
 
     # ---- auth -------------------------------------------------------
 
@@ -251,7 +319,7 @@ class AiCsClient:
             resp = self._http.request(
                 method,
                 f"{self._cfg.base_url}{path}",
-                headers={"token": token, "Content-Type": "application/json"},
+                headers={"token": token, "Content-Type": "application/json", "Connection": "close"},
                 json=json,
                 timeout=self._cfg.timeout_seconds,
             )
@@ -272,8 +340,8 @@ class AiCsClient:
             body = resp.json()
         except ValueError as e:
             raise AiCsBusinessError(f"AI 客服 non-JSON response: {e}") from e
-        errcode = str(body.get("errcode"))
-        if errcode != _OK:
+        errcode = str(body.get("errcode") or "")
+        if errcode not in (_OK, "000000", "0"):
             raise AiCsBusinessError(
                 str(body.get("description") or "AI 客服 business error"),
                 error_code=errcode,

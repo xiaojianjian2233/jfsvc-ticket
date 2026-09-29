@@ -49,6 +49,7 @@ function exportSessionsToExcel(targetSessions: SessionItem[], fileName: string) 
 
   const rows = targetSessions.map((s) => ({
     会话ID: s.id,
+    大模型CID: s.ai_agent_cid ?? "—",
     咨询企业: s.company_name,
     咨询企业税号: s.tax_no ?? "—",
     归属租户: s.tenant_name || s.tenant_no || "—",
@@ -65,6 +66,7 @@ function exportSessionsToExcel(targetSessions: SessionItem[], fileName: string) 
   const ws = XLSX.utils.json_to_sheet(rows);
   ws["!cols"] = [
     { wch: 20 }, // 会话ID
+    { wch: 26 }, // 大模型CID
     { wch: 28 }, // 咨询企业
     { wch: 22 }, // 咨询企业税号
     { wch: 20 }, // 归属租户
@@ -699,6 +701,9 @@ export function SessionListPage() {
                 >
                   会话ID
                 </th>
+                <th className="px-3.5 py-2.5 whitespace-nowrap text-[13px] font-bold sticky top-0 z-20 bg-slate-50 min-w-[150px]">
+                  大模型CID
+                </th>
                 <th className="px-3.5 py-2.5 whitespace-nowrap text-[13px] font-bold sticky top-0 z-20 bg-slate-50">
                   咨询企业
                 </th>
@@ -737,13 +742,13 @@ export function SessionListPage() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={13} className="text-center py-16 text-slate-400 text-[13px] whitespace-nowrap">
+                  <td colSpan={14} className="text-center py-16 text-slate-400 text-[13px] whitespace-nowrap">
                     数据加载中...
                   </td>
                 </tr>
               ) : sessions.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="text-center py-16 text-slate-400 text-[13px] whitespace-nowrap">
+                  <td colSpan={14} className="text-center py-16 text-slate-400 text-[13px] whitespace-nowrap">
                     暂无符合条件的会话记录
                   </td>
                 </tr>
@@ -775,6 +780,19 @@ export function SessionListPage() {
                       >
                         {s.id}
                       </button>
+                    </td>
+                    {/* 大模型CID：展示与会话 1 对 1 绑定的 ai_agent_cid */}
+                    <td className="px-3.5 py-2.5 font-mono whitespace-nowrap">
+                      {s.ai_agent_cid ? (
+                        <span
+                          className="inline-block px-1.5 py-0.5 rounded text-[12px] font-medium bg-purple-50 text-purple-700 border border-purple-200 font-mono"
+                          title={`大模型会话CID (1对1绑定): ${s.ai_agent_cid}`}
+                        >
+                          {s.ai_agent_cid}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
                     </td>
                     {/* 咨询企业：不换行，完整展示 */}
                     <td className="px-3.5 py-2.5 font-medium text-slate-800 whitespace-nowrap">
@@ -938,6 +956,15 @@ export function SessionListPage() {
                 <span className="text-[14px] font-bold text-slate-900 font-mono">
                   {selectedSession.id}
                 </span>
+                {selectedSession.ai_agent_cid && (
+                  <span
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-purple-50 text-purple-700 border border-purple-200"
+                    title={`大模型会话CID (1对1绑定): ${selectedSession.ai_agent_cid}`}
+                  >
+                    <span className="text-purple-500 font-normal">大模型CID:</span>
+                    <span>{selectedSession.ai_agent_cid}</span>
+                  </span>
+                )}
                 <span className="text-[12px] text-slate-500">
                   {renderStatusBadge(selectedSession.status)}
                 </span>
@@ -1033,6 +1060,15 @@ export function SessionListPage() {
                     </div>
                   </div>
                 </div>
+                {selectedSession.ai_agent_cid && (
+                  <div className="pt-2.5 mt-1 border-t border-slate-200/80 flex items-center gap-2 text-[12px]">
+                    <span className="text-slate-400 font-normal">大模型通道会话标识 (ai_agent_cid):</span>
+                    <span className="font-mono font-medium text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                      {selectedSession.ai_agent_cid}
+                    </span>
+                    <span className="text-slate-400 text-[11px]">（与本会话严格 1 对 1 绑定）</span>
+                  </div>
+                )}
               </div>
 
               {/* 3 & 4) 客户问题总结：13号字体加粗，展示矩形框距离内容总结 5px */}

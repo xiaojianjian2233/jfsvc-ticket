@@ -45,6 +45,11 @@ tmp/
 *.db
 .reception_notices_dev.json
 *.reception_notices_dev.json
+.dev_reception_sessions.json
+*.dev_reception_sessions.json
+.bot-config-store.json
+*.bot-config-store.json
+scratch/
 
 # Playwright
 test-results/

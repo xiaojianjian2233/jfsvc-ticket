@@ -62,17 +62,24 @@ export function TabsProvider({
   const [state, setState] = useState<Persisted>(() => {
     const persisted = loadPersisted();
     if (persisted) {
+      // 刷新已有 tab 标题：如果现有 tab 标题等于 path 本身或以 / 开头（之前未命中静态标题的 fallback），自动通过 resolveTitle 修正
+      const refreshedTabs = persisted.tabs.map((t) => {
+        if (t.title.startsWith("/") || t.title === t.key) {
+          return { ...t, title: resolveTitle(t.path) };
+        }
+        return t;
+      });
       // 确保当前 URL 对应的 tab 存在且激活（刷新到某详情页时）
       const k = keyOf(initialPath);
-      if (!persisted.tabs.some((t) => t.key === k)) {
-        persisted.tabs.push({
+      if (!refreshedTabs.some((t) => t.key === k)) {
+        refreshedTabs.push({
           key: k,
           path: initialPath,
           title: resolveTitle(initialPath),
           closable: true,
         });
       }
-      return { tabs: persisted.tabs, activeKey: k };
+      return { tabs: refreshedTabs, activeKey: k };
     }
     const k = keyOf(initialPath);
     return {
@@ -101,6 +108,8 @@ export function TabsProvider({
                   title:
                     title && title !== "…" && !title.endsWith("…")
                       ? title
+                      : existing.title.startsWith("/")
+                      ? resolveTitle(path)
                       : t.title,
                 }
               : t,

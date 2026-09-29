@@ -209,3 +209,113 @@ def test_workbench_flow(app_client: TestClient, db_session: Session) -> None:
     )
     assert r_search.status_code == 200
     assert len(r_search.json()) >= 1
+
+
+def test_bot_config_and_client_escalation(app_client: TestClient, db_session: Session) -> None:
+    headers = _bearer(999, name="管理员", role="admin")
+
+    # 1. 获取 Bot 配置
+    r = app_client.get("/api/reception/bot-config", headers=headers)
+    assert r.status_code == 200
+    cfg = r.json()
+    assert len(cfg["agents"]) >= 3
+    assert len(cfg["routing_rules"]) >= 2
+    assert cfg["escalation_strategy"]["enable_agent_reception"] is True
+
+    # 2. 更新 Bot 配置
+    cfg["escalation_strategy"]["ask_transfer_text"] = "【自定义】请问需要转接人工客服吗？"
+    r_put = app_client.put("/api/reception/bot-config", json=cfg, headers=headers)
+    assert r_put.status_code == 200
+    assert r_put.json()["escalation_strategy"]["ask_transfer_text"] == "【自定义】请问需要转接人工客服吗？"
+
+    # 3. 探针接口
+    r_probe = app_client.get("/api/reception/client/probe-human-capacity")
+    assert r_probe.status_code == 200
+    probe_data = r_probe.json()
+    assert "can_transfer_human" in probe_data
+    assert "action_type" in probe_data
+
+    # 4. 客户端初始化会话（命中 Agent 接待）
+    r_init = app_client.post(
+        "/api/reception/client/init-session",
+        json={
+            "contact_name": "王经理",
+            "contact_phone": "13800138000",
+            "company_name": "数电科技有限公司",
+            "tax_no": "91110108MA00000000",
+            "purchased_products": ["数电票标准版"],
+        },
+    )
+    assert r_init.status_code == 200
+    init_data = r_init.json()
+    sid = init_data["session"]["id"]
+    assert init_data["session"]["is_human"] is False
+    assert init_data["session"]["status"] == "in_progress"
+    # 第一条消息应为 Bot 发出的欢迎语
+    msgs = init_data["messages"]
+    assert len(msgs) >= 1
+    assert msgs[0]["sender_type"] == "bot"
+
+    # 5. 客户发消息，触发 Bot 自动作答
+    r_msg = app_client.post(
+        f"/api/reception/client/sessions/{sid}/send-message",
+        json={"content": "请问红字发票怎么开？", "sender_name": "王经理"},
+    )
+    assert r_msg.status_code == 200
+    # 再次查询消息列表，应包含客户提问与 Bot 的自动回答
+    r_all_msgs = app_client.get(f"/api/reception/client/sessions/{sid}/messages")
+    assert r_all_msgs.status_code == 200
+    all_msgs = r_all_msgs.json()
+    assert len(all_msgs) >= 3
+    assert any("红字发票" in m["content"] for m in all_msgs if m["sender_type"] == "bot")
+
+    # 6. 客户反馈未解决
+    r_unresolved = app_client.post(f"/api/reception/client/sessions/{sid}/unresolved")
+    assert r_unresolved.status_code == 200
+    unres_data = r_unresolved.json()
+    assert unres_data["ok"] is True
+    assert unres_data["action_type"] in ("ask_transfer", "guide_ticket")
+
+    # 7. 客户确认转人工
+    r_esc = app_client.post(f"/api/reception/client/sessions/{sid}/escalate-human")
+    assert r_esc.status_code == 200
+    esc_data = r_esc.json()
+    assert esc_data["session"]["is_human"] is True
+    assert "未解决" in esc_data["session"]["summary"]
+
+    # 8. 一键提交售后工单
+    r_ticket = app_client.post(
+        f"/api/reception/client/sessions/{sid}/submit-ticket",
+        json={
+            "title": "数电发票开具红字异常协助",
+            "description": "客户咨询红字发票开具多次提示异常，申请专家工单协助排查",
+        },
+    )
+    assert r_ticket.status_code == 200
+    assert r_ticket.json()["ok"] is True
+    assert r_ticket.json()["status"] == "converted"
+    assert "TKT-AUTO-" in r_ticket.json()["ticket_short_code"]
+
+    # 9. 第三方大模型异步消息推送接口测试
+    r_init2 = app_client.post(
+        "/api/reception/client/init-session",
+        json={"contact_name": "李总", "company_name": "测试企业"},
+    )
+    assert r_init2.status_code == 200
+    sid2 = r_init2.json()["session"]["id"]
+
+    r_llm = app_client.post(
+        "/api/reception/webhook/llm-reply",
+        json={
+            "session_id": sid2,
+            "content": "这是由外部大模型通过异步接口推送的智能回复内容。",
+            "sender_name": "外部GLM智能助手",
+        },
+    )
+    assert r_llm.status_code == 200
+    assert r_llm.json()["ok"] is True
+
+    # 验证消息已进入会话
+    r_msgs = app_client.get(f"/api/reception/client/sessions/{sid2}/messages")
+    assert r_msgs.status_code == 200
+    assert any("这是由外部大模型通过异步接口推送" in m["content"] for m in r_msgs.json())

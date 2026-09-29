@@ -160,9 +160,9 @@ class Settings(BaseSettings):
     # 主管从 escalation 工单反思 → 改 AI 客服 skill draft → replay 试跑对比 → 发布。
     # 默认关；配好 base_url + appid/app_key 后开。见 adapters/ai_cs/。
     knowledge_feedback_enabled: bool = False
-    ai_cs_base_url: str = "http://localhost:9090"
-    ai_cs_app_id: str = ""  # AI 客服 open-api appid（沿用 sample AGENT_APPID 语义）
-    ai_cs_app_key: str = ""  # 签名密钥 app_key（MD5(appid+create_time+app_key)）
+    ai_cs_base_url: str = "http://123.207.158.7:5000/fpy_agent"
+    ai_cs_app_id: str = "sadajfkefhksjh"  # AI 客服 open-api appid
+    ai_cs_app_key: str = "addk23-adasfsf-asdasc"  # 签名密钥 app_key (MD5(appid+create_time+app_key))
     ai_cs_managed_skills: str = "customer-service,customer-service-feishu"
     # replay 走 LLM 生成，AI 客服服务端可能较慢；客户端超时（秒）。可 .env 覆盖。
     ai_cs_timeout_seconds: float = 180.0

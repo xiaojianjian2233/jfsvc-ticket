@@ -1485,6 +1485,7 @@ class ReceptionSession(Base):
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)  # ZXHHyyyymmdd0000
+    ai_agent_cid: Mapped[str | None] = mapped_column(String(64), nullable=True)  # 对应大模型通道会话 CID (1对1)
     company_name: Mapped[str] = mapped_column(String(256), nullable=False)
     tax_no: Mapped[str | None] = mapped_column(String(64), nullable=True)
     tenant_no: Mapped[str | None] = mapped_column(String(64), nullable=True)

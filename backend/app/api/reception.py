@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import random
+import re
 import time
 import uuid
 from datetime import UTC, datetime
@@ -20,20 +21,31 @@ from sqlalchemy import String, desc, func, or_
 from sqlalchemy.orm import Session
 
 from app.api.deps.auth import AuthedUser, require_user
+from app.config import get_settings
 from app.db import get_session
 from app.models import (
     CustomerIdentity,
+    ProductLine,
     ReceptionAgent,
     ReceptionMessage,
     ReceptionNotice,
     ReceptionSession,
+    Source,
     StatusHistory,
     SystemSetting,
     Ticket,
     User,
 )
+from app.repositories.ticket import TicketRepository
+from app.services.ingest.catalog_upsert import safe_product_line_code
+from adapters.ai_cs import AiCsClient, AiCsConfig, AiCsError
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+# 内存会话缓存：维护 session_id -> ai_agent_cid 映射，支持多轮连续问答
+_session_ai_cid_cache: dict[str, str] = {}
+
 
 
 # -----------------------------------------------------------------------------
@@ -85,6 +97,642 @@ def get_db_schedule_settings(db: Session) -> ScheduleSettings:
         except Exception:
             pass
     return ScheduleSettings.model_validate(DEFAULT_SCHEDULE)
+
+
+# -----------------------------------------------------------------------------
+# Pydantic Schemas - Bot Config & Routing
+# -----------------------------------------------------------------------------
+
+
+class BotAgentProfile(BaseModel):
+    id: str
+    code: str = ""
+    name: str
+    avatar: str = "🤖"
+    agent_type: str = "normal"  # normal (正常智能体) | fallback (兜底智能体)
+    description: str = ""
+    webhook_url: str | None = None
+    welcome_message: str = "您好！我是智能小助手，请问有什么可以帮您？"
+    unresolved_prompt: str = "很抱歉没能彻底解决您的问题。"
+    system_prompt: str = "你是一名专业的发票云技术支持专家，请热情、专业、准确地解答用户的问题。"
+    skills: list[str] = Field(default_factory=list)
+    product_lines: list[str] = Field(default_factory=lambda: ["全部"])
+    source_channels: list[str] = Field(default_factory=lambda: ["全部"])
+    support_transfer_human: bool = True
+    transfer_human_rule: str = "客户回复未解决且在人工工作时间有空闲坐席时触发转人工"
+    temperature: float = 0.3
+    is_enabled: bool = True
+    created_at: str = ""
+    created_by: str = "系统管理员"
+
+
+class BotRoutingCondition(BaseModel):
+    match_mode: str = "any"  # any | all
+    product_keywords: list[str] = Field(default_factory=list)
+    company_keywords: list[str] = Field(default_factory=list)
+    message_keywords: list[str] = Field(default_factory=list)
+
+
+class BotRoutingRule(BaseModel):
+    id: str
+    name: str
+    target_agent_id: str
+    conditions: BotRoutingCondition = Field(default_factory=BotRoutingCondition)
+    is_enabled: bool = True
+
+
+class BotEscalationStrategy(BaseModel):
+    enable_agent_reception: bool = True
+    probe_working_hours: bool = True
+    probe_human_agents: bool = True
+    ask_transfer_text: str = "很抱歉没能解决您的问题。当前有在线专业人工客服，是否为您转接人工坐席？"
+    no_human_guide_text: str = "当前人工坐席均在忙碌中或已下班，建议您直接提交售后工单，我们将由技术专家加急排查并在第一时间答复您！"
+    show_ticket_button: bool = True
+
+
+class BotConfigData(BaseModel):
+    agents: list[BotAgentProfile] = Field(default_factory=list)
+    routing_rules: list[BotRoutingRule] = Field(default_factory=list)
+    default_agent_id: str = "agent-general"
+    escalation_strategy: BotEscalationStrategy = Field(default_factory=BotEscalationStrategy)
+
+
+class ProbeCapacityResponse(BaseModel):
+    can_transfer_human: bool
+    in_working_hours: bool
+    online_agent_count: int
+    idle_capacity: int
+    action_type: str  # "ask_transfer" | "guide_ticket"
+    prompt_text: str
+
+
+class ClientSubmitTicketRequest(BaseModel):
+    title: str = Field(..., min_length=2, max_length=200)
+    description: str = Field(..., min_length=5)
+    contact_name: str | None = None
+    contact_phone: str | None = None
+    company_name: str | None = None
+    tax_no: str | None = None
+
+
+class ExternalLlmReplyRequest(BaseModel):
+    session_id: str
+    content: str
+    sender_name: str | None = None
+    agent_code: str | None = None
+
+
+SETTING_KEY_BOT_CONFIG = "reception_bot_config"
+
+DEFAULT_BOT_CONFIG = {
+    "agents": [
+        {
+            "id": "agent-invoice",
+            "code": "AGENT0001",
+            "name": "数电发票专家",
+            "avatar": "🧾",
+            "agent_type": "normal",
+            "description": "精通数电发票开具、红字发票冲红、发票勾选抵扣与入账归档等业务",
+            "webhook_url": "",
+            "welcome_message": "您好！欢迎使用发票云售后在线支持。系统已为您建立会话，我是数电发票智能专家，请问在发票开具、红字发票冲红或勾选抵扣中遇到什么问题？",
+            "unresolved_prompt": "抱歉没能解决您的数电发票问题，请问需要为您转接人工坐席或提交售后工单跟进吗？",
+            "system_prompt": "你是一名精通国家数电发票、电子发票服务平台规则的发票云业务专家。",
+            "skills": ["invoice-issuance", "red-invoice", "deduction-check"],
+            "product_lines": ["全部"],
+            "source_channels": ["全部"],
+            "support_transfer_human": True,
+            "transfer_human_rule": "客户回复未解决且在人工工作时间有空闲坐席时触发转人工",
+            "temperature": 0.2,
+            "is_enabled": False,
+            "created_at": "2026-09-20 09:00:00",
+            "created_by": "系统管理员",
+        },
+        {
+            "id": "agent-tax",
+            "code": "AGENT0002",
+            "name": "税务申报专家",
+            "avatar": "💼",
+            "agent_type": "normal",
+            "description": "精通税企直连、税局认证、企业所得税与增值税申报接口相关疑问",
+            "webhook_url": "",
+            "welcome_message": "您好！欢迎使用发票云售后在线支持。系统已为您建立会话，我是税务申报智能助手，请问有什么关于税局接口或纳税申报的问题需要解答？",
+            "unresolved_prompt": "税务规则复杂多变，未能解决您的申报疑问十分抱歉。",
+            "system_prompt": "你是一名资深税务申报与税局数据接口系统支持专家。",
+            "skills": ["tax-declaration", "tax-interfaces"],
+            "product_lines": ["全部"],
+            "source_channels": ["全部"],
+            "support_transfer_human": True,
+            "transfer_human_rule": "客户回复未解决且在人工工作时间有空闲坐席时触发转人工",
+            "temperature": 0.3,
+            "is_enabled": False,
+            "created_at": "2026-09-20 09:00:00",
+            "created_by": "系统管理员",
+        },
+        {
+            "id": "agent-general",
+            "code": "AGENT0003",
+            "name": "综合服务助手",
+            "avatar": "🤖",
+            "agent_type": "fallback",
+            "description": "全能型发票云服务助手，负责通用产品功能咨询、账号权限与系统指引",
+            "webhook_url": "",
+            "welcome_message": "您好！欢迎使用发票云售后在线支持。系统已为您建立会话，我是发票云智能综合助手，请问有什么可以帮您？",
+            "unresolved_prompt": "抱歉没能彻底解决您的问题。",
+            "system_prompt": "你是一名专业的发票云综合客服支持助手。",
+            "skills": ["general-guide", "account-perm"],
+            "product_lines": ["全部"],
+            "source_channels": ["全部"],
+            "support_transfer_human": True,
+            "transfer_human_rule": "客户回复未解决且在人工工作时间有空闲坐席时触发转人工",
+            "temperature": 0.3,
+            "is_enabled": True,
+            "created_at": "2026-09-20 09:00:00",
+            "created_by": "系统管理员",
+        },
+    ],
+    "routing_rules": [
+        {
+            "id": "rule-invoice",
+            "name": "数电与发票类咨询分流",
+            "target_agent_id": "agent-invoice",
+            "conditions": {
+                "match_mode": "any",
+                "product_keywords": ["数电票", "全电发票", "进销项", "发票云"],
+                "company_keywords": [],
+                "message_keywords": ["开票", "红字", "勾选", "作废", "差额征税", "纸电混合", "税控盘"],
+            },
+            "is_enabled": True,
+        },
+        {
+            "id": "rule-tax",
+            "name": "税务申报与直连分流",
+            "target_agent_id": "agent-tax",
+            "conditions": {
+                "match_mode": "any",
+                "product_keywords": ["税企直连", "纳税申报", "税局端"],
+                "company_keywords": [],
+                "message_keywords": ["申报", "扣税", "税局", "认证", "增值税", "所得税", "接口超时"],
+            },
+            "is_enabled": True,
+        },
+    ],
+    "default_agent_id": "agent-general",
+    "escalation_strategy": {
+        "enable_agent_reception": True,
+        "probe_working_hours": True,
+        "probe_human_agents": True,
+        "ask_transfer_text": "很抱歉没能解决您的问题。当前有在线专业人工客服，是否为您转接人工坐席？",
+        "no_human_guide_text": "当前人工坐席均在忙碌中或已下班，建议您直接提交售后工单，我们将由技术专家加急排查并在第一时间答复您！",
+        "show_ticket_button": True,
+    },
+}
+
+
+def get_db_bot_config(db: Session) -> BotConfigData:
+    setting = db.query(SystemSetting).filter(SystemSetting.key == SETTING_KEY_BOT_CONFIG).first()
+    config: BotConfigData | None = None
+    if setting and setting.value:
+        try:
+            data = json.loads(setting.value)
+            config = BotConfigData.model_validate(data)
+        except Exception:
+            pass
+    if not config:
+        config = BotConfigData.model_validate(DEFAULT_BOT_CONFIG)
+
+    # 规范化补全编号与基础字段
+    max_num = 0
+    for a in config.agents:
+        if a.code and a.code.startswith("AGENT") and a.code[5:].isdigit():
+            max_num = max(max_num, int(a.code[5:]))
+    for a in config.agents:
+        if not a.code:
+            max_num += 1
+            a.code = f"AGENT{max_num:04d}"
+        if not getattr(a, "agent_type", None):
+            a.agent_type = "fallback" if a.id == config.default_agent_id else "normal"
+        if not a.created_at:
+            a.created_at = "2026-09-20 09:00:00"
+        if not a.created_by:
+            a.created_by = "系统管理员"
+        if not a.product_lines:
+            a.product_lines = ["全部"]
+        if not getattr(a, "source_channels", None):
+            a.source_channels = ["全部"]
+        if not a.transfer_human_rule:
+            a.transfer_human_rule = "客户回复未解决且在人工工作时间有空闲坐席时触发转人工"
+    return config
+
+
+def save_db_bot_config(db: Session, config: BotConfigData, user_id: int | None = None) -> BotConfigData:
+    setting = db.query(SystemSetting).filter(SystemSetting.key == SETTING_KEY_BOT_CONFIG).first()
+    json_val = json.dumps(config.model_dump())
+    if setting:
+        setting.value = json_val
+        setting.updated_by = user_id
+    else:
+        setting = SystemSetting(key=SETTING_KEY_BOT_CONFIG, value=json_val, updated_by=user_id)
+        db.add(setting)
+    db.commit()
+    return config
+
+
+def match_bot_agent(
+    config: BotConfigData,
+    *,
+    company_name: str = "",
+    purchased_products: list[str] | None = None,
+    product_line: str = "",
+    source_channel: str = "",
+    message_text: str = "",
+) -> BotAgentProfile:
+    """根据智能机器人的适用产品线和适用来源渠道匹配。
+
+    若来访客户能明确知道发起会话的渠道和产品线时，调用匹配的智能体接待；
+    若不知道或未定位到适配智能机器人，则匹配兜底智能体接待。
+    """
+    enabled_agents = [a for a in config.agents if a.is_enabled]
+    if not enabled_agents:
+        return BotAgentProfile(
+            id="agent-fallback",
+            code="AGENT0000",
+            name="发票云智能AI助手",
+            agent_type="fallback",
+            welcome_message="您好！我是发票云智能AI助手，请问有什么可以帮您？",
+        )
+
+    # 兜底智能体寻找：优先标记为 fallback 的智能体，或 default_agent_id，兜底第一个
+    fallback_agent = next((a for a in enabled_agents if a.agent_type == "fallback"), None)
+    if not fallback_agent:
+        fallback_agent = next(
+            (a for a in enabled_agents if a.id == config.default_agent_id), enabled_agents[0]
+        )
+
+    # 收集来访客户的产品线候选词与渠道
+    prod_candidates: list[str] = []
+    if product_line and product_line.strip():
+        prod_candidates.append(product_line.strip().lower())
+    for p in (purchased_products or []):
+        if p and p.strip():
+            prod_candidates.append(p.strip().lower())
+
+    channel_clean = (source_channel or "").strip().lower()
+
+    # 如果来访客户没有明确产品线与渠道，直接调用兜底机器人接待
+    if not prod_candidates and not channel_clean:
+        return fallback_agent
+
+    # 针对明确知道发起渠道和产品线的场景，匹配对应智能机器人
+    best_agent: BotAgentProfile | None = None
+    best_score = 0
+
+    for agent in enabled_agents:
+        if agent.agent_type == "fallback":
+            continue
+
+        agent_lines = [l.strip().lower() for l in (agent.product_lines or ["全部"])]
+        agent_channels = [c.strip().lower() for c in (agent.source_channels or ["全部"])]
+
+        score = 0
+        prod_match = False
+        if prod_candidates:
+            if any(l in cand or cand in l for l in agent_lines if l != "全部" for cand in prod_candidates):
+                score += 3
+                prod_match = True
+            elif "全部" in agent_lines:
+                score += 1
+                prod_match = True
+        else:
+            if "全部" in agent_lines:
+                score += 1
+                prod_match = True
+
+        channel_match = False
+        if channel_clean:
+            if any(c in channel_clean or channel_clean in c for c in agent_channels if c != "全部"):
+                score += 3
+                channel_match = True
+            elif "全部" in agent_channels:
+                score += 1
+                channel_match = True
+        else:
+            if "全部" in agent_channels:
+                score += 1
+                channel_match = True
+
+        if prod_match and channel_match:
+            if score > best_score:
+                best_score = score
+                best_agent = agent
+
+    if best_agent and best_score >= 1:
+        return best_agent
+
+    # 未定位到适配智能机器人时，由兜底机器人接待
+    return fallback_agent
+
+
+def check_human_capacity(db: Session) -> tuple[bool, bool, int, int, str]:
+    schedule = get_db_schedule_settings(db)
+    now = datetime.now()
+    current_time_str = now.strftime("%H:%M")
+    is_weekend = now.weekday() >= 5
+    slots = schedule.weekend_slots if is_weekend else schedule.weekday_slots
+
+    in_working_hours = False
+    for slot in slots:
+        if slot.start <= current_time_str <= slot.end:
+            in_working_hours = True
+            break
+
+    online_agents = db.query(ReceptionAgent).filter(ReceptionAgent.status == "online").all()
+    online_count = len(online_agents)
+
+    # 校验规则：至少有 1 名状态“在线”的人工坐席
+    has_capacity = online_count > 0
+
+    total_capacity = sum(a.max_concurrent for a in online_agents)
+    online_user_ids = [a.user_id for a in online_agents if a.user_id]
+
+    current_active_load = 0
+    if online_user_ids:
+        current_active_load = (
+            db.query(func.count(ReceptionSession.id))
+            .filter(
+                ReceptionSession.is_human == True,
+                ReceptionSession.status == "in_progress",
+                ReceptionSession.agent_user_id.in_(online_user_ids),
+            )
+            .scalar()
+            or 0
+        )
+
+    idle_capacity = max(0, total_capacity - current_active_load)
+
+    if not in_working_hours:
+        reason = "当前处于非人工坐席服务时段"
+    elif not has_capacity:
+        reason = "当前无状态为“在线”的人工客服坐席"
+    else:
+        reason = f"当前有 {online_count} 位在线坐席"
+
+    return in_working_hours, has_capacity, online_count, idle_capacity, reason
+
+
+def generate_bot_answer(agent: BotAgentProfile, question: str) -> str:
+    q_lower = (question or "").lower()
+
+    if any(k in q_lower for k in ["红字", "冲红", "红冲"]):
+        return (
+            "【红字发票开具操作指引】\n"
+            "1. 请在【发票管理】>【红字发票】模块中点击【申请红字信息表】；\n"
+            "2. 录入需冲红的蓝字发票代码与发票号码，系统将自动校验原发票状态与开票数据；\n"
+            "3. 提交税局端校验审核通过后，获得红字信息表编号；\n"
+            "4. 在开票界面选择【导入红字信息表】，核对金额与税额无误后点击【开具红字发票】完成冲红。\n\n"
+            "💡 若原发票已跨月认证抵扣，需由购买方发起填开信息表，请核实发票开具主体。"
+        )
+    elif any(k in q_lower for k in ["勾选", "抵扣", "进项"]):
+        return (
+            "【发票勾选抵扣操作说明】\n"
+            "1. 登录系统进入【进项发票管理】>【发票勾选确认】；\n"
+            "2. 筛选查询对应的开票月份或发票代码范围；\n"
+            "3. 勾选需要用于本期抵扣的发票明细，点击【确认勾选】；\n"
+            "4. 在申报期截止日前，点击【申请统计】并完成【统计确认】即可计入当期进项税额抵扣。"
+        )
+    elif any(k in q_lower for k in ["作废", "作废发票", "撤销"]):
+        return (
+            "【发票作废规则】\n"
+            "1. 全电/数电发票不再提供纸质票传统的直接作废功能，如需更正请通过【开具红字发票】进行冲红；\n"
+            "2. 如为传统税控纸质发票，且在当月开具未抄报税的情况下，可在【发票查询】中选中发票点击【作废】；\n"
+            "3. 跨月发票一律不能直接作废，只能走红字冲红流程。"
+        )
+    elif any(k in q_lower for k in ["额度", "开票限额", "授信额度", "总额度"]):
+        return (
+            "【数电发票开票额度说明】\n"
+            "1. 数电发票实行税局端【总额度】管理机制，不再区分单张发票最高限额；\n"
+            "2. 您可在系统首页或【企业信息】中查看当月【可用开票额度】；\n"
+            "3. 当月额度不足时，可向主管税务机关发起【调整开票总额度申请】。"
+        )
+    elif any(k in q_lower for k in ["交付", "发送发票", "邮箱", "短信"]):
+        return (
+            "【发票交付方式】\n"
+            "1. 在【发票填开】或【发票查询】详情中，点击【发票交付】按钮；\n"
+            "2. 支持通过【短信发送提取码】、【电子邮箱发送PDF/OFD版式文件】或直接下载发票原件；\n"
+            "3. 也可直接复制税局端查验下载链接发送给客户。"
+        )
+
+    return (
+        f"您好！关于您咨询的问题：“{question[:60]}”，为您整理如下解答方案：\n"
+        f"1. 请确认当前系统账号具备对应功能的业务操作权限；\n"
+        f"2. 请前往系统功能模块核对基础信息录入是否完整，若涉及税局网络交互请检查网络连接；\n"
+        f"3. 您也可以查阅发票云在线帮助手册或参考系统内操作指引。\n\n"
+        f"💡 如以上说明已解决您的问题，请点击下方【👍 已解决】；如未解决，请点击【👎 未解决】获取人工坐席或工单支持。"
+    )
+
+
+# -----------------------------------------------------------------------------
+# 会话内容清洗与工单真实生成函数 (对齐泳道 5 规则)
+# -----------------------------------------------------------------------------
+
+_GREETING_PATTERNS = [
+    r"^(?:(?:你好|您好|哈喽|hello|hi|hey)[，,\s]*)?(?:请问)?(?:在吗|在么|有人吗|有人在吗|请问有人吗|有人么|请问在吗)[\s!！?？~～.。]*$",
+    r"^(?:你好|您好|在吗|在么|有人吗|有人在吗|请问有人吗|hello|hi|hey|哈喽)[\s!！?？~～.。]*$",
+    r"^(?:请问|咨询一下|请教一下)[\s!！?？~～.。]*$",
+]
+
+_STATUS_PATTERNS = [
+    r"^(?:[12](?:[.\s、]*(?:解决|未解决))?|已解决|未解决|没解决|没有解决|问题已解决|问题未解决|好了|行了|满意|不满意)[\s!！?？~～.。]*$",
+]
+
+_TRANSFER_PATTERNS = [
+    r"^(?:转(?:接)?人工(?:客服|坐席|服务)?|人工(?:客服|在线)?|呼叫人工|接入人工|找人工)[\s!！?？~～.。]*$",
+]
+
+
+def clean_and_extract_ticket_content(
+    messages: list[ReceptionMessage],
+    company_name: str = "",
+    purchased_products: list[str] | None = None,
+) -> tuple[str, str, str | None]:
+    """清洗会话历史，提取工单标题、工单内容和提单产品线。
+
+    规则对齐泳道图：
+    - 工单标题：取客户第一个产品问题
+    - 工单内容：取所有客户发送的不包含问候语、未解决、转人工的内容
+    - 提单产品线：对话中有取没有则为空
+    """
+    valid_customer_questions: list[str] = []
+
+    sorted_msgs = sorted(
+        messages,
+        key=lambda m: m.created_at if m.created_at else datetime.min.replace(tzinfo=UTC),
+    )
+
+    for m in sorted_msgs:
+        if m.sender_type != "customer":
+            continue
+        raw_text = (m.content or "").strip()
+        if not raw_text or raw_text.startswith("[CARD:"):
+            continue
+        # 去掉前端引用的格式「引用 ...」
+        clean_text = re.sub(r"「引用\s+[^:：]+[:：][^」]+」\n?", "", raw_text).strip()
+        if not clean_text:
+            continue
+
+        # 1. 过滤状态词（如 1、2、已解决、未解决）
+        if any(re.match(p, clean_text, re.IGNORECASE) for p in _STATUS_PATTERNS):
+            continue
+
+        # 2. 过滤转人工词（如 人工、转人工、人工客服）
+        if any(re.match(p, clean_text, re.IGNORECASE) for p in _TRANSFER_PATTERNS):
+            continue
+
+        # 3. 过滤纯打招呼（如 你好、在吗）
+        if any(re.match(p, clean_text, re.IGNORECASE) for p in _GREETING_PATTERNS):
+            continue
+
+        # 4. 如果是以打招呼开头，剥离前缀招呼语
+        clean_question = re.sub(
+            r"^(?:(?:你好|您好|哈喽|hello|hi)[，,\s]*)*(?:请问[，,\s]*)?",
+            "",
+            clean_text,
+            flags=re.IGNORECASE,
+        ).strip()
+        if not clean_question or any(
+            re.match(p, clean_question, re.IGNORECASE) for p in _GREETING_PATTERNS
+        ):
+            continue
+
+        valid_customer_questions.append(clean_question)
+
+    # 提取首个有效问题作为标题
+    if valid_customer_questions:
+        first_q = valid_customer_questions[0].replace("\n", " ").strip()
+        title = first_q[:77] + "..." if len(first_q) > 80 else first_q
+    else:
+        title = f"{company_name}在线咨询技术协助" if company_name else "在线接待客户咨询协助"
+
+    # 合并所有清洗后的提问作为工单内容
+    if valid_customer_questions:
+        if len(valid_customer_questions) == 1:
+            body = valid_customer_questions[0]
+        else:
+            body = "\n".join(f"{i+1}. {q}" for i, q in enumerate(valid_customer_questions))
+    else:
+        body = "客户在线咨询未解决，申请售后工单协助处理。"
+
+    # 识别产品线（对话中有取，没有则为空）
+    all_text = " ".join(valid_customer_questions).lower()
+    product_line_code: str | None = None
+    if any(k in all_text for k in ["数电", "开票", "发票", "冲红", "红字", "勾选"]):
+        product_line_code = "invoice"
+    elif any(k in all_text for k in ["申报", "纳税", "所得税", "增值税", "税局"]):
+        product_line_code = "tax"
+    elif purchased_products:
+        p_str = " ".join(purchased_products).lower()
+        if "数电" in p_str or "发票" in p_str:
+            product_line_code = "invoice"
+        elif "申报" in p_str or "税" in p_str:
+            product_line_code = "tax"
+
+    return title, body, product_line_code
+
+
+def create_ticket_from_reception_session(
+    db: Session,
+    session: ReceptionSession,
+    title: str | None = None,
+    body: str | None = None,
+    user_id: int | None = None,
+) -> Ticket:
+    """根据在线接待会话真实在 tickets 表创建工单记录（对齐泳道 5 规则）。"""
+    messages = (
+        db.query(ReceptionMessage)
+        .filter(ReceptionMessage.session_id == session.id)
+        .order_by(ReceptionMessage.created_at.asc())
+        .all()
+    )
+    extracted_title, extracted_body, extracted_product = clean_and_extract_ticket_content(
+        messages,
+        company_name=session.company_name or "",
+        purchased_products=[session.tenant_name] if session.tenant_name else [],
+    )
+    final_title = (title or "").strip() or extracted_title
+    final_body = (body or "").strip() or extracted_body
+
+    # 1. 确保来源 sources 存在 online_reception
+    source_record = db.query(Source).filter(Source.code == "online_reception").first()
+    if not source_record:
+        source_record = Source(code="online_reception", name="在线接待", is_active=True)
+        db.add(source_record)
+        db.flush()
+
+    # 2. 产品线 code 校验与外键安全
+    final_product_code = None
+    if extracted_product:
+        final_product_code = safe_product_line_code(db, extracted_product)
+        if not final_product_code:
+            p_exist = db.query(ProductLine).filter(ProductLine.code == extracted_product).first()
+            if p_exist:
+                final_product_code = p_exist.code
+
+    # 3. 生成合法标准工单单号 TKT-xxxxxx
+    ticket_repo = TicketRepository(db)
+    next_code = ticket_repo.next_short_code("TKT")
+
+    # 4. 构造 Ticket ORM 记录
+    reporter_data = {
+        "name": session.contact_name or "客户",
+        "phone": session.contact_phone or "",
+        "email": None,
+    }
+    now = datetime.now(UTC)
+    ticket = Ticket(
+        short_code=next_code,
+        type="Raw",
+        source_code="online_reception",
+        source_ticket_id=session.id,
+        source_ticket_number=session.id,
+        title=final_title,
+        body=final_body,
+        product_line_code=final_product_code,
+        reporter_company=session.company_name,
+        reporter_tax_no=session.tax_no,
+        reporter_tenant=session.tenant_name or session.tenant_no,
+        reporter=reporter_data,
+        status="received",
+        process_stage="received",
+        source_payload={
+            "session_id": session.id,
+            "channel": "online_reception",
+            "created_via": "reception_transfer",
+            "created_at": now.isoformat(),
+        },
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(ticket)
+    db.flush()
+
+    # 5. 写入状态历史变更审计
+    status_hist = StatusHistory(
+        ticket_id=ticket.id,
+        from_status="none",
+        to_status="received",
+        changed_by=f"reception:{session.id}",
+        reason="由在线接待转工单创建",
+        created_at=now,
+    )
+    db.add(status_hist)
+
+    # 6. 回写更新接待会话状态
+    session.status = "converted"
+    session.ticket_id = ticket.id
+    session.ticket_short_code = ticket.short_code
+    session.summary = f"已转工单：{ticket.title}"
+    session.updated_at = now
+
+    return ticket
 
 
 # -----------------------------------------------------------------------------
@@ -154,6 +802,7 @@ class MessageOut(BaseModel):
 
 class SessionListItemOut(BaseModel):
     id: str
+    ai_agent_cid: str | None = None
     company_name: str
     tax_no: str | None = None
     tenant_no: str | None = None
@@ -360,15 +1009,26 @@ def update_agent(
     if not agent:
         raise HTTPException(status_code=404, detail="坐席不存在")
 
+    should_dispatch = False
     if body.nickname is not None:
         agent.nickname = body.nickname.strip()
     if body.max_concurrent is not None:
         agent.max_concurrent = body.max_concurrent
+        should_dispatch = True
     if body.status is not None:
+        if body.status == "online" and agent.status != "online":
+            should_dispatch = True
         agent.status = body.status
 
     db.commit()
     db.refresh(agent)
+
+    if should_dispatch and agent.status == "online":
+        try:
+            dispatch_online_sessions_internal(db)
+        except Exception as e:
+            logger.warning("Auto dispatch on update_agent failed: %s", e)
+
     return AgentOut.model_validate(agent)
 
 
@@ -666,7 +1326,7 @@ def close_session(
     db: Session = Depends(get_session),
     _user: AuthedUser = Depends(require_user),
 ) -> dict[str, Any]:
-    """【结束】会话。"""
+    """【结束】会话并触发空位补位分发。"""
     session = db.query(ReceptionSession).filter(ReceptionSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
@@ -686,6 +1346,13 @@ def close_session(
     )
     db.add(sys_msg)
     db.commit()
+
+    # 坐席释放空位：自动触发排队会话补位分发 (对齐泳道 4)
+    try:
+        dispatch_online_sessions_internal(db)
+    except Exception as e:
+        logger.warning("Auto dispatch on close_session failed: %s", e)
+
     return {"ok": True, "status": "closed"}
 
 
@@ -696,7 +1363,7 @@ def convert_to_ticket(
     db: Session = Depends(get_session),
     user: AuthedUser = Depends(require_user),
 ) -> dict[str, Any]:
-    """【转工单】创建/关联工单并完成会话转换。"""
+    """【转工单】真实在 tickets 表创建工单并完成会话转换 (对齐泳道 5)。"""
     session = db.query(ReceptionSession).filter(ReceptionSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
@@ -704,22 +1371,39 @@ def convert_to_ticket(
     agent_record = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == user.user_id).first()
     agent_display_name = agent_record.nickname if (agent_record and agent_record.nickname) else user.name
 
-    # 生成模拟/关联工单
-    random_num = random.randint(5000, 9999)
-    ticket_code = f"TKT-{random_num:06d}"
-    session.status = "converted"
-    session.ticket_short_code = ticket_code
+    # 真实创建 Ticket 记录（自动根据会话清洗提取产品问题与内容）
+    ticket = create_ticket_from_reception_session(
+        db,
+        session,
+        title=body.title,
+        body=body.remark,
+        user_id=user.user_id,
+    )
+    ticket_code = ticket.short_code
 
     auto_msg = ReceptionMessage(
         session_id=session.id,
         sender_type="agent",
         sender_name=agent_display_name,
-        content=f"您的问题需要转工单推送到产研修复，已经帮您创建工单，工单号 {ticket_code}，后续工单进度会通过短信通知。",
+        content=f"您的问题需要转工单推送到产研修复，已经帮您创建工单【{ticket_code}】（标题：{ticket.title}），后续可在工单列表查看处理进度。",
         is_read=True,
     )
     db.add(auto_msg)
     db.commit()
-    return {"ok": True, "ticket_short_code": ticket_code, "status": "converted"}
+
+    # 坐席释放空位：自动触发排队会话补位分发 (对齐泳道 4)
+    try:
+        dispatch_online_sessions_internal(db)
+    except Exception as e:
+        logger.warning("Auto dispatch on transfer_ticket failed: %s", e)
+
+    return {
+        "ok": True,
+        "ticket_id": ticket.id,
+        "ticket_short_code": ticket_code,
+        "title": ticket.title,
+        "status": "converted",
+    }
 
 
 @router.post("/workbench/sessions/{session_id}/send-message")
@@ -891,6 +1575,69 @@ def update_schedule_settings(
         db.add(setting)
     db.commit()
     return body
+
+
+# -----------------------------------------------------------------------------
+# 4.1 智能接待配置 API (Bot Config & Routing Rules)
+# -----------------------------------------------------------------------------
+
+
+@router.get("/bot-config", response_model=BotConfigData)
+def get_bot_config(
+    db: Session = Depends(get_session),
+    _user: AuthedUser = Depends(require_user),
+) -> BotConfigData:
+    """获取在线智能接待 Agent 档案、分流规则与转人工策略配置。"""
+    return get_db_bot_config(db)
+
+
+@router.put("/bot-config", response_model=BotConfigData)
+def update_bot_config(
+    body: BotConfigData,
+    db: Session = Depends(get_session),
+    user: AuthedUser = Depends(require_user),
+) -> BotConfigData:
+    """更新在线智能接待 Agent 档案、分流规则与转人工策略配置。"""
+    return save_db_bot_config(db, body, user_id=user.user_id)
+
+
+@router.post("/webhook/llm-reply")
+@router.post("/agent/external-message")
+def webhook_external_llm_reply(
+    body: ExternalLlmReplyRequest,
+    db: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """接收第三方大模型异步调用回调推送的消息，并存入会话展示给客户。"""
+    session = db.query(ReceptionSession).filter(ReceptionSession.id == body.session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if session.status in ("closed", "converted"):
+        raise HTTPException(status_code=400, detail="当前会话已结束，不可追加消息")
+
+    now = datetime.now(UTC)
+    sender_name = body.sender_name or session.agent_name or "智能助手"
+    msg = ReceptionMessage(
+        session_id=session.id,
+        sender_type="bot",
+        sender_name=sender_name,
+        content=body.content,
+        is_read=True,
+        created_at=now,
+    )
+    db.add(msg)
+    session.last_message = body.content[:200]
+    session.last_message_at = now
+    session.updated_at = now
+    db.commit()
+    db.refresh(msg)
+
+    return {
+        "ok": True,
+        "message_id": msg.id,
+        "session_id": session.id,
+        "sender_name": sender_name,
+        "created_at": now.isoformat(),
+    }
 
 
 # -----------------------------------------------------------------------------
@@ -1401,8 +2148,6 @@ def query_tenant_by_company_rpa(
 # 9. 在线接待运营接口适配器 (Client profile & session support)
 # -----------------------------------------------------------------------------
 
-logger = logging.getLogger(__name__)
-
 
 @router.post("/client/fetch-tenant-profile", response_model=TenantProfileResponse)
 def client_fetch_tenant_profile(
@@ -1467,10 +2212,10 @@ def client_init_session(
             .order_by(desc(ReceptionSession.created_at))
             .first()
         )
-        if history_session and history_session.contact_name:
+        if history_session and history_session.contact_name and not history_session.contact_name.startswith("客户_"):
             contact_name = history_session.contact_name
         else:
-            contact_name = f"客户_{phone[-4:]}"
+            contact_name = phone
 
     session_id = generate_session_id(db)
     now = datetime.now(UTC)
@@ -1487,12 +2232,38 @@ def client_init_session(
         tenant_no = tenant_no or profile.tenant_no
         purchased_products = purchased_products or profile.purchased_products
 
+    bot_config = get_db_bot_config(db)
+    use_agent = bot_config.escalation_strategy.enable_agent_reception
+    matched_agent: BotAgentProfile | None = None
+
+    if use_agent:
+        matched_agent = match_bot_agent(
+            bot_config,
+            company_name=body.company_name,
+            purchased_products=purchased_products or [],
+        )
+
+    # 预创建大模型通道会话标识 ai_agent_cid（与本地会话 ID 建立 1 对 1 绑定关系）
+    init_cid: str | None = None
+    settings = get_settings()
+    ai_cs_app_id = (getattr(settings, "ai_cs_app_id", "") or os.environ.get("AI_CS_APP_ID", "")).strip()
+    ai_cs_app_key = (getattr(settings, "ai_cs_app_key", "") or os.environ.get("AI_CS_APP_KEY", "")).strip()
+    if ai_cs_app_id and ai_cs_app_key:
+        try:
+            cfg = AiCsConfig.from_settings(settings)
+            with AiCsClient(cfg) as ai_client:
+                init_cid = ai_client.ask_init()
+                _session_ai_cid_cache[session_id] = init_cid
+        except Exception as e:
+            logger.warning("ask_init failed on client_init_session for %s: %s", session_id, e)
+
     session = ReceptionSession(
         id=session_id,
+        ai_agent_cid=init_cid,
         session_type="online",
-        status="queue",
-        is_human=True,
-        agent_name="在线待分配",
+        status="in_progress" if use_agent else "queue",
+        is_human=not use_agent,
+        agent_name=matched_agent.name if (use_agent and matched_agent) else "在线待分配",
         company_name=body.company_name.strip(),
         tax_no=body.tax_no.strip(),
         tenant_name=tenant_name,
@@ -1507,21 +2278,36 @@ def client_init_session(
     db.add(session)
     db.flush()
 
-    welcome_msg = ReceptionMessage(
-        session_id=session.id,
-        sender_type="system",
-        sender_name="发票云小助手",
-        content=f"您好！欢迎使用发票云售后在线支持。系统已为您建立会话【{session.id}】，正在为您接入在线专业客服，请稍候...",
-        is_read=True,
-        created_at=now,
-    )
+    if use_agent and matched_agent:
+        welcome_content = (
+            matched_agent.welcome_message
+            or f"您好！我是{matched_agent.name}，很高兴为您服务，请问有什么可以帮您？"
+        )
+        welcome_msg = ReceptionMessage(
+            session_id=session.id,
+            sender_type="bot",
+            sender_name=matched_agent.name,
+            content=welcome_content,
+            is_read=True,
+            created_at=now,
+        )
+    else:
+        welcome_msg = ReceptionMessage(
+            session_id=session.id,
+            sender_type="system",
+            sender_name="发票云小助手",
+            content=f"您好！欢迎使用发票云售后在线支持。系统已为您建立会话【{session.id}】，正在为您接入在线专业客服，请稍候...",
+            is_read=True,
+            created_at=now,
+        )
     db.add(welcome_msg)
     db.commit()
     db.refresh(session)
 
-    # 尝试自动分配在线坐席
-    dispatch_online_sessions_internal(db)
-    db.refresh(session)
+    if not use_agent:
+        # 尝试自动分配在线坐席
+        dispatch_online_sessions_internal(db)
+        db.refresh(session)
 
     messages = (
         db.query(ReceptionMessage)
@@ -1615,9 +2401,503 @@ def client_send_message(
     session.unread_count = (session.unread_count or 0) + 1
     session.updated_at = now
 
+    # 1. 核心交互闭环：识别“已解决”反馈（支持 Agent 接待阶段与人工接待阶段自动关闭，对齐节点 7.1）
+    content_stripped = body.content.strip()
+    last_eval_msg = (
+        db.query(ReceptionMessage)
+        .filter(ReceptionMessage.session_id == session_id)
+        .filter(ReceptionMessage.sender_type.in_(["bot", "agent", "system"]))
+        .order_by(desc(ReceptionMessage.created_at))
+        .first()
+    )
+    has_resolution_prompt = False
+    if last_eval_msg and last_eval_msg.content:
+        has_resolution_prompt = bool(
+            re.search(r"(?:1\s*解决|是否(?:已经)?解决|解决您的(?:问题|疑问))", last_eval_msg.content)
+        )
+
+    is_resolved_feedback = (
+        content_stripped in ("1 解决", "1.解决", "1、解决", "已解决", "问题已解决", "好了", "行了", "满意")
+        or (has_resolution_prompt and content_stripped == "1")
+    )
+
+    if is_resolved_feedback:
+        bot_time = datetime.now(UTC)
+        session.status = "closed"
+        session.closed_at = bot_time
+        session.updated_at = bot_time
+
+        if not session.is_human:
+            # 1) Agent 接待阶段已解决 (对齐节点 7.1)
+            session.is_human = False
+            bot_config = get_db_bot_config(db)
+            if not session.agent_name or session.agent_name in ("在线待分配", "智能助手"):
+                matched_agent = match_bot_agent(
+                    bot_config, company_name=session.company_name, purchased_products=[]
+                )
+                session.agent_name = matched_agent.name
+
+            bot_answer = "🎉 很高兴为您解决问题！发票云专家团队始终为您保驾护航。本次会话已结束，请对本次服务进行评价！"
+            bot_msg = ReceptionMessage(
+                session_id=session_id,
+                sender_type="bot",
+                sender_name=session.agent_name,
+                content=bot_answer,
+                is_read=True,
+                created_at=bot_time,
+            )
+            db.add(bot_msg)
+            session.last_message = bot_answer[:200]
+            session.last_message_at = bot_time
+
+            # 释放 Open API Channel 远程会话
+            cid = _session_ai_cid_cache.pop(session_id, None)
+            if cid:
+                try:
+                    cfg = AiCsConfig.from_settings(get_settings())
+                    with AiCsClient(cfg) as ai_client:
+                        ai_client.end_session(cid)
+                except Exception:
+                    pass
+        else:
+            # 2) 人工接待阶段已解决
+            session.is_human = True
+            agent_disp = session.agent_name or "人工客服"
+            sys_answer = f"客户已确认问题解决，本次由坐席【{agent_disp}】接待的人工会话已结束，感谢您的咨询，请对本次服务进行评价！"
+            sys_msg = ReceptionMessage(
+                session_id=session_id,
+                sender_type="system",
+                sender_name="系统通知",
+                content=sys_answer,
+                is_read=True,
+                created_at=bot_time,
+            )
+            db.add(sys_msg)
+            session.last_message = sys_answer[:200]
+            session.last_message_at = bot_time
+
+        db.commit()
+        db.refresh(session)
+
+        # 坐席释放空位时触发排队补位分发 (对齐泳道 4)
+        if session.is_human:
+            try:
+                dispatch_online_sessions_internal(db)
+            except Exception as e:
+                logger.warning("Auto dispatch on human resolved failed: %s", e)
+
+        return MessageOut.model_validate(msg)
+
+    # 如果会话当前处于 Agent 接待（非人工坐席），且不是卡片信令，触发 Agent 自动作答
+    if not session.is_human and not body.content.startswith("[CARD:"):
+        bot_config = get_db_bot_config(db)
+
+        # 2. 识别“未解决 / 2”等关键词，直接触发未解决探针引导
+        is_unresolved_feedback = (
+            content_stripped in ("2 未解决", "2.未解决", "2、未解决", "未解决", "没解决", "没有解决", "问题未解决")
+            or (has_resolution_prompt and content_stripped == "2")
+        )
+        if is_unresolved_feedback:
+            strat = bot_config.escalation_strategy
+            in_working_hours, has_capacity, online_count, idle_capacity, _ = check_human_capacity(db)
+            allow_human = True
+            if strat.probe_working_hours and not in_working_hours:
+                allow_human = False
+            if strat.probe_human_agents and not has_capacity:
+                allow_human = False
+
+            action_type = "ask_transfer" if allow_human else "guide_ticket"
+            prompt_text = strat.ask_transfer_text if allow_human else strat.no_human_guide_text
+            card_time = datetime.now(UTC)
+            card_msg = ReceptionMessage(
+                session_id=session_id,
+                sender_type="system",
+                sender_name="智能服务助手",
+                content=f"[CARD:{action_type}] {prompt_text}",
+                is_read=True,
+                created_at=card_time,
+            )
+            db.add(card_msg)
+            session.last_message = prompt_text[:200]
+            session.last_message_at = card_time
+        else:
+            # 正常咨询：匹配对应 Agent 并生成结构化自动应答
+            matched_agent = match_bot_agent(
+                bot_config,
+                company_name=session.company_name,
+                purchased_products=[],
+                message_text=body.content,
+            )
+            bot_answer = ""
+            transfer_card_prompt: tuple[str, str] | None = None
+
+            # 1. 优先调用 Open API Channel 同步问答（基于 open-api-channel.md 规范，传入智能体配置的 skill）
+            settings = get_settings()
+            ai_cs_app_id = (getattr(settings, "ai_cs_app_id", "") or os.environ.get("AI_CS_APP_ID", "")).strip()
+            ai_cs_app_key = (getattr(settings, "ai_cs_app_key", "") or os.environ.get("AI_CS_APP_KEY", "")).strip()
+            if ai_cs_app_id and ai_cs_app_key:
+                try:
+                    cfg = AiCsConfig.from_settings(settings)
+                    cached_cid = getattr(session, "ai_agent_cid", None) or _session_ai_cid_cache.get(session_id)
+                    primary_skill = matched_agent.skills[0] if (matched_agent and matched_agent.skills) else None
+                    effective_skill = "customer-service"
+                    if primary_skill in ("customer-service", "customer-service-feishu"):
+                        effective_skill = primary_skill
+                    with AiCsClient(cfg) as ai_client:
+                        res = ai_client.answer_no_stream(
+                            question=body.content,
+                            cid=cached_cid,
+                            skill=effective_skill,
+                            user_name=body.sender_name or session.contact_name or "客户",
+                        )
+                        if res.ai_agent_cid:
+                            session.ai_agent_cid = res.ai_agent_cid
+                            _session_ai_cid_cache[session_id] = res.ai_agent_cid
+                            db.add(session)
+                        bot_answer = res.answer
+
+                        # 核心联动：若 Open API Channel 识别到转人工意图（TRANSFER）
+                        if res.transfer_result == "TRANSFER":
+                            strat = bot_config.escalation_strategy
+                            in_working_hours, has_capacity, online_count, idle_capacity, _ = check_human_capacity(db)
+                            allow_human = True
+                            if strat.probe_working_hours and not in_working_hours:
+                                allow_human = False
+                            if strat.probe_human_agents and not has_capacity:
+                                allow_human = False
+
+                            action_type = "ask_transfer" if allow_human else "guide_ticket"
+                            prompt_text = strat.ask_transfer_text if allow_human else strat.no_human_guide_text
+                            transfer_card_prompt = (action_type, prompt_text)
+                except Exception as e:
+                    logger.warning("Call Open API Channel answer_no_stream failed for session %s: %s", session_id, e)
+
+            # 2. 若未从 Open API Channel 获取到答复，检查是否配置了第三方大模型推送地址 (webhook_url)
+            if not bot_answer and matched_agent.webhook_url and matched_agent.webhook_url.strip():
+                try:
+                    webhook_payload = {
+                        "session_id": session_id,
+                        "message": body.content,
+                        "agent_code": matched_agent.code or matched_agent.id,
+                        "agent_name": matched_agent.name,
+                        "company_name": session.company_name or "",
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    }
+                    with httpx.Client(timeout=5.0) as client:
+                        resp = client.post(matched_agent.webhook_url.strip(), json=webhook_payload)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            if isinstance(data, dict):
+                                bot_answer = (
+                                    data.get("reply")
+                                    or data.get("message")
+                                    or data.get("content")
+                                    or data.get("text")
+                                    or ""
+                                )
+                except Exception as e:
+                    logger.warning("Push to external LLM webhook failed for agent %s: %s", matched_agent.id, e)
+
+            # 3. 若第三方仍未返回回复，则平滑降级使用本地知识库/规则回复
+            if not bot_answer:
+                bot_answer = generate_bot_answer(matched_agent, body.content)
+
+            agent_display_name = (
+                f"{matched_agent.avatar} {matched_agent.name}"
+                if matched_agent.avatar and not matched_agent.name.startswith(matched_agent.avatar)
+                else matched_agent.name
+            )
+            bot_time = datetime.now(UTC)
+            bot_msg = ReceptionMessage(
+                session_id=session_id,
+                sender_type="bot",
+                sender_name=agent_display_name,
+                content=bot_answer,
+                is_read=True,
+                created_at=bot_time,
+            )
+            db.add(bot_msg)
+            session.agent_name = agent_display_name
+            session.last_message = bot_answer[:200]
+            session.last_message_at = bot_time
+
+            # 4. 若大模型识别需要转人工，联动向客户推送转人工引导探针卡片
+            if transfer_card_prompt:
+                action_type, prompt_text = transfer_card_prompt
+                card_time = datetime.now(UTC)
+                card_msg = ReceptionMessage(
+                    session_id=session_id,
+                    sender_type="system",
+                    sender_name="智能服务助手",
+                    content=f"[CARD:{action_type}] {prompt_text}",
+                    is_read=True,
+                    created_at=card_time,
+                )
+                db.add(card_msg)
+                session.last_message = prompt_text[:200]
+                session.last_message_at = card_time
+
+
     db.commit()
     db.refresh(msg)
     return MessageOut.model_validate(msg)
+
+
+@router.get("/client/probe-human-capacity", response_model=ProbeCapacityResponse)
+def client_probe_human_capacity(db: Session = Depends(get_session)) -> ProbeCapacityResponse:
+    """实时在岗探针：检测当前是否处于工作时段以及是否有在线空闲坐席"""
+    bot_config = get_db_bot_config(db)
+    strat = bot_config.escalation_strategy
+    in_working_hours, has_capacity, online_count, idle_capacity, _ = check_human_capacity(db)
+
+    allow_human = True
+    if strat.probe_working_hours and not in_working_hours:
+        allow_human = False
+    if strat.probe_human_agents and not has_capacity:
+        allow_human = False
+
+    action_type = "ask_transfer" if allow_human else "guide_ticket"
+    prompt_text = strat.ask_transfer_text if allow_human else strat.no_human_guide_text
+
+    return ProbeCapacityResponse(
+        can_transfer_human=allow_human,
+        in_working_hours=in_working_hours,
+        online_agent_count=online_count,
+        idle_capacity=idle_capacity,
+        action_type=action_type,
+        prompt_text=prompt_text,
+    )
+
+
+@router.post("/client/sessions/{session_id}/unresolved")
+def client_mark_unresolved(
+    session_id: str,
+    db: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """客户点击【未解决】反馈，触发在岗探针并生成相应引导卡片消息"""
+    session = db.query(ReceptionSession).filter(ReceptionSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    bot_config = get_db_bot_config(db)
+    strat = bot_config.escalation_strategy
+    in_working_hours, has_capacity, online_count, idle_capacity, _ = check_human_capacity(db)
+
+    allow_human = True
+    if strat.probe_working_hours and not in_working_hours:
+        allow_human = False
+    if strat.probe_human_agents and not has_capacity:
+        allow_human = False
+
+    action_type = "ask_transfer" if allow_human else "guide_ticket"
+    prompt_text = strat.ask_transfer_text if allow_human else strat.no_human_guide_text
+
+    now = datetime.now(UTC)
+    card_msg = ReceptionMessage(
+        session_id=session_id,
+        sender_type="system",
+        sender_name="智能服务助手",
+        content=f"[CARD:{action_type}] {prompt_text}",
+        is_read=True,
+        created_at=now,
+    )
+    db.add(card_msg)
+    session.last_message = prompt_text[:200]
+    session.last_message_at = now
+    session.updated_at = now
+    db.commit()
+
+    return {
+        "ok": True,
+        "action_type": action_type,
+        "prompt_text": prompt_text,
+        "can_transfer_human": allow_human,
+        "in_working_hours": in_working_hours,
+        "online_agent_count": online_count,
+        "idle_capacity": idle_capacity,
+    }
+
+
+@router.post("/client/sessions/{session_id}/escalate-human", response_model=SessionDetailOut)
+def client_escalate_human(
+    session_id: str,
+    db: Session = Depends(get_session),
+) -> SessionDetailOut:
+    """客户确认转接人工坐席：将会话转入人工队列并触发自动分配"""
+    session = db.query(ReceptionSession).filter(ReceptionSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    prev_agent_name = session.agent_name or "AI智能助手"
+    now = datetime.now(UTC)
+    session.is_human = True
+    session.status = "queue"
+    session.agent_name = "在线待分配"
+    session.summary = f"由智能助手[{prev_agent_name}]接待转入（客户反馈未解决）"
+    session.updated_at = now
+
+    sys_msg = ReceptionMessage(
+        session_id=session_id,
+        sender_type="system",
+        sender_name="系统通知",
+        content="已为您转接人工坐席，正在为您接入专业客服，请稍候...",
+        is_read=True,
+        created_at=now,
+    )
+    db.add(sys_msg)
+    db.commit()
+    db.refresh(session)
+
+    # 尝试自动分配在线坐席
+    dispatch_online_sessions_internal(db)
+    db.refresh(session)
+
+    messages = (
+        db.query(ReceptionMessage)
+        .filter(ReceptionMessage.session_id == session_id)
+        .order_by(ReceptionMessage.created_at.asc())
+        .all()
+    )
+    return SessionDetailOut(
+        session=SessionListItemOut.model_validate(session),
+        messages=[MessageOut.model_validate(m) for m in messages],
+    )
+
+
+@router.post("/client/sessions/{session_id}/resolve")
+def client_resolve_session(
+    session_id: str,
+    db: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """客户点击【👍 已解决】按钮，自动执行会话关闭并弹出评价窗口 (对齐节点 7.1)。"""
+    session = db.query(ReceptionSession).filter(ReceptionSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if session.status in ("closed", "converted"):
+        return {
+            "ok": True,
+            "status": session.status,
+            "agent_name": session.agent_name,
+            "is_human": session.is_human,
+        }
+
+    now = datetime.now(UTC)
+    session.status = "closed"
+    session.closed_at = now
+    session.updated_at = now
+
+    if not session.is_human:
+        # 1) Agent 接待阶段已解决 (对齐节点 7.1)
+        session.is_human = False
+        bot_config = get_db_bot_config(db)
+        if not session.agent_name or session.agent_name in ("在线待分配", "智能助手"):
+            matched_agent = match_bot_agent(
+                bot_config, company_name=session.company_name, purchased_products=[]
+            )
+            session.agent_name = matched_agent.name
+
+        bot_answer = "🎉 很高兴为您解决问题！发票云专家团队始终为您保驾护航。本次会话已结束，请对本次服务进行评价！"
+        bot_msg = ReceptionMessage(
+            session_id=session_id,
+            sender_type="bot",
+            sender_name=session.agent_name,
+            content=bot_answer,
+            is_read=True,
+            created_at=now,
+        )
+        db.add(bot_msg)
+        session.last_message = bot_answer[:200]
+        session.last_message_at = now
+
+        cid = _session_ai_cid_cache.pop(session_id, None)
+        if cid:
+            try:
+                cfg = AiCsConfig.from_settings(get_settings())
+                with AiCsClient(cfg) as ai_client:
+                    ai_client.end_session(cid)
+            except Exception:
+                pass
+    else:
+        # 2) 人工接待阶段已解决
+        session.is_human = True
+        agent_disp = session.agent_name or "人工客服"
+        sys_answer = f"客户已确认问题解决，本次由坐席【{agent_disp}】接待的人工会话已结束，感谢您的咨询，请对本次服务进行评价！"
+        sys_msg = ReceptionMessage(
+            session_id=session_id,
+            sender_type="system",
+            sender_name="系统通知",
+            content=sys_answer,
+            is_read=True,
+            created_at=now,
+        )
+        db.add(sys_msg)
+        session.last_message = sys_answer[:200]
+        session.last_message_at = now
+
+    db.commit()
+    db.refresh(session)
+
+    # 坐席释放空位时触发排队补位分发 (对齐泳道 4)
+    if session.is_human:
+        try:
+            dispatch_online_sessions_internal(db)
+        except Exception as e:
+            logger.warning("Auto dispatch on client resolve failed: %s", e)
+
+    return {
+        "ok": True,
+        "status": "closed",
+        "is_human": session.is_human,
+        "agent_name": session.agent_name,
+        "closed_at": now.isoformat(),
+    }
+
+
+@router.post("/client/sessions/{session_id}/submit-ticket")
+def client_submit_ticket(
+    session_id: str,
+    body: ClientSubmitTicketRequest,
+    db: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """客户一键提交售后工单，真实写入 tickets 表 (对齐泳道 5)。"""
+    session = db.query(ReceptionSession).filter(ReceptionSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    ticket = create_ticket_from_reception_session(
+        db,
+        session,
+        title=body.title,
+        body=body.description,
+    )
+    ticket_code = ticket.short_code
+    now = datetime.now(UTC)
+
+    ticket_msg = ReceptionMessage(
+        session_id=session_id,
+        sender_type="system",
+        sender_name="售后工单系统",
+        content=f"已为您一键生成售后工单【{ticket_code}】！标题：{ticket.title}。技术服务团队将根据您提交的记录加急处理并在工作时间回访答复。",
+        is_read=True,
+        created_at=now,
+    )
+    db.add(ticket_msg)
+    db.commit()
+
+    # 释放坐席容量（如果是人工转出的工单）
+    if session.is_human:
+        try:
+            dispatch_online_sessions_internal(db)
+        except Exception as e:
+            logger.warning("Auto dispatch on submit_ticket failed: %s", e)
+
+    return {
+        "ok": True,
+        "ticket_id": ticket.id,
+        "ticket_short_code": ticket_code,
+        "status": "converted",
+        "title": ticket.title,
+    }
 
 
 @router.post("/client/sessions/{session_id}/close")
@@ -1644,7 +2924,20 @@ def client_close_session(
     )
     db.add(sys_msg)
     db.commit()
+
+    # 释放 Open API Channel 远端会话资源
+    cid = _session_ai_cid_cache.pop(session_id, None)
+    if cid:
+        try:
+            settings = get_settings()
+            cfg = AiCsConfig.from_settings(settings)
+            with AiCsClient(cfg) as ai_client:
+                ai_client.end_session(cid)
+        except Exception as e:
+            logger.warning("Call Open API Channel end_session failed for %s (cid=%s): %s", session_id, cid, e)
+
     return {"status": "ok", "closed_at": now.isoformat()}
+
 
 
 @router.post("/client/sessions/{session_id}/evaluate")

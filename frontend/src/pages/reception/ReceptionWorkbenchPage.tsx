@@ -944,6 +944,9 @@ export function ReceptionWorkbenchPage() {
           ) : (
             currentCardList.map((card) => {
               const isSelected = activeSession?.id === card.id;
+              const isAiEscalated = Boolean(
+                card.summary && (card.summary.includes("未解决") || card.summary.includes("AI"))
+              );
               return (
                 <div
                   key={card.id}
@@ -953,10 +956,20 @@ export function ReceptionWorkbenchPage() {
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-semibold text-[14px] text-slate-800 truncate max-w-[200px]">
-                      {card.company_name}
-                    </span>
-                    <span className="text-[12.5px] text-slate-400 font-mono">
+                    <div className="flex items-center gap-1.5 min-w-0 max-w-[210px]">
+                      <span className="font-semibold text-[14px] text-slate-800 truncate">
+                        {card.company_name}
+                      </span>
+                      {isAiEscalated && (
+                        <span
+                          className="flex-none px-1.5 py-0.2 rounded text-[10.5px] bg-amber-50 text-amber-700 border border-amber-200 font-medium"
+                          title={card.summary || undefined}
+                        >
+                          AI转入·未解决
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[12.5px] text-slate-400 font-mono flex-none ml-1">
                       {(card.last_message_at || card.created_at).slice(11, 16)}
                     </span>
                   </div>
@@ -992,6 +1005,12 @@ export function ReceptionWorkbenchPage() {
                 <span className="text-xs text-slate-400 font-mono">
                   ({activeSession.id})
                 </span>
+                {(activeSession.summary?.includes("未解决") || activeSession.summary?.includes("AI")) && (
+                  <span className="px-2 py-0.5 rounded text-xs bg-amber-50 text-amber-700 border border-amber-200 font-medium flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                    AI转入·未解决
+                  </span>
+                )}
               </div>
 
               {/* 动态按钮组 */}
@@ -1346,6 +1365,24 @@ export function ReceptionWorkbenchPage() {
       <div className="w-[360px] flex-none bg-white flex flex-col overflow-y-auto">
         {activeSession ? (
           <>
+            {/* AI 前置沟通摘要 */}
+            {(activeSession.summary?.includes("未解决") || activeSession.summary?.includes("AI")) && (
+              <div className="px-3.5 py-2.5 border-b border-amber-200/80 bg-amber-50/60 flex-none space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-[12.5px] font-bold text-amber-900 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                    <span>AI 前置沟通摘要</span>
+                  </h4>
+                  <span className="text-[11px] text-amber-700 bg-amber-100/90 px-1.5 py-0.5 rounded border border-amber-200 font-medium">
+                    客户反馈未解决
+                  </span>
+                </div>
+                <div className="text-[12px] text-amber-800/90 leading-relaxed bg-white p-2 rounded border border-amber-200/60 break-words shadow-2xs">
+                  {activeSession.summary}
+                </div>
+              </div>
+            )}
+
             {/* 上部：企业与客户画像 */}
             <div className="px-3.5 py-2.5 border-b border-slate-200 bg-slate-50/50 space-y-2 flex-none">
               <div className="flex items-center justify-between">

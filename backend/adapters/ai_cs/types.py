@@ -16,19 +16,26 @@ from typing import Any
 class AiCsConfig:
     app_id: str
     app_key: str
-    base_url: str = "http://localhost:9090"
+    base_url: str = "http://123.207.158.7:5000/fpy_agent"
     timeout_seconds: float = 180.0  # replay 走 LLM，AI 客服服务端较慢，留足余量
     # Skills the AI 客服 side allows managing (mirror of its MANAGED_SKILLS env).
     managed_skills: tuple[str, ...] = ("customer-service", "customer-service-feishu")
+
+    def __post_init__(self) -> None:
+        if self.base_url:
+            cleaned = self.base_url.strip().rstrip("/,").rstrip("/,")
+            object.__setattr__(self, "base_url", cleaned)
 
     @classmethod
     def from_settings(cls, settings: Any) -> AiCsConfig:
         raw = getattr(settings, "ai_cs_managed_skills", "") or ""
         skills = tuple(s.strip() for s in raw.split(",") if s.strip())
+        raw_url = str(getattr(settings, "ai_cs_base_url", "") or "http://123.207.158.7:5000/fpy_agent").strip()
+        cleaned_url = raw_url.rstrip("/,").rstrip("/,")
         return cls(
             app_id=getattr(settings, "ai_cs_app_id", ""),
             app_key=getattr(settings, "ai_cs_app_key", ""),
-            base_url=getattr(settings, "ai_cs_base_url", "") or "http://localhost:9090",
+            base_url=cleaned_url,
             timeout_seconds=float(getattr(settings, "ai_cs_timeout_seconds", 180.0) or 180.0),
             managed_skills=skills or ("customer-service", "customer-service-feishu"),
         )
@@ -97,3 +104,16 @@ class ReplayResult:
     cited_knowledge: list[dict[str, Any]] = field(default_factory=list)
     skills_used: list[str] = field(default_factory=list)
     trace_id: str = ""
+
+
+@dataclass(slots=True, frozen=True)
+class ChannelAnswerResult:
+    """POST /open-api/ask/answer_no_stream — 同步问答响应 DTO。"""
+
+    answer: str
+    transfer_result: str = "NO_ACTION"  # NO_ACTION | TRANSFER
+    ai_agent_cid: str = ""
+    robot_answer_type: str = "QA_DIRECT"
+    robot_answer_message_type: str = "MESSAGE"
+    roundid: str | None = None
+

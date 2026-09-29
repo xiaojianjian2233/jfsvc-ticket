@@ -27,6 +27,7 @@ import { AgentsPage } from "@/pages/reception/AgentsPage";
 import { SessionListPage } from "@/pages/reception/SessionListPage";
 import { ReceptionWorkbenchPage } from "@/pages/reception/ReceptionWorkbenchPage";
 import { NoticeConfigPage } from "@/pages/reception/NoticeConfigPage";
+import { BotConfigPage } from "@/pages/reception/BotConfigPage";
 
 /**
  * require_admin 页面守卫：非管理员（含 supervisor）直接跳回 /admin/users。
@@ -113,5 +114,6 @@ export const authedRoutes = (
     <Route path="/reception/sessions" element={<SessionListPage />} />
     <Route path="/reception/workbench" element={<ReceptionWorkbenchPage />} />
     <Route path="/reception/notices" element={<NoticeConfigPage />} />
+    <Route path="/reception/bot-config" element={<BotConfigPage />} />
   </>
 );

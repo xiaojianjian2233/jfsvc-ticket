@@ -178,6 +178,7 @@ const navItems: {
       { to: "/reception/agents", label: "坐席设置" },
       { to: "/reception/sessions", label: "会话记录列表" },
       { to: "/reception/notices", label: "消息通知配置" },
+      { to: "/reception/bot-config", label: "智能体接待配置" },
     ],
   },
   {

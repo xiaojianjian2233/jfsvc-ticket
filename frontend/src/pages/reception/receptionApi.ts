@@ -44,6 +44,7 @@ export interface EligibleUser {
 
 export interface SessionItem {
   id: string;
+  ai_agent_cid?: string | null;
   company_name: string;
   tax_no?: string | null;
   tenant_no?: string | null;
@@ -54,6 +55,7 @@ export interface SessionItem {
   is_human: boolean;
   agent_user_id?: number | null;
   agent_name: string;
+  agent_avatar?: string | null;
   ticket_id?: number | null;
   ticket_short_code?: string | null;
   summary?: string | null;
@@ -74,6 +76,7 @@ export interface MessageItem {
   session_id: string;
   sender_type: "customer" | "agent" | "bot" | "system";
   sender_name: string;
+  sender_avatar?: string | null;
   content: string;
   is_read: boolean;
   created_at: string;
@@ -124,6 +127,186 @@ export const DEFAULT_SCHEDULE_SETTINGS: ScheduleSettings = {
     { start: "09:00", end: "11:45" },
     { start: "13:30", end: "18:00" },
   ],
+};
+
+// ----------------------------------------------------------------------------
+// Bot Config & Routing Types
+// ----------------------------------------------------------------------------
+
+export interface BotAgentProfile {
+  id: string;
+  code: string;
+  name: string;
+  avatar: string;
+  agent_type?: "normal" | "fallback";
+  description: string;
+  webhook_url?: string;
+  welcome_message: string;
+  unresolved_prompt: string;
+  system_prompt: string;
+  skills: string[];
+  product_lines: string[];
+  source_channels?: string[];
+  support_transfer_human: boolean;
+  transfer_human_rule: string;
+  temperature: number;
+  is_enabled: boolean;
+  created_at: string;
+  created_by: string;
+}
+
+export const CHANNEL_OPTIONS = ["全部", "星瀚侧边栏", "星空侧边栏", "标准侧边栏"];
+
+export interface BotRoutingCondition {
+  match_mode: "any" | "all";
+  product_keywords: string[];
+  company_keywords: string[];
+  message_keywords: string[];
+}
+
+export interface BotRoutingRule {
+  id: string;
+  name: string;
+  target_agent_id: string;
+  conditions: BotRoutingCondition;
+  is_enabled: boolean;
+}
+
+export interface BotEscalationStrategy {
+  enable_agent_reception: boolean;
+  probe_working_hours: boolean;
+  probe_human_agents: boolean;
+  ask_transfer_text: string;
+  no_human_guide_text: string;
+  show_ticket_button: boolean;
+}
+
+export interface BotConfigData {
+  agents: BotAgentProfile[];
+  routing_rules: BotRoutingRule[];
+  default_agent_id: string;
+  escalation_strategy: BotEscalationStrategy;
+}
+
+export interface ProbeCapacityResponse {
+  can_transfer_human: boolean;
+  in_working_hours: boolean;
+  online_agent_count: number;
+  idle_capacity: number;
+  action_type: "ask_transfer" | "guide_ticket";
+  prompt_text: string;
+}
+
+export interface ClientSubmitTicketPayload {
+  title: string;
+  description: string;
+  contact_name?: string;
+  contact_phone?: string;
+  company_name?: string;
+  tax_no?: string;
+}
+
+export const DEFAULT_BOT_CONFIG: BotConfigData = {
+  agents: [
+    {
+      id: "agent-invoice",
+      code: "AGENT0001",
+      name: "数电发票专家",
+      avatar: "🧾",
+      agent_type: "normal",
+      description: "精通数电发票开具、红字发票冲红、发票勾选抵扣与入账归档等业务",
+      webhook_url: "",
+      welcome_message: "您好！欢迎使用发票云售后在线支持。系统已为您建立会话，我是数电发票智能专家，请问在发票开具、红字发票冲红或勾选抵扣中遇到什么问题？",
+      unresolved_prompt: "抱歉没能解决您的数电发票问题，请问需要为您转接人工坐席或提交售后工单跟进吗？",
+      system_prompt: "你是一名精通国家数电发票、电子发票服务平台规则的发票云业务专家。",
+      skills: ["invoice-issuance", "red-invoice", "deduction-check"],
+      product_lines: ["全部"],
+      source_channels: ["全部"],
+      support_transfer_human: true,
+      transfer_human_rule: "客户回复未解决且在人工工作时间有空闲坐席时触发转人工",
+      temperature: 0.2,
+      is_enabled: false,
+      created_at: "2026-09-20 09:00:00",
+      created_by: "系统管理员",
+    },
+    {
+      id: "agent-tax",
+      code: "AGENT0002",
+      name: "税务申报专家",
+      avatar: "💼",
+      agent_type: "normal",
+      description: "精通税企直连、税局认证、企业所得税与增值税申报接口相关疑问",
+      webhook_url: "",
+      welcome_message: "您好！欢迎使用发票云售后在线支持。系统已为您建立会话，我是税务申报智能助手，请问有什么关于税局接口或纳税申报的问题需要解答？",
+      unresolved_prompt: "税务规则复杂多变，未能解决您的申报疑问十分抱歉。",
+      system_prompt: "你是一名资深税务申报与税局数据接口系统支持专家。",
+      skills: ["tax-declaration", "tax-interfaces"],
+      product_lines: ["全部"],
+      source_channels: ["全部"],
+      support_transfer_human: true,
+      transfer_human_rule: "客户回复未解决且在人工工作时间有空闲坐席时触发转人工",
+      temperature: 0.3,
+      is_enabled: false,
+      created_at: "2026-09-20 09:00:00",
+      created_by: "系统管理员",
+    },
+    {
+      id: "agent-general",
+      code: "AGENT0003",
+      name: "综合服务助手",
+      avatar: "🤖",
+      agent_type: "fallback",
+      description: "全能型发票云服务助手，负责通用产品功能咨询、账号权限与系统指引",
+      webhook_url: "",
+      welcome_message: "您好！欢迎使用发票云售后在线支持。系统已为您建立会话，我是发票云智能综合助手，请问有什么可以帮您？",
+      unresolved_prompt: "抱歉没能彻底解决您的问题。",
+      system_prompt: "你是一名专业的发票云综合客服支持助手。",
+      skills: ["general-guide", "account-perm"],
+      product_lines: ["全部"],
+      source_channels: ["全部"],
+      support_transfer_human: true,
+      transfer_human_rule: "客户回复未解决且在人工工作时间有空闲坐席时触发转人工",
+      temperature: 0.3,
+      is_enabled: true,
+      created_at: "2026-09-20 09:00:00",
+      created_by: "系统管理员",
+    },
+  ],
+  routing_rules: [
+    {
+      id: "rule-invoice",
+      name: "数电与发票类咨询分流",
+      target_agent_id: "agent-invoice",
+      conditions: {
+        match_mode: "any",
+        product_keywords: ["数电票", "全电发票", "进销项", "发票云"],
+        company_keywords: [],
+        message_keywords: ["开票", "红字", "勾选", "作废", "差额征税", "纸电混合", "税控盘"],
+      },
+      is_enabled: true,
+    },
+    {
+      id: "rule-tax",
+      name: "税务申报与直连分流",
+      target_agent_id: "agent-tax",
+      conditions: {
+        match_mode: "any",
+        product_keywords: ["税企直连", "纳税申报", "税局端"],
+        company_keywords: [],
+        message_keywords: ["申报", "扣税", "税局", "认证", "增值税", "所得税", "接口超时"],
+      },
+      is_enabled: true,
+    },
+  ],
+  default_agent_id: "agent-general",
+  escalation_strategy: {
+    enable_agent_reception: true,
+    probe_working_hours: true,
+    probe_human_agents: true,
+    ask_transfer_text: "很抱歉没能解决您的问题。当前有在线专业人工客服，是否为您转接人工坐席？",
+    no_human_guide_text: "当前人工坐席均在忙碌中或已下班，建议您直接提交售后工单，我们将由技术专家加急排查并在第一时间答复您！",
+    show_ticket_button: true,
+  },
 };
 
 // ----------------------------------------------------------------------------
@@ -596,6 +779,18 @@ export async function fetchSessions(params?: {
       const localSessions = getLocalStore<SessionItem[]>("sessions", []);
       let allItems = [...res.items];
       if (localSessions.length > 0) {
+        const localMap = new Map(localSessions.map((x) => [x.id, x]));
+        // 补充服务端可能未持久化或缺失的 ai_agent_cid
+        allItems = allItems.map((item) => {
+          if (!item.ai_agent_cid && localMap.has(item.id)) {
+            const loc = localMap.get(item.id);
+            if (loc?.ai_agent_cid) {
+              return { ...item, ai_agent_cid: loc.ai_agent_cid };
+            }
+          }
+          return item;
+        });
+
         const serverIds = new Set(res.items.map((x) => x.id));
         const extraLocal = localSessions.filter((x) => !serverIds.has(x.id));
         if (extraLocal.length > 0) {
@@ -676,7 +871,16 @@ export async function fetchSessionDetail(
     const res = await httpGet<{ session: SessionItem; messages: MessageItem[] }>(
       `/api/reception/sessions/${sessionId}`
     );
-    if (res && res.session) return res;
+    if (res && res.session) {
+      if (!res.session.ai_agent_cid) {
+        const localSessions = getLocalStore<SessionItem[]>("sessions", []);
+        const loc = localSessions.find((s) => s.id === sessionId);
+        if (loc?.ai_agent_cid) {
+          res.session.ai_agent_cid = loc.ai_agent_cid;
+        }
+      }
+      return res;
+    }
   } catch {
     // fallback
   }
@@ -1082,6 +1286,8 @@ export function isWithinReceptionTime(
   return false;
 }
 
+export const isWithinWorkingHours = isWithinReceptionTime;
+
 export async function fetchScheduleSettings(): Promise<ScheduleSettings> {
   try {
     const res = await httpGet<ScheduleSettings>("/api/reception/settings/schedule");
@@ -1106,6 +1312,112 @@ export async function updateScheduleSettings(
     // ignore
   }
   return settings;
+}
+
+export interface ProductLineOption {
+  code: string;
+  name: string;
+}
+
+export const FALLBACK_PRODUCT_LINES: ProductLineOption[] = [
+  { code: "cloud-erp", name: "数电发票云" },
+  { code: "tax-direct", name: "税企直连系统" },
+  { code: "invoice-open", name: "发票开放平台" },
+  { code: "general-cloud", name: "通用发票微服务" },
+  { code: "input-output", name: "进销项申报系统" },
+];
+
+export async function fetchProductLineOptions(): Promise<ProductLineOption[]> {
+  try {
+    const res = await httpGet<any[]>("/api/admin/product-lines");
+    if (Array.isArray(res) && res.length > 0) {
+      return res.map((r) => ({ code: r.code || r.name, name: r.name }));
+    }
+  } catch {
+    // fallback
+  }
+  return FALLBACK_PRODUCT_LINES;
+}
+
+export function normalizeBotConfig(raw: BotConfigData): BotConfigData {
+  let maxNum = 0;
+  raw.agents.forEach((a) => {
+    if (a.code && a.code.startsWith("AGENT")) {
+      const n = parseInt(a.code.slice(5), 10);
+      if (!isNaN(n) && n > maxNum) maxNum = n;
+    }
+  });
+
+  const agents = raw.agents.map((a) => {
+    let code = a.code;
+    if (!code) {
+      maxNum += 1;
+      code = `AGENT${maxNum.toString().padStart(4, "0")}`;
+    }
+    return {
+      ...a,
+      code,
+      agent_type: a.agent_type || (a.id === raw.default_agent_id ? "fallback" : "normal"),
+      webhook_url: a.webhook_url ?? "",
+      product_lines: Array.isArray(a.product_lines) && a.product_lines.length > 0 ? a.product_lines : ["全部"],
+      source_channels: Array.isArray(a.source_channels) && a.source_channels.length > 0 ? a.source_channels : ["全部"],
+      support_transfer_human: a.support_transfer_human ?? true,
+      transfer_human_rule: a.transfer_human_rule || "客户回复未解决且在人工工作时间有空闲坐席时触发转人工",
+      created_at: a.created_at || "2026-09-20 09:00:00",
+      created_by: a.created_by || "系统管理员",
+    };
+  });
+
+  return { ...raw, agents };
+}
+
+export async function fetchBotConfig(): Promise<BotConfigData> {
+  try {
+    const res = await httpGet<BotConfigData>("/api/reception/bot-config");
+    if (res && Array.isArray(res.agents)) {
+      const normalized = normalizeBotConfig(res);
+      setLocalStore("bot_config", normalized);
+      return normalized;
+    }
+  } catch {
+    // ignore
+  }
+  const fallback = getLocalStore<BotConfigData>("bot_config", DEFAULT_BOT_CONFIG);
+  return normalizeBotConfig(fallback);
+}
+
+export async function saveBotConfig(config: BotConfigData): Promise<BotConfigData> {
+  setLocalStore("bot_config", config);
+  try {
+    const res = await httpPut<BotConfigData>("/api/reception/bot-config", config);
+    if (res) return res;
+  } catch {
+    // ignore
+  }
+  return config;
+}
+
+export async function probeHumanCapacity(): Promise<ProbeCapacityResponse> {
+  try {
+    return await httpGet<ProbeCapacityResponse>("/api/reception/client/probe-human-capacity");
+  } catch {
+    const botConfig = getLocalStore<BotConfigData>("bot_config", DEFAULT_BOT_CONFIG);
+    const schedule = getLocalStore<ScheduleSettings>("schedule_settings", DEFAULT_SCHEDULE_SETTINGS);
+    const inHours = isWithinWorkingHours(schedule);
+    const agents = getLocalStore<AgentItem[]>("agents", SEED_AGENTS);
+    const onlineAgents = agents.filter((a) => a.status === "online");
+    const canHuman = inHours && onlineAgents.length > 0;
+    return {
+      can_transfer_human: canHuman,
+      in_working_hours: inHours,
+      online_agent_count: onlineAgents.length,
+      idle_capacity: onlineAgents.length * 5,
+      action_type: canHuman ? "ask_transfer" : "guide_ticket",
+      prompt_text: canHuman
+        ? botConfig.escalation_strategy?.ask_transfer_text || "当前有在线专业客服，是否为您转接人工坐席？"
+        : botConfig.escalation_strategy?.no_human_guide_text || "当前人工客服均在忙碌中，建议您直接提交售后工单！",
+    };
+  }
 }
 
 export async function handoverAndOffline(
@@ -1306,6 +1618,7 @@ export interface ClientInitSessionPayload {
   tenant_name?: string | null;
   tenant_no?: string | null;
   purchased_products?: string[];
+  channel?: string;
   is_historical?: boolean;
 }
 
@@ -1498,8 +1811,10 @@ export async function clientInitSession(
     const sessions = getLocalStore<SessionItem[]>("sessions", SEED_SESSIONS);
 
     if (!contactName) {
-      const historySession = sessions.find((s) => s.contact_phone === phone && s.contact_name);
-      contactName = historySession?.contact_name || `客户_${phone.slice(-4)}`;
+      const historySession = sessions.find(
+        (s) => s.contact_phone === phone && s.contact_name && !/^客户_\d+$/.test(s.contact_name)
+      );
+      contactName = historySession?.contact_name || phone;
     }
 
     let tenantName = payload.tenant_name;
@@ -1519,12 +1834,55 @@ export async function clientInitSession(
     const sessionId = `${prefix}${seq.toString().padStart(4, "0")}`;
     const nowStr = new Date().toISOString().replace("T", " ").slice(0, 19);
 
+    const botConfig = getLocalStore<BotConfigData>("bot_config", DEFAULT_BOT_CONFIG);
+    const useAgent = botConfig.escalation_strategy?.enable_agent_reception ?? true;
+    let matchedAgent: BotAgentProfile | undefined;
+    if (useAgent) {
+      const enabledAgents = (botConfig.agents || []).filter((a) => a.is_enabled);
+      const fallbackAgent =
+        enabledAgents.find((a) => a.agent_type === "fallback") ||
+        enabledAgents.find((a) => a.id === botConfig.default_agent_id) ||
+        enabledAgents[0];
+
+      const prodCandidates = (purchasedProducts || []).map((p) => p.toLowerCase());
+      const channelCandidate = (payload.channel || "").toLowerCase();
+
+      if (prodCandidates.length > 0 || channelCandidate) {
+        let bestAgent: BotAgentProfile | null = null;
+        let bestScore = 0;
+        for (const a of enabledAgents) {
+          if (a.agent_type === "fallback") continue;
+          let score = 0;
+          const lines = (a.product_lines || ["全部"]).map((l) => l.toLowerCase());
+          const channels = (a.source_channels || ["全部"]).map((c) => c.toLowerCase());
+          if (prodCandidates.length > 0) {
+            if (lines.some((l) => l !== "全部" && prodCandidates.some((c) => c.includes(l) || l.includes(c)))) {
+              score += 3;
+            }
+          }
+          if (channelCandidate) {
+            if (channels.some((c) => c !== "全部" && (c.includes(channelCandidate) || channelCandidate.includes(c)))) {
+              score += 2;
+            }
+          }
+          if (score > bestScore) {
+            bestScore = score;
+            bestAgent = a;
+          }
+        }
+        matchedAgent = bestAgent || fallbackAgent;
+      } else {
+        matchedAgent = fallbackAgent;
+      }
+    }
+
     const newSession: SessionItem = {
       id: sessionId,
       session_type: "online",
-      status: "queue",
-      is_human: true,
-      agent_name: "在线待分配",
+      status: useAgent ? "in_progress" : "queue",
+      is_human: !useAgent,
+      agent_name: useAgent && matchedAgent ? matchedAgent.name : "在线待分配",
+      agent_avatar: useAgent && matchedAgent ? matchedAgent.avatar : undefined,
       company_name: payload.company_name.trim(),
       tax_no: payload.tax_no.trim(),
       tenant_name: tenantName,
@@ -1540,15 +1898,28 @@ export async function clientInitSession(
       updated_at: nowStr,
     };
 
-    const welcomeMsg: MessageItem = {
-      id: Date.now(),
-      session_id: sessionId,
-      sender_type: "system",
-      sender_name: "发票云小助手",
-      content: `您好！欢迎使用发票云售后在线支持。系统已为您建立会话【${sessionId}】，正在为您接入在线专业客服，请稍候...`,
-      is_read: true,
-      created_at: nowStr,
-    };
+    const welcomeMsg: MessageItem =
+      useAgent && matchedAgent
+        ? {
+            id: Date.now(),
+            session_id: sessionId,
+            sender_type: "bot",
+            sender_name: matchedAgent.name,
+            sender_avatar: matchedAgent.avatar,
+            content:
+              matchedAgent.welcome_message || `您好！我是${matchedAgent.name}，很高兴为您服务，请问有什么可以帮您？`,
+            is_read: true,
+            created_at: nowStr,
+          }
+        : {
+            id: Date.now(),
+            session_id: sessionId,
+            sender_type: "system",
+            sender_name: "发票云小助手",
+            content: `您好！欢迎使用发票云售后在线支持。系统已为您建立会话【${sessionId}】，正在为您接入在线专业客服，请稍候...`,
+            is_read: true,
+            created_at: nowStr,
+          };
 
     sessions.unshift(newSession);
     setLocalStore("sessions", sessions);
@@ -1557,8 +1928,10 @@ export async function clientInitSession(
     allMessages[sessionId] = [welcomeMsg];
     setLocalStore("messages", allMessages);
 
-    // 触发自动分发
-    autoDispatchQueueSessions().catch(() => {});
+    // 如果不是 Agent 接待才触发人工分发
+    if (!useAgent) {
+      autoDispatchQueueSessions().catch(() => {});
+    }
     notifySessionCreated(newSession);
 
     return { session: newSession, messages: [welcomeMsg] };
@@ -1571,7 +1944,25 @@ export async function clientInitSession(
 export async function clientFetchSessions(phone: string): Promise<ClientSessionsGrouped> {
   const cleanPhone = phone.trim();
   try {
-    return await httpGet<ClientSessionsGrouped>("/api/reception/client/sessions", { phone: cleanPhone });
+    const res = await httpGet<ClientSessionsGrouped>("/api/reception/client/sessions", { phone: cleanPhone });
+    if (res) {
+      const allRes = [...(res.recent_open || []), ...(res.closed || [])];
+      const localSessions = getLocalStore<SessionItem[]>("sessions", SEED_SESSIONS);
+      let changed = false;
+      for (const r of allRes) {
+        const found = localSessions.find((s) => s.id === r.id);
+        if (found) {
+          if (!found.ai_agent_cid && r.ai_agent_cid) {
+            found.ai_agent_cid = r.ai_agent_cid;
+            changed = true;
+          }
+        }
+      }
+      if (changed) {
+        setLocalStore("sessions", localSessions);
+      }
+    }
+    return res;
   } catch {
     const sessions = getLocalStore<SessionItem[]>("sessions", SEED_SESSIONS);
     const matched = sessions.filter((s) => s.contact_phone === cleanPhone);
@@ -1640,12 +2031,142 @@ export async function clientSendMessage(
       created_at: nowStr,
     };
     list.push(newMsg);
+
+    // 如果会话当前处于 Agent 接待（非人工坐席），本地回退模式下触发 Agent 自动作答
+    const sessions = getLocalStore<SessionItem[]>("sessions", SEED_SESSIONS);
+    const s = sessions.find((item) => item.id === sessionId);
+    if (s && !s.is_human && !content.startsWith("[CARD:")) {
+      const botConfig = getLocalStore<BotConfigData>("bot_config", DEFAULT_BOT_CONFIG);
+      const contentTrimmed = content.trim();
+      const lastBotMsg = list
+        .slice()
+        .reverse()
+        .find((m) => m.sender_type === "bot" && m.id !== newMsg.id);
+      const hasResolutionPrompt =
+        lastBotMsg &&
+        /(?:1\s*解决|是否(?:已经)?解决|解决您的(?:问题|疑问))/.test(lastBotMsg.content || "");
+
+      const isResolved =
+        [
+          "1 解决",
+          "1.解决",
+          "1、解决",
+          "已解决",
+          "解决",
+          "问题已解决",
+          "好了",
+          "行了",
+          "满意",
+        ].includes(contentTrimmed) || (hasResolutionPrompt && contentTrimmed === "1");
+      const isUnresolved =
+        [
+          "2 未解决",
+          "2.未解决",
+          "2、未解决",
+          "未解决",
+          "没解决",
+          "没有解决",
+          "问题未解决",
+        ].includes(contentTrimmed) || (hasResolutionPrompt && contentTrimmed === "2");
+      const isTransfer = ["人工", "转人工", "找客服", "真人", "坐席", "投诉"].some((k) => contentTrimmed.includes(k));
+
+      if (isResolved) {
+        list.push({
+          id: Date.now() + 2,
+          session_id: sessionId,
+          sender_type: "bot",
+          sender_name: s.agent_name || "智能助手",
+          content:
+            "🎉 很高兴为您解决问题！发票云专家团队始终为您保驾护航。如您在发票开具、冲红、申报或系统使用中有其他疑问，随时可以在此咨询我们。祝您工作顺利，生活愉快！",
+          is_read: true,
+          created_at: nowStr,
+        });
+      } else if (isUnresolved || isTransfer) {
+        const schedule = getLocalStore<ScheduleSettings>("schedule_settings", DEFAULT_SCHEDULE_SETTINGS);
+        const inHours = isWithinWorkingHours(schedule);
+        const agents = getLocalStore<AgentItem[]>("agents", SEED_AGENTS);
+        const hasOnline = agents.some((a) => a.status === "online");
+        const canHuman = inHours && hasOnline;
+        const actionType = canHuman ? "ask_transfer" : "guide_ticket";
+        const promptText = canHuman
+          ? botConfig.escalation_strategy?.ask_transfer_text || "很抱歉没能解决您的问题。当前有在线专业人工客服，是否为您转接人工坐席？"
+          : botConfig.escalation_strategy?.no_human_guide_text || "当前人工坐席均在忙碌中或已下班，建议您直接提交售后工单，我们将由技术专家加急排查并在第一时间答复您！";
+
+        if (isTransfer) {
+          list.push({
+            id: Date.now() + 1,
+            session_id: sessionId,
+            sender_type: "bot",
+            sender_name: s.agent_name || "智能助手",
+            content: "【AI 客服】已识别到您希望与人工客服进行沟通。已为您触发人工坐席转接流程：",
+            is_read: true,
+            created_at: nowStr,
+          });
+        }
+
+        list.push({
+          id: Date.now() + 2,
+          session_id: sessionId,
+          sender_type: "system",
+          sender_name: "智能服务助手",
+          content: `[CARD:${actionType}] ${promptText}`,
+          is_read: true,
+          created_at: nowStr,
+        });
+      } else {
+        let answer =
+          `您好！关于您咨询的问题：“${content.slice(0, 40)}”，为您整理如下解答方案：\n` +
+          "1. 请确认当前系统账号具备对应功能的业务操作权限；\n" +
+          "2. 请前往系统功能模块核对基础信息录入是否完整，若涉及税局网络交互请检查网络连接；\n" +
+          "3. 您也可以查阅发票云在线帮助手册或参考系统内操作指引。\n\n" +
+          "💡 如以上说明已解决您的问题，请点击下方【👍 已解决】；如未解决，请点击【👎 未解决】获取人工坐席或工单支持。";
+
+        if (contentTrimmed.includes("版本")) {
+          answer =
+            "【发票云版本矩阵说明】\n" +
+            "1. 标准版：适合一般纳税人基础进销项管理与常规数电发票开具；\n" +
+            "2. 星瀚旗舰版：面向大型集团企业，支持多组织多租户、银企直联与深度业务集成；\n" +
+            "3. 星空旗舰版：面向成长型企业，深度打通 ERP 财务业务一体化；\n" +
+            "4. 国际版：支持多币种及跨境涉税合规管理。";
+        } else if (contentTrimmed.includes("红字") || contentTrimmed.includes("冲红")) {
+          answer =
+            "【红字发票开具操作指引】\n" +
+            "1. 请在【发票管理】>【红字发票】模块中点击【申请红字信息表】；\n" +
+            "2. 录入需冲红的蓝字发票代码与发票号码，系统将自动校验原发票状态与开票数据；\n" +
+            "3. 提交税局端校验审核通过后，获得红字信息表编号；\n" +
+            "4. 在开票界面选择【导入红字信息表】，核对金额与税额无误后点击【开具红字发票】完成冲红。\n\n" +
+            "💡 若原发票已跨月认证抵扣，需由购买方发起填开信息表，请核实发票开具主体。";
+        } else if (contentTrimmed.includes("勾选") || contentTrimmed.includes("抵扣")) {
+          answer =
+            "【发票勾选抵扣操作说明】\n" +
+            "1. 登录系统进入【进项发票管理】>【发票勾选确认】；\n" +
+            "2. 筛选查询对应的开票月份或发票代码范围；\n" +
+            "3. 勾选需要用于本期抵扣的发票明细，点击【确认勾选】；\n" +
+            "4. 在申报期截止日前，点击【申请统计】并完成【统计确认】即可计入当期进项税额抵扣。";
+        } else if (contentTrimmed.includes("作废")) {
+          answer =
+            "【发票作废规则】\n" +
+            "1. 全电/数电发票不再提供纸质票传统的直接作废功能，如需更正请通过【开具红字发票】进行冲红；\n" +
+            "2. 如为传统税控纸质发票，且在当月开具未抄报税的情况下，可在【发票查询】中选中发票点击【作废】；\n" +
+            "3. 跨月发票一律不能直接作废，只能走红字冲红流程。";
+        }
+
+        list.push({
+          id: Date.now() + 2,
+          session_id: sessionId,
+          sender_type: "bot",
+          sender_name: s.agent_name || "智能助手",
+          content: answer,
+          is_read: true,
+          created_at: nowStr,
+        });
+      }
+    }
+
     allMessages[sessionId] = list;
     setLocalStore("messages", allMessages);
 
     // 更新会话最新消息
-    const sessions = getLocalStore<SessionItem[]>("sessions", SEED_SESSIONS);
-    const s = sessions.find((item) => item.id === sessionId);
     if (s) {
       s.last_message = content.slice(0, 120);
       s.last_message_at = nowStr;
@@ -1655,6 +2176,137 @@ export async function clientSendMessage(
     }
 
     return newMsg;
+  }
+}
+
+/**
+ * 客户端：未解决反馈与在岗探针
+ */
+export async function clientMarkUnresolved(
+  sessionId: string,
+  messageId?: number
+): Promise<{ ok: boolean; action_type: "ask_transfer" | "guide_ticket"; prompt_text: string }> {
+  try {
+    return await httpPost<{ ok: boolean; action_type: "ask_transfer" | "guide_ticket"; prompt_text: string }>(
+      `/api/reception/client/sessions/${sessionId}/unresolved`,
+      messageId ? { message_id: messageId } : undefined
+    );
+  } catch {
+    const botConfig = getLocalStore<BotConfigData>("bot_config", DEFAULT_BOT_CONFIG);
+    const schedule = getLocalStore<ScheduleSettings>("schedule_settings", DEFAULT_SCHEDULE_SETTINGS);
+    const inHours = isWithinWorkingHours(schedule);
+    const agents = getLocalStore<AgentItem[]>("agents", SEED_AGENTS);
+    const hasOnline = agents.some((a) => a.status === "online");
+    const canHuman = inHours && hasOnline;
+    const actionType = canHuman ? "ask_transfer" : "guide_ticket";
+    const promptText = canHuman
+      ? botConfig.escalation_strategy?.ask_transfer_text ||
+        "很抱歉没能解决您的问题。当前有在线专业人工客服，是否为您转接人工坐席？"
+      : botConfig.escalation_strategy?.no_human_guide_text ||
+        "当前人工坐席均在忙碌中或已下班，建议您直接提交售后工单，我们将由技术专家加急排查并在第一时间答复您！";
+
+    const allMessages = getLocalStore<Record<string, MessageItem[]>>("messages", SEED_MESSAGES);
+    const list = allMessages[sessionId] || [];
+    list.push({
+      id: Date.now(),
+      session_id: sessionId,
+      sender_type: "system",
+      sender_name: "智能服务助手",
+      content: `[CARD:${actionType}] ${promptText}`,
+      is_read: true,
+      created_at: new Date().toISOString().replace("T", " ").slice(0, 19),
+    });
+    allMessages[sessionId] = list;
+    setLocalStore("messages", allMessages);
+
+    return { ok: true, action_type: actionType, prompt_text: promptText };
+  }
+}
+
+/**
+ * 客户端：转接人工坐席
+ */
+export async function clientEscalateHuman(
+  sessionId: string
+): Promise<{ session: SessionItem; messages: MessageItem[] }> {
+  try {
+    return await httpPost<{ session: SessionItem; messages: MessageItem[] }>(
+      `/api/reception/client/sessions/${sessionId}/escalate-human`
+    );
+  } catch {
+    const sessions = getLocalStore<SessionItem[]>("sessions", SEED_SESSIONS);
+    const s = sessions.find((item) => item.id === sessionId);
+    const nowStr = new Date().toISOString().replace("T", " ").slice(0, 19);
+    if (s) {
+      s.is_human = true;
+      s.status = "queue";
+      s.agent_name = "在线待分配";
+      s.summary = "由智能助手接待转入（客户反馈未解决）";
+      s.updated_at = nowStr;
+      setLocalStore("sessions", sessions);
+    }
+    const allMessages = getLocalStore<Record<string, MessageItem[]>>("messages", SEED_MESSAGES);
+    const list = allMessages[sessionId] || [];
+    const msg: MessageItem = {
+      id: Date.now(),
+      session_id: sessionId,
+      sender_type: "system",
+      sender_name: "系统通知",
+      content: "已为您转接人工坐席，正在为您接入专业客服，请稍候...",
+      is_read: true,
+      created_at: nowStr,
+    };
+    list.push(msg);
+    allMessages[sessionId] = list;
+    setLocalStore("messages", allMessages);
+
+    autoDispatchQueueSessions().catch(() => {});
+    return { session: s!, messages: list };
+  }
+}
+
+/**
+ * 客户端：一键提交售后工单
+ */
+export async function clientSubmitTicket(
+  sessionId: string,
+  payload: ClientSubmitTicketPayload
+): Promise<{ ok: boolean; ticket_short_code: string; status: string; title: string }> {
+  try {
+    return await httpPost<{ ok: boolean; ticket_short_code: string; status: string; title: string }>(
+      `/api/reception/client/sessions/${sessionId}/submit-ticket`,
+      payload
+    );
+  } catch {
+    const randomNum = Math.floor(10000 + Math.random() * 90000);
+    const ticketCode = `TKT-AUTO-${randomNum}`;
+    const nowStr = new Date().toISOString().replace("T", " ").slice(0, 19);
+
+    const sessions = getLocalStore<SessionItem[]>("sessions", SEED_SESSIONS);
+    const s = sessions.find((item) => item.id === sessionId);
+    if (s) {
+      s.status = "converted";
+      s.ticket_short_code = ticketCode;
+      s.summary = `未解决已转工单：${payload.title}`;
+      s.updated_at = nowStr;
+      setLocalStore("sessions", sessions);
+    }
+
+    const allMessages = getLocalStore<Record<string, MessageItem[]>>("messages", SEED_MESSAGES);
+    const list = allMessages[sessionId] || [];
+    list.push({
+      id: Date.now(),
+      session_id: sessionId,
+      sender_type: "system",
+      sender_name: "售后工单系统",
+      content: `已为您一键生成售后工单【${ticketCode}】！标题：${payload.title}。技术服务团队将根据您提交的记录加急处理并在工作时间回访答复。`,
+      is_read: true,
+      created_at: nowStr,
+    });
+    allMessages[sessionId] = list;
+    setLocalStore("messages", allMessages);
+
+    return { ok: true, ticket_short_code: ticketCode, status: "converted", title: payload.title };
   }
 }
 
@@ -1690,6 +2342,45 @@ export async function clientCloseSession(sessionId: string): Promise<{ status: s
     setLocalStore("messages", allMessages);
 
     return { status: "ok", closed_at: nowStr };
+  }
+}
+
+/**
+ * 客户端：客户反馈已解决（自动关闭会话并触发评价，对齐节点 7.1）
+ */
+export async function clientResolveSession(
+  sessionId: string
+): Promise<{ ok: boolean; status: string; is_human: boolean; agent_name?: string }> {
+  try {
+    return await httpPost<{ ok: boolean; status: string; is_human: boolean; agent_name?: string }>(
+      `/api/reception/client/sessions/${sessionId}/resolve`
+    );
+  } catch {
+    const nowStr = new Date().toISOString().replace("T", " ").slice(0, 19);
+    const sessions = getLocalStore<SessionItem[]>("sessions", SEED_SESSIONS);
+    const s = sessions.find((item) => item.id === sessionId);
+    if (s) {
+      s.status = "closed";
+      s.closed_at = nowStr;
+      s.updated_at = nowStr;
+      setLocalStore("sessions", sessions);
+    }
+
+    const allMessages = getLocalStore<Record<string, MessageItem[]>>("messages", SEED_MESSAGES);
+    const list = allMessages[sessionId] || [];
+    list.push({
+      id: Date.now(),
+      session_id: sessionId,
+      sender_type: s?.is_human ? "system" : "bot",
+      sender_name: s?.agent_name || "智能助手",
+      content: "🎉 很高兴为您解决问题！发票云专家团队始终为您保驾护航。本次会话已结束，请对本次服务进行评价！",
+      is_read: true,
+      created_at: nowStr,
+    });
+    allMessages[sessionId] = list;
+    setLocalStore("messages", allMessages);
+
+    return { ok: true, status: "closed", is_human: !!s?.is_human, agent_name: s?.agent_name };
   }
 }
 

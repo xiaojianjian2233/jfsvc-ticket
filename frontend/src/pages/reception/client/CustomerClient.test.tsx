@@ -428,6 +428,36 @@ describe("Customer Client Online Support H5 / Web App", () => {
         })
       );
     });
+
+    it("defaults contact_name to contact_phone when name input is left empty", async () => {
+      const onSuccess = vi.fn();
+      render(<CustomerInfoCollectionPage onSuccess={onSuccess} />);
+
+      const phoneInput = screen.getByPlaceholderText(/11位中国大陆手机号码/);
+      const companyInput = screen.getByPlaceholderText(/本次咨询的企业全称/);
+      const taxInput = screen.getByPlaceholderText(/统一社会信用代码/);
+
+      // 故意不录入姓名（保持为空）
+      fireEvent.change(phoneInput, { target: { value: "13912344498" } });
+      fireEvent.change(companyInput, { target: { value: "无名测试科技有限公司" } });
+      fireEvent.change(taxInput, { target: { value: "91110108MA99999999" } });
+
+      const submitBtn = screen.getByRole("button", { name: "提交" });
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(onSuccess).toHaveBeenCalledTimes(1);
+      });
+      // 验证咨询人姓名等于联系电话，而不是 客户_4498
+      expect(onSuccess).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profile: expect.objectContaining({
+            contact_name: "13912344498",
+            contact_phone: "13912344498",
+          }),
+        })
+      );
+    });
   });
 
   describe("CustomerChatWorkbenchPage (3-Column Workbench)", () => {
@@ -780,17 +810,37 @@ describe("Customer Client Online Support H5 / Web App", () => {
       // 展开「24小时内未关闭会话」
       fireEvent.click(unclosedButtonNew!);
 
-      // 点击该历史会话卡片恢复沟通
+      // 点击该历史会话卡片恢复沟通（此时仅载入查看，不自动移入进行中）
       const unclosedCard = await screen.findByText("CS-LONG-RUNNING-001");
       fireEvent.click(unclosedCard);
 
-      // 验证：点击后该会话恢复为当前窗口进行中会话，重新写入 sessionStorage
+      // 验证：点击后该会话载入为当前窗口操作会话
       await waitFor(() => {
         expect(sessionStorage.getItem(STORAGE_SESSION_KEY)).toBeTruthy();
         const saved = JSON.parse(sessionStorage.getItem(STORAGE_SESSION_KEY)!);
         expect(saved.id).toBe("CS-LONG-RUNNING-001");
       });
-      expect(screen.getByText("当前活跃")).toBeInTheDocument();
+
+      // 需求2：在未关闭会话中重新发送消息后，会话从24小时未关闭晋升进入「进行中会话」
+      const sendMsgSpy = vi.spyOn(receptionApi, "clientSendMessage").mockResolvedValue({
+        id: 999,
+        session_id: "CS-LONG-RUNNING-001",
+        sender_type: "customer",
+        sender_name: "王先生",
+        content: "请问有最新排查进展吗？",
+        is_read: false,
+        created_at: "2026-09-21 14:20:00",
+      });
+
+      const textarea = screen.getByPlaceholderText(/请输入您遇到的问题/);
+      fireEvent.change(textarea, { target: { value: "请问有最新排查进展吗？" } });
+      const sendBtn = screen.getByRole("button", { name: "发送" });
+      fireEvent.click(sendBtn);
+
+      await waitFor(() => {
+        expect(sendMsgSpy).toHaveBeenCalled();
+        expect(screen.getByText("当前活跃")).toBeInTheDocument();
+      });
     });
 
     it("detects NO unclosed session: displays welcome prompt and creates session upon sending message", async () => {
@@ -1401,6 +1451,517 @@ describe("Customer Client Online Support H5 / Web App", () => {
       const closeViewModalBtn = screen.getByRole("button", { name: "关闭" });
       fireEvent.click(closeViewModalBtn);
       expect(screen.queryByText("提单详情")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Agent Reception & Unresolved Escalation Flow", () => {
+    const mockClientProfile: CustomerProfile = {
+      contact_phone: "13800008888",
+      contact_name: "林经理",
+      company_name: "数电乐企技术测试公司",
+      tax_no: "91330100MA22334455",
+      tenant_name: "数电乐企租户",
+      tenant_no: "T-LEQI-01",
+      purchased_products: ["数电发票乐企模块"],
+      is_historical: false,
+    };
+
+    const mockAgentSession: SessionItem = {
+      id: "CS-AGENT-888",
+      contact_name: "林经理",
+      contact_phone: "13800008888",
+      company_name: "数电乐企技术测试公司",
+      status: "in_progress",
+      is_human: false,
+      agent_name: "数电乐企技术专家",
+      session_type: "online",
+      unread_count: 0,
+      created_at: "2026-09-24T10:00:00Z",
+      updated_at: "2026-09-24T10:00:00Z",
+    };
+
+    const mockBotMessage: MessageItem = {
+      id: 9901,
+      session_id: "CS-AGENT-888",
+      sender_type: "bot",
+      sender_name: "数电乐企技术专家",
+      content: "您好！这是针对乐企直连通道证书同步异常的自动解决方案，请检查根证书有效性。",
+      is_read: true,
+      created_at: "2026-09-24T10:01:00Z",
+    };
+
+    it("displays bot message with feedback buttons, triggers ask_transfer card on 未解决 and escalates to human", async () => {
+      vi.spyOn(receptionApi, "clientFetchSessions").mockResolvedValue({
+        recent_open: [mockAgentSession],
+        closed: [],
+      });
+      const transferCardMsg: MessageItem = {
+        id: 9902,
+        session_id: "CS-AGENT-888",
+        sender_type: "system",
+        sender_name: "系统通知",
+        content: "[CARD:ask_transfer] 当前人工坐席在岗，是否需要为您转接人工坐席继续跟进？",
+        is_read: true,
+        created_at: "2026-09-24T10:02:00Z",
+      };
+
+      vi.spyOn(receptionApi, "clientFetchMessages")
+        .mockResolvedValueOnce([mockBotMessage])
+        .mockResolvedValueOnce([mockBotMessage, transferCardMsg])
+        .mockResolvedValue([mockBotMessage, transferCardMsg]);
+
+      vi.spyOn(receptionApi, "clientMarkUnresolved").mockResolvedValue({
+        ok: true,
+        action_type: "ask_transfer",
+        prompt_text: "当前人工坐席在岗，是否需要为您转接人工坐席继续跟进？",
+      });
+      vi.spyOn(receptionApi, "clientEscalateHuman").mockResolvedValue({
+        session: { ...mockAgentSession, status: "queue", is_human: true, agent_name: "待分配坐席" },
+        messages: [
+          mockBotMessage,
+          {
+            id: 9903,
+            session_id: "CS-AGENT-888",
+            sender_type: "system",
+            sender_name: "系统通知",
+            content: "已为您转接人工客服，正在为您排队分配空闲坐席，请稍候...",
+            is_read: true,
+            created_at: "2026-09-24T10:03:00Z",
+          },
+        ],
+      });
+
+      render(
+        <MemoryRouter>
+          <CustomerChatWorkbenchPage
+            profile={mockClientProfile}
+            initialSession={mockAgentSession}
+            initialMessages={[mockBotMessage]}
+            onBackToLogin={vi.fn()}
+          />
+        </MemoryRouter>
+      );
+
+      // 验证渲染了 AI 智能回答
+      expect(await screen.findByText("数电乐企技术专家")).toBeInTheDocument();
+      expect(screen.getByText(/针对乐企直连通道证书同步异常的自动解决方案/)).toBeInTheDocument();
+      // 用户需求5：彻底移除消息气泡底部的「以上解答是否对您有帮助？」
+      expect(screen.queryByText("以上解答是否对您有帮助？")).not.toBeInTheDocument();
+
+      // 验证快捷点击胶囊中的 👍 1 解决 和 👎 2 未解决 按钮
+      const solvedBtn = screen.getByRole("button", { name: /1 解决/ });
+      const unsolvedBtn = screen.getByRole("button", { name: /2 未解决/ });
+      expect(solvedBtn).toBeInTheDocument();
+      expect(unsolvedBtn).toBeInTheDocument();
+
+      // 点击 未解决
+      fireEvent.click(unsolvedBtn);
+
+      await waitFor(() => {
+        expect(receptionApi.clientMarkUnresolved).toHaveBeenCalledWith("CS-AGENT-888", 9901);
+      });
+
+      // 渲染转人工询问卡片
+      expect(await screen.findByText("转接人工客服询问")).toBeInTheDocument();
+      expect(screen.getByText(/当前人工坐席在岗，是否需要为您转接人工坐席继续跟进？/)).toBeInTheDocument();
+      const transferBtn = screen.getByRole("button", { name: /确认转接人工坐席/ });
+      expect(transferBtn).toBeInTheDocument();
+
+      // 点击 确认转接人工坐席
+      fireEvent.click(transferBtn);
+
+      await waitFor(() => {
+        expect(receptionApi.clientEscalateHuman).toHaveBeenCalledWith("CS-AGENT-888");
+      });
+    });
+
+    it("opens submit ticket modal and submits ticket successfully", async () => {
+      vi.spyOn(receptionApi, "clientFetchSessions").mockResolvedValue({
+        recent_open: [mockAgentSession],
+        closed: [],
+      });
+      const guideTicketMsg: MessageItem = {
+        id: 9904,
+        session_id: "CS-AGENT-888",
+        sender_type: "system",
+        sender_name: "系统通知",
+        content: "[CARD:guide_ticket] 当前非人工工作时段或人工坐席全忙，建议您提交售后工单，由专属工程师跟进处理。",
+        is_read: true,
+        created_at: "2026-09-24T10:04:00Z",
+      };
+      vi.spyOn(receptionApi, "clientFetchMessages").mockResolvedValue([guideTicketMsg]);
+      vi.spyOn(receptionApi, "clientSubmitTicket").mockResolvedValue({
+        ok: true,
+        ticket_short_code: "R20260924-0301",
+        status: "received",
+        title: "乐企直连通道证书同步异常",
+      });
+
+      render(
+        <MemoryRouter>
+          <CustomerChatWorkbenchPage
+            profile={mockClientProfile}
+            initialSession={mockAgentSession}
+            initialMessages={[guideTicketMsg]}
+            onBackToLogin={vi.fn()}
+          />
+        </MemoryRouter>
+      );
+
+      expect(await screen.findByText("在线客服暂无空闲 / 引导提交售后工单")).toBeInTheDocument();
+      expect(screen.getByText(/当前非人工工作时段或人工坐席全忙/)).toBeInTheDocument();
+      const oneClickSubmitBtn = screen.getByRole("button", { name: /一键提交售后工单/ });
+      fireEvent.click(oneClickSubmitBtn);
+
+      // 弹窗打开
+      expect(await screen.findByText("一键提交售后工单")).toBeInTheDocument();
+      expect(screen.getByText("数电乐企技术测试公司")).toBeInTheDocument();
+
+      const confirmBtn = screen.getByRole("button", { name: "确认提交工单" });
+      fireEvent.click(confirmBtn);
+
+      await waitFor(() => {
+        expect(receptionApi.clientSubmitTicket).toHaveBeenCalled();
+      });
+    });
+
+    it("renders quick action capsules for '1 解决 2 未解决' and handles clicking '1 解决'", async () => {
+      const botMsgWithOptions: MessageItem = {
+        id: 9910,
+        session_id: "CS-AGENT-888",
+        sender_type: "bot",
+        sender_name: "🧾 数电发票专家",
+        content:
+          "【数电发票开具解答】\n1. 请在发票管理开具发票；\n\n以上回复是否已经解决您的问题\n1 解决\n2 未解决",
+        is_read: true,
+        created_at: "2026-09-24T10:10:00Z",
+      };
+      vi.spyOn(receptionApi, "clientFetchSessions").mockResolvedValue({
+        recent_open: [mockAgentSession],
+        closed: [],
+      });
+      vi.spyOn(receptionApi, "clientFetchMessages").mockResolvedValue([botMsgWithOptions]);
+      const sendMock = vi.spyOn(receptionApi, "clientSendMessage").mockResolvedValue({
+        id: 9911,
+        session_id: "CS-AGENT-888",
+        sender_type: "customer",
+        sender_name: "张三",
+        content: "1 解决",
+        is_read: false,
+        created_at: "2026-09-24T10:10:05Z",
+      });
+
+      render(
+        <MemoryRouter>
+          <CustomerChatWorkbenchPage
+            profile={mockClientProfile}
+            initialSession={mockAgentSession}
+            initialMessages={[botMsgWithOptions]}
+            onBackToLogin={vi.fn()}
+          />
+        </MemoryRouter>
+      );
+
+      // Verify quick click capsules are rendered
+      expect(await screen.findByText("⚡ 快捷点击：")).toBeInTheDocument();
+      const solveCapsule = screen.getByRole("button", { name: /👍 1 解决/ });
+      const unsolveCapsule = screen.getByRole("button", { name: /👎 2 未解决/ });
+      expect(solveCapsule).toBeInTheDocument();
+      expect(unsolveCapsule).toBeInTheDocument();
+
+      // Click "👍 1 解决" capsule
+      fireEvent.click(solveCapsule);
+
+      await waitFor(() => {
+        expect(sendMock).toHaveBeenCalledWith("CS-AGENT-888", "1 解决", "林经理");
+      });
+    });
+
+    it("renders numbered choice capsules and sends option on click", async () => {
+      const botMsgWithChoices: MessageItem = {
+        id: 9920,
+        session_id: "CS-AGENT-888",
+        sender_type: "bot",
+        sender_name: "🧾 数电发票专家",
+        content:
+          "【金蝶发票云产品版本全景】\n1. 标准版发票云\n2. For AI 星瀚版\n3. 星空旗舰版\n4. 国际版\n\n您可以点击下方快捷按钮了解详情！",
+        is_read: true,
+        created_at: "2026-09-24T10:12:00Z",
+      };
+      vi.spyOn(receptionApi, "clientFetchSessions").mockResolvedValue({
+        recent_open: [mockAgentSession],
+        closed: [],
+      });
+      vi.spyOn(receptionApi, "clientFetchMessages").mockResolvedValue([botMsgWithChoices]);
+      const sendMock = vi.spyOn(receptionApi, "clientSendMessage").mockResolvedValue({
+        id: 9921,
+        session_id: "CS-AGENT-888",
+        sender_type: "customer",
+        sender_name: "林经理",
+        content: "1. 标准版发票云",
+        is_read: false,
+        created_at: "2026-09-24T10:12:05Z",
+      });
+
+      render(
+        <MemoryRouter>
+          <CustomerChatWorkbenchPage
+            profile={mockClientProfile}
+            initialSession={mockAgentSession}
+            initialMessages={[botMsgWithChoices]}
+            onBackToLogin={vi.fn()}
+          />
+        </MemoryRouter>
+      );
+
+      // Verify numbered capsules
+      expect(await screen.findByText("⚡ 快捷点击：")).toBeInTheDocument();
+      const opt1Btn = screen.getByRole("button", { name: /1\. 标准版发票云/ });
+      const opt2Btn = screen.getByRole("button", { name: /2\. For AI 星瀚版/ });
+      expect(opt1Btn).toBeInTheDocument();
+      expect(opt2Btn).toBeInTheDocument();
+
+      // Click option 1
+      fireEvent.click(opt1Btn);
+
+      await waitFor(() => {
+        expect(sendMock).toHaveBeenCalledWith("CS-AGENT-888", "1. 标准版发票云", "林经理");
+      });
+    });
+
+    it("resolves session automatically on clicking 👍 已解决 and pops evaluation modal", async () => {
+      const mockSession: SessionItem = {
+        id: "CS-RESOLVE-100",
+        contact_name: "林经理",
+        contact_phone: "13800138000",
+        company_name: "深圳市创新科技有限公司",
+        status: "in_progress",
+        is_human: false,
+        agent_name: "🧾 数电发票专家",
+        unread_count: 0,
+        session_type: "online",
+        created_at: "2026-09-24 10:00:00",
+        updated_at: "2026-09-24 10:05:00",
+      };
+      const botMsg: MessageItem = {
+        id: 7701,
+        session_id: "CS-RESOLVE-100",
+        sender_type: "bot",
+        sender_name: "🧾 数电发票专家",
+        content: "数电发票红字冲红操作说明已提供。请点击下方【👍 已解决】或【👎 未解决】。",
+        is_read: true,
+        created_at: "2026-09-24 10:05:00",
+      };
+
+      vi.spyOn(receptionApi, "clientFetchSessions").mockResolvedValue({
+        recent_open: [mockSession],
+        closed: [],
+      });
+      vi.spyOn(receptionApi, "clientFetchMessages").mockResolvedValue([botMsg]);
+      const resolveMock = vi.spyOn(receptionApi, "clientResolveSession").mockResolvedValue({
+        ok: true,
+        status: "closed",
+        is_human: false,
+        agent_name: "🧾 数电发票专家",
+      });
+
+      render(
+        <MemoryRouter>
+          <CustomerChatWorkbenchPage
+            profile={mockClientProfile}
+            initialSession={mockSession}
+            initialMessages={[botMsg]}
+            onBackToLogin={vi.fn()}
+          />
+        </MemoryRouter>
+      );
+
+      const resolveBtn = await screen.findByRole("button", { name: /1 解决/ });
+      expect(resolveBtn).toBeInTheDocument();
+      fireEvent.click(resolveBtn);
+
+      await waitFor(() => {
+        expect(resolveMock).toHaveBeenCalledWith("CS-RESOLVE-100");
+        // Verify evaluation modal is opened
+        expect(screen.getByText("服务满意度评价")).toBeInTheDocument();
+      });
+    });
+
+    it("cleans greetings, status and transfer words when opening submit ticket modal", async () => {
+      const mockSession: SessionItem = {
+        id: "CS-TICKET-CLEAN-200",
+        contact_name: "林经理",
+        contact_phone: "13800138000",
+        company_name: "深圳市创新科技有限公司",
+        status: "in_progress",
+        is_human: false,
+        agent_name: "🧾 数电发票专家",
+        unread_count: 0,
+        session_type: "online",
+        created_at: "2026-09-24 10:00:00",
+        updated_at: "2026-09-24 10:05:00",
+      };
+      const msgs: MessageItem[] = [
+        {
+          id: 1,
+          session_id: "CS-TICKET-CLEAN-200",
+          sender_type: "customer",
+          sender_name: "林经理",
+          content: "您好，在吗？",
+          is_read: true,
+          created_at: "2026-09-24 10:01:00",
+        },
+        {
+          id: 2,
+          session_id: "CS-TICKET-CLEAN-200",
+          sender_type: "customer",
+          sender_name: "林经理",
+          content: "你好，请问数电发票怎么冲红？",
+          is_read: true,
+          created_at: "2026-09-24 10:02:00",
+        },
+        {
+          id: 3,
+          session_id: "CS-TICKET-CLEAN-200",
+          sender_type: "customer",
+          sender_name: "林经理",
+          content: "2 未解决",
+          is_read: true,
+          created_at: "2026-09-24 10:03:00",
+        },
+        {
+          id: 4,
+          session_id: "CS-TICKET-CLEAN-200",
+          sender_type: "customer",
+          sender_name: "林经理",
+          content: "转人工客服",
+          is_read: true,
+          created_at: "2026-09-24 10:04:00",
+        },
+        {
+          id: 5,
+          session_id: "CS-TICKET-CLEAN-200",
+          sender_type: "customer",
+          sender_name: "林经理",
+          content: "另外还有个问题：跨月发票可以直接作废吗？",
+          is_read: true,
+          created_at: "2026-09-24 10:05:00",
+        },
+        {
+          id: 6,
+          session_id: "CS-TICKET-CLEAN-200",
+          sender_type: "system",
+          sender_name: "智能服务助手",
+          content: "[CARD:guide_ticket] 当前人工客服全忙，建议您提交售后工单加急处理。",
+          is_read: true,
+          created_at: "2026-09-24 10:06:00",
+        },
+      ];
+
+      vi.spyOn(receptionApi, "clientFetchSessions").mockResolvedValue({
+        recent_open: [mockSession],
+        closed: [],
+      });
+      vi.spyOn(receptionApi, "clientFetchMessages").mockResolvedValue(msgs);
+
+      render(
+        <MemoryRouter>
+          <CustomerChatWorkbenchPage
+            profile={mockClientProfile}
+            initialSession={mockSession}
+            initialMessages={msgs}
+            onBackToLogin={vi.fn()}
+          />
+        </MemoryRouter>
+      );
+
+      // Trigger card ticket modal
+      const ticketBtn = await screen.findByRole("button", { name: /一键提交售后工单/ });
+      fireEvent.click(ticketBtn);
+
+      await waitFor(() => {
+        expect(screen.getByText("一键提交售后工单")).toBeInTheDocument();
+      });
+
+      // Verify title is set to first valid question (greeting stripped)
+      const titleInput = screen.getByDisplayValue("数电发票怎么冲红？");
+      expect(titleInput).toBeInTheDocument();
+
+      // Verify body contains clean combined questions and does not contain greeting or status
+      const descInput = screen.getByPlaceholderText(
+        "详细描述异常场景、开票软件提示及诉求"
+      ) as HTMLTextAreaElement;
+      expect(descInput).toBeInTheDocument();
+      expect(descInput.value).toContain("1. 数电发票怎么冲红？");
+      expect(descInput.value).toContain("2. 另外还有个问题：跨月发票可以直接作废吗？");
+      expect(descInput.value).not.toContain("您好，在吗？");
+      expect(descInput.value).not.toContain("2 未解决");
+      expect(descInput.value).not.toContain("转人工客服");
+    });
+
+    it("does NOT render quick click '1 解决 2 未解决' capsules for inquiry/question-confirmation replies", async () => {
+      const inquiryBotMsg: MessageItem = {
+        id: 9950,
+        session_id: "CS-AGENT-888",
+        sender_type: "bot",
+        sender_name: "数电乐企技术专家",
+        content: "您好！请问您遇到的是什么问题，使用的是哪款产品呢？请描述一下具体情况，我来帮您解答。",
+        is_read: true,
+        created_at: "2026-09-24T10:15:00Z",
+      };
+
+      vi.spyOn(receptionApi, "clientFetchSessions").mockResolvedValue({
+        recent_open: [mockAgentSession],
+        closed: [],
+      });
+      vi.spyOn(receptionApi, "clientFetchMessages").mockResolvedValue([inquiryBotMsg]);
+
+      render(
+        <MemoryRouter>
+          <CustomerChatWorkbenchPage
+            profile={mockClientProfile}
+            initialSession={mockAgentSession}
+            initialMessages={[inquiryBotMsg]}
+            onBackToLogin={vi.fn()}
+          />
+        </MemoryRouter>
+      );
+
+      expect(await screen.findByText(/您好！请问您遇到的是什么问题/)).toBeInTheDocument();
+      // 确认询问类回复严禁展示 1 解决 和 2 未解决 胶囊
+      expect(screen.queryByRole("button", { name: /1 解决/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /2 未解决/ })).not.toBeInTheDocument();
+      expect(screen.queryByText("⚡ 快捷点击：")).not.toBeInTheDocument();
+    });
+
+    it("renders agent avatar as a 25px*25px circular element", async () => {
+      const botMsg: MessageItem = {
+        id: 9960,
+        session_id: "CS-AGENT-888",
+        sender_type: "bot",
+        sender_name: "数电乐企技术专家",
+        content: "这是操作指导，请参考以下说明处理。",
+        is_read: true,
+        created_at: "2026-09-24T10:16:00Z",
+      };
+
+      render(
+        <MemoryRouter>
+          <CustomerChatWorkbenchPage
+            profile={mockClientProfile}
+            initialSession={mockAgentSession}
+            initialMessages={[botMsg]}
+            onBackToLogin={vi.fn()}
+          />
+        </MemoryRouter>
+      );
+
+      // 验证渲染的 Agent 头像元素尺寸为 25px*25px 且为圆形 (rounded-full)
+      const avatarEl = screen.getByTitle("数电乐企技术专家");
+      expect(avatarEl).toBeInTheDocument();
+      expect(avatarEl.className).toContain("w-[25px]");
+      expect(avatarEl.className).toContain("h-[25px]");
+      expect(avatarEl.className).toContain("rounded-full");
     });
   });
 });

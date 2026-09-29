@@ -8,14 +8,18 @@ import {
   type SessionItem,
   clientCloseSession,
   clientConfirmTicket,
+  clientEscalateHuman,
   clientEvaluateSession,
   clientFetchMessages,
   clientFetchNotices,
   clientFetchSessions,
   clientFetchTickets,
   clientInitSession,
+  clientMarkUnresolved,
   clientRemindTicket,
+  clientResolveSession,
   clientSendMessage,
+  clientSubmitTicket,
 } from "../receptionApi";
 import { type CustomerProfile } from "./CustomerInfoCollectionPage";
 import { CustomerEvaluationModal } from "./CustomerEvaluationModal";
@@ -52,6 +56,177 @@ function formatSessionTime(dateStr?: string | null): string {
   return clean;
 }
 
+export function parseAgentInfo(
+  senderName?: string | null,
+  senderAvatar?: string | null,
+  sessionAvatar?: string | null,
+  sessionName?: string | null
+): { name: string; avatar: string } {
+  let rawName = (senderName || "").trim();
+  let avatar = (senderAvatar || sessionAvatar || "").trim();
+
+  // 1. 如果 rawName 开头是 data:image/，提取 base64 作为头像，剩余文字作为名称
+  if (rawName.startsWith("data:image/")) {
+    const spaceIdx = rawName.indexOf(" ");
+    if (spaceIdx > 0) {
+      if (!avatar) {
+        avatar = rawName.slice(0, spaceIdx);
+      }
+      rawName = rawName.slice(spaceIdx + 1).trim();
+    } else {
+      if (!avatar) avatar = rawName;
+      rawName = "";
+    }
+  }
+
+  // 2. 如果 rawName 开头包含 Emoji，提取 Emoji 为头像，剩余文字作为名称
+  const emojiMatch = rawName.match(/^([\p{Extended_Pictographic}\u{1F300}-\u{1F9FF}]+)\s*(.*)$/u);
+  if (emojiMatch) {
+    if (!avatar) {
+      avatar = emojiMatch[1];
+    }
+    rawName = emojiMatch[2].trim();
+  }
+
+  // 3. 对 sessionName 进行相同的清洗提取
+  let cleanSessionName = (sessionName || "").trim();
+  if (cleanSessionName.startsWith("data:image/")) {
+    const spaceIdx = cleanSessionName.indexOf(" ");
+    if (spaceIdx > 0) {
+      if (!avatar) avatar = cleanSessionName.slice(0, spaceIdx);
+      cleanSessionName = cleanSessionName.slice(spaceIdx + 1).trim();
+    } else {
+      if (!avatar) avatar = cleanSessionName;
+      cleanSessionName = "";
+    }
+  }
+  const sessionEmojiMatch = cleanSessionName.match(/^([\p{Extended_Pictographic}\u{1F300}-\u{1F9FF}]+)\s*(.*)$/u);
+  if (sessionEmojiMatch) {
+    if (!avatar) avatar = sessionEmojiMatch[1];
+    cleanSessionName = sessionEmojiMatch[2].trim();
+  }
+
+  // 4. 去除可能残留的“智能助手 · ”、“智能服务助手 · ”、“系统助手 · ”、“客服 · ”前缀
+  rawName = rawName
+    .replace(/^(?:🤖\s*)?(?:智能(?:服务)?助手|系统助手|客服)\s*[·•\-:：]\s*/, "")
+    .trim();
+
+  // 5. 确定最终 Agent 名称：优先干净的 rawName，其次 cleanSessionName，兜底为“综合服务助手”
+  let finalName = rawName;
+  if (!finalName || finalName === "智能助手" || finalName === "智能服务助手" || finalName === "系统助手") {
+    finalName = cleanSessionName || "综合服务助手";
+  }
+
+  // 6. 如果仍然没有头像，默认显示 🤖
+  if (!avatar) {
+    avatar = "🤖";
+  }
+
+  return { name: finalName, avatar };
+}
+
+export function AgentAvatarView({
+  avatar,
+  name,
+  className = "w-[25px] h-[25px]",
+}: {
+  avatar: string;
+  name: string;
+  className?: string;
+}) {
+  const isImg =
+    avatar.startsWith("data:image/") ||
+    avatar.startsWith("http://") ||
+    avatar.startsWith("https://") ||
+    avatar.startsWith("/");
+
+  if (isImg) {
+    return (
+      <img
+        src={avatar}
+        alt={name}
+        className={`${className} min-w-[25px] min-h-[25px] max-w-[25px] max-h-[25px] rounded-full object-cover shrink-0 border border-slate-200 shadow-2xs select-none`}
+      />
+    );
+  }
+
+  return (
+    <span
+      className={`${className} min-w-[25px] min-h-[25px] max-w-[25px] max-h-[25px] rounded-full bg-slate-100/90 border border-slate-200 flex items-center justify-center text-[13.5px] leading-none shrink-0 select-none shadow-2xs`}
+      title={name}
+    >
+      {avatar || "🤖"}
+    </span>
+  );
+}
+
+export const ONGOING_SESSION_IDS_KEY = "reception_client_ongoing_session_ids";
+
+export const cleanBotAnswerText = (raw: string): string => {
+  if (!raw) return "";
+  let text = raw;
+  text = text.replace(
+    /(?:\r?\n|\s)*(?:以上(?:回复|解答|内容)?是否(?:已经)?解决(?:您的问题|您的疑问)?[？?]?|请对本次解答进行评价[：:]?|请回复[：:]?)?(?:\r?\n|\s)*(?:1\s*[.、:： ]?\s*解决|1\s+解决)[\s\S]*?(?:2\s*[.、:： ]?\s*未解决|2\s+未解决)[\s\S]*$/i,
+    ""
+  );
+  text = text.replace(/(?:\r?\n|\s)*(?:1\s*[.、:： ]?\s*解决|2\s*[.、:： ]?\s*未解决)[\s\S]*$/i, "");
+  text = text.replace(/(?:\r?\n|\s)*以上(?:解答|回复)是否对您有帮助[？?]?[\s\S]*$/i, "");
+  return text.trim();
+};
+
+/**
+ * 判定 Agent 回复是否属于「信息收集 / 问题确认 / 询问类」回复：
+ * 规则：此类反问、澄清、引导补充信息的回复严禁展示「解决 / 未解决」快捷胶囊，
+ * 只有真正提供具体方案、指引或排查结果的「结果答复类」才展示。
+ */
+export const isClarificationOrInquiryResponse = (rawContent: string): boolean => {
+  if (!rawContent) return false;
+  const text = rawContent.trim();
+
+  // 1. 用户给出的典型反问/信息收集示例快速匹配
+  if (
+    /(?:请问您遇到的是什么问题|使用的是哪款产品|请描述一下具体情况|我来帮您解答)/.test(text) &&
+    !/(?:解决方案|操作步骤|处理方法)/.test(text)
+  ) {
+    return true;
+  }
+
+  // 2. 检查是否具有强烈的「结果答复类」特征（如果有具体操作指导或排查结论，则优先视为结果回复）
+  const hasStrongSolutionKeywords =
+    /(?:解决方案|处理方案|操作步骤|排查方法|处理方法|操作指南|操作说明|处理建议|为您查询到|原因分析|已为您解决|请按照以下步骤|按以下步骤|建议您按照|可以通过以下方式)/.test(
+      text
+    );
+  const hasNumberedSteps = /^[1-9][.、]\s*([^\n\r]+)/m.test(text);
+
+  if (hasStrongSolutionKeywords || (hasNumberedSteps && text.length > 60)) {
+    // 即使含有问句尾巴（例如“请问这样操作是否恢复？”），主干仍然是结果方案，不视为纯询问
+    return false;
+  }
+
+  // 3. 检查问句形式
+  if (/[？?]\s*$/.test(text) && /(?:请问|什么|哪款|哪个|哪种|是否|是不是|还是|如何|怎么|吗)/i.test(text)) {
+    return true;
+  }
+
+  // 4. 典型信息收集、反问追问或确认特征
+  const inquiryPatterns = [
+    // 询问问题类型、产品、模块、版本
+    /(?:请问|请告知|请提供|方便提供|能否提供)[\s\S]*?(?:什么问题|哪款产品|哪一个产品|哪个版本|哪个模块|具体情况|报错信息|错误提示|报错截图|发票代码|发票号码|税号|纳税人识别号)/i,
+    // 请问您是在... / 请问您遇到的是... / 请问您使用的是...
+    /请问您?(?:遇到的是|使用的是|需要的是|是在|指的是|是指|具体在)/i,
+    // 引导客户描述、补充信息以便排查
+    /请(?:详细|具体)?(?:描述|补充|说明|提供)[\s\S]*?(?:以便(?:为您|我们)?(?:分析|定位|排查|解答|处理|核实)|我来帮您)/i,
+    // 确认类反问：您指的是...吗 / 是不是... / 请确认是否...
+    /(?:您指的是|您的意思是|请确认是否|请确认一下|请核对是否)[\s\S]*?[？?吗]/i,
+    // 二选一确认："是...还是..."
+    /是[\s\S]{2,20}还是[\s\S]{2,20}[？?]/,
+    // 结尾引导反问："以便为您排查/解答"
+    /(?:以便为您|我来帮您)(?:排查|定位|解答|处理)[。！!？?]?$/i,
+  ];
+
+  return inquiryPatterns.some((pattern) => pattern.test(text));
+};
+
 export function CustomerChatWorkbenchPage({
   profile,
   initialSession = null,
@@ -71,6 +246,57 @@ export function CustomerChatWorkbenchPage({
     }
   };
 
+  // 维护当前窗口「进行中会话」的会话ID集合（多会话支持，窗口关闭后自然清空归入24小时未关闭）
+  const [ongoingSessionIds, setOngoingSessionIds] = useState<string[]>(() => {
+    try {
+      const saved = sessionStorage.getItem(ONGOING_SESSION_IDS_KEY);
+      if (saved) {
+        const arr = JSON.parse(saved);
+        if (Array.isArray(arr)) return arr;
+      }
+    } catch {}
+    if (initialSession && initialSession.status !== "closed" && initialSession.status !== "converted") {
+      return [initialSession.id];
+    }
+    try {
+      const legacySaved = sessionStorage.getItem(STORAGE_SESSION_KEY);
+      if (legacySaved) {
+        const parsed = JSON.parse(legacySaved);
+        if (parsed?.id && parsed.status !== "closed" && parsed.status !== "converted") {
+          return [parsed.id];
+        }
+      }
+    } catch {}
+    return [];
+  });
+
+  const addOngoingSessionId = (id: string) => {
+    setOngoingSessionIds((prev) => {
+      if (prev.includes(id)) return prev;
+      const next = [...prev, id];
+      try {
+        sessionStorage.setItem(ONGOING_SESSION_IDS_KEY, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const removeOngoingSessionId = (id: string) => {
+    setOngoingSessionIds((prev) => {
+      const next = prev.filter((x) => x !== id);
+      try {
+        sessionStorage.setItem(ONGOING_SESSION_IDS_KEY, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (initialSession && initialSession.status !== "closed" && initialSession.status !== "converted") {
+      addOngoingSessionId(initialSession.id);
+    }
+  }, [initialSession]);
+
   // 当前进行中的会话与消息流（窗口生命周期内持久锚定）
   const [currentSession, setCurrentSession] = useState<SessionItem | null>(() => {
     if (initialSession) return initialSession;
@@ -89,6 +315,8 @@ export function CustomerChatWorkbenchPage({
   });
   const [messages, setMessages] = useState<MessageItem[]>(initialMessages);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  // 大模型分析状态控制：发送问题后展示“正在分析中，请耐心等待”，收到回复后替换
+  const [isBotAnalyzing, setIsBotAnalyzing] = useState(false);
 
   // 会话列表（24小时内未关闭 vs 已结束）
   const [sessionsGroup, setSessionsGroup] = useState<ClientSessionsGrouped>(() => {
@@ -167,6 +395,16 @@ export function CustomerChatWorkbenchPage({
     isSuccess: boolean;
   } | null>(null);
 
+  // 智能助手反馈状态 (msgId -> "resolved" | "unresolved")
+  const [feedbackStatus, setFeedbackStatus] = useState<Record<number, "resolved" | "unresolved">>({});
+  const [escalating, setEscalating] = useState(false);
+
+  // 提交售后工单弹窗
+  const [submitTicketModalOpen, setSubmitTicketModalOpen] = useState(false);
+  const [ticketFormTitle, setTicketFormTitle] = useState("");
+  const [ticketFormDesc, setTicketFormDesc] = useState("");
+  const [submittingTicket, setSubmittingTicket] = useState(false);
+
   // 引用回复状态
   const [quotedMessage, setQuotedMessage] = useState<MessageItem | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -174,6 +412,153 @@ export function CustomerChatWorkbenchPage({
   const handleQuoteMessage = (msg: MessageItem) => {
     setQuotedMessage(msg);
     textareaRef.current?.focus();
+  };
+
+  // 点赞/已解决（自动关闭会话并弹出满意度评价窗口，对齐节点 7.1）
+  const handleFeedbackResolved = async (msgId: number) => {
+    setFeedbackStatus((prev) => ({ ...prev, [msgId]: "resolved" }));
+    if (!currentSession || currentSession.status === "closed") {
+      setEvaluationModalOpen(true);
+      return;
+    }
+    try {
+      const res = await clientResolveSession(currentSession.id);
+      const updated: SessionItem = {
+        ...currentSession,
+        status: "closed",
+        agent_name: res.agent_name || currentSession.agent_name,
+        is_human: res.is_human ?? currentSession.is_human,
+      };
+      setCurrentSession(updated);
+      syncSessionToStorage(updated);
+      removeOngoingSessionId(currentSession.id);
+      const newMsgs = await clientFetchMessages(currentSession.id);
+      setMessages(newMsgs);
+      setTimeout(scrollToBottom, 50);
+      await refreshSessions();
+      setEvaluationModalOpen(true);
+    } catch (err) {
+      console.error("提交已解决关闭失败:", err);
+      removeOngoingSessionId(currentSession.id);
+      setEvaluationModalOpen(true);
+    }
+  };
+
+  // 点踩/未解决反馈
+  const handleFeedbackUnresolved = async (msgId: number) => {
+    if (!currentSession) return;
+    setFeedbackStatus((prev) => ({ ...prev, [msgId]: "unresolved" }));
+    try {
+      await clientMarkUnresolved(currentSession.id, msgId);
+      const newMsgs = await clientFetchMessages(currentSession.id);
+      setMessages(newMsgs);
+      setTimeout(scrollToBottom, 50);
+    } catch (err) {
+      console.error("提交未解决反馈失败:", err);
+    }
+  };
+
+  // 确认转接人工坐席
+  const handleConfirmEscalateHuman = async () => {
+    if (!currentSession) return;
+    setEscalating(true);
+    try {
+      const res = await clientEscalateHuman(currentSession.id);
+      if (res?.session) {
+        setCurrentSession(res.session);
+        syncSessionToStorage(res.session);
+      }
+      if (res?.messages) {
+        setMessages(res.messages);
+      }
+      setTimeout(scrollToBottom, 50);
+      await refreshSessions();
+    } catch (err) {
+      console.error("转接人工失败:", err);
+      alert("转接人工客服失败，请重试");
+    } finally {
+      setEscalating(false);
+    }
+  };
+
+  // 打开一键提交工单弹窗 (文本智能清洗：过滤打招呼、状态词、转人工诉求，对齐泳道 5)
+  const handleOpenSubmitTicketModal = () => {
+    const greetingRegex =
+      /^(?:(?:你好|您好|哈喽|hello|hi|hey)[，,\s]*)?(?:请问)?(?:在吗|在么|有人吗|有人在吗|请问有人吗|有人么|请问在吗)[\s!！?？~～.。]*$/i;
+    const statusRegex =
+      /^(?:[12](?:[.\s、]*(?:解决|未解决))?|已解决|未解决|没解决|没有解决|问题已解决|问题未解决|好了|行了|满意|不满意)[\s!！?？~～.。]*$/i;
+    const transferRegex =
+      /^(?:转(?:接)?人工(?:客服|坐席|服务)?|人工(?:客服|在线)?|呼叫人工|接入人工|找人工)[\s!！?？~～.。]*$/i;
+
+    const validQuestions: string[] = [];
+    messages.forEach((m) => {
+      if (m.sender_type !== "customer") return;
+      const raw = (m.content || "").replace(/「引用\s+[^:：]+[:：][^」]+」\n?/g, "").trim();
+      if (!raw || raw.startsWith("[CARD:")) return;
+      if (statusRegex.test(raw) || transferRegex.test(raw) || greetingRegex.test(raw)) return;
+      const clean = raw
+        .replace(/^(?:(?:你好|您好|哈喽|hello|hi)[，,\s]*)*(?:请问[，,\s]*)?/i, "")
+        .trim();
+      if (clean && !greetingRegex.test(clean)) {
+        validQuestions.push(clean);
+      }
+    });
+
+    const firstQuestion = validQuestions[0] || "";
+    const titleText = firstQuestion
+      ? firstQuestion.length > 80
+        ? firstQuestion.slice(0, 77) + "..."
+        : firstQuestion
+      : `${profile.company_name || "客户"}在线咨询协助`;
+
+    const bodyText =
+      validQuestions.length > 1
+        ? validQuestions.map((q, idx) => `${idx + 1}. ${q}`).join("\n")
+        : validQuestions[0] || "客户在线咨询未解决，申请售后工单协助处理。";
+
+    setTicketFormTitle(titleText);
+    setTicketFormDesc(bodyText);
+    setSubmitTicketModalOpen(true);
+  };
+
+  // 确认提交工单
+  const handleSubmitTicketForm = async () => {
+    if (!currentSession) return;
+    if (!ticketFormTitle.trim() || !ticketFormDesc.trim()) {
+      alert("请填写工单标题与问题描述");
+      return;
+    }
+    setSubmittingTicket(true);
+    try {
+      const res = await clientSubmitTicket(currentSession.id, {
+        title: ticketFormTitle.trim(),
+        description: ticketFormDesc.trim(),
+        contact_name: profile.contact_name,
+        contact_phone: profile.contact_phone,
+        company_name: profile.company_name,
+        tax_no: profile.tax_no,
+      });
+      setSubmitTicketModalOpen(false);
+
+      const converted: SessionItem = {
+        ...currentSession,
+        status: "converted",
+        ticket_short_code: res.ticket_short_code,
+      };
+      setCurrentSession(converted);
+      syncSessionToStorage(converted);
+      removeOngoingSessionId(currentSession.id);
+
+      const newMsgs = await clientFetchMessages(currentSession.id);
+      setMessages(newMsgs);
+      setTimeout(scrollToBottom, 50);
+      await refreshSessions();
+    } catch (err) {
+      console.error("提交工单失败:", err);
+      alert("提交售后工单失败，请重试");
+    } finally {
+      setSubmittingTicket(false);
+    }
   };
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -531,8 +916,9 @@ export function CustomerChatWorkbenchPage({
   };
 
   // 发送消息与附件：若当前没有进行中会话，则自动在后台生成一行新的会话记录
-  const handleSendMessage = async () => {
-    if ((!inputMessage.trim() && stagedAttachments.length === 0) || sending) {
+  const handleSendMessage = async (overrideContent?: string | React.MouseEvent) => {
+    const effectiveText = typeof overrideContent === "string" ? overrideContent.trim() : inputMessage.trim();
+    if ((!effectiveText && stagedAttachments.length === 0) || sending) {
       return;
     }
 
@@ -563,23 +949,50 @@ export function CustomerChatWorkbenchPage({
       }
 
       // 发送文本消息
-      if (inputMessage.trim()) {
-        let textToSend = inputMessage.trim();
-        if (quotedMessage) {
+      if (effectiveText) {
+        let textToSend = effectiveText;
+        if (quotedMessage && typeof overrideContent !== "string") {
           const quoteSender =
             quotedMessage.sender_name ||
             (quotedMessage.sender_type === "customer" ? "客户" : "客服");
           const quoteContent = quotedMessage.content.replace(/\n/g, " ").slice(0, 100);
           textToSend = `「引用 ${quoteSender}: ${quoteContent}」\n${textToSend}`;
         }
+
+        // 客户发送消息，立即将当前会话晋升至进行中会话分类
+        addOngoingSessionId(activeSession.id);
+
+        // 立即在前端聊天记录中显示客户自己发送的消息，清空输入框
+        const nowIso = new Date().toISOString().replace("T", " ").slice(0, 19);
+        const tempCustomerMsg: MessageItem = {
+          id: Date.now(),
+          session_id: activeSession.id,
+          sender_type: "customer",
+          sender_name: profile.contact_name || "我",
+          content: textToSend,
+          is_read: false,
+          created_at: nowIso,
+        };
+        setMessages((prev) => [...prev, tempCustomerMsg]);
+        if (typeof overrideContent !== "string") {
+          setInputMessage("");
+          setQuotedMessage(null);
+        }
+        setTimeout(scrollToBottom, 50);
+
+        // 如果处于智能客服接待阶段，立即展现“正在分析中，请耐心等待...”加载状态
+        if (!activeSession.is_human) {
+          setIsBotAnalyzing(true);
+          setTimeout(scrollToBottom, 50);
+        }
+
+        const sendStartTime = Date.now();
         try {
-          const textMsg = await clientSendMessage(
+          await clientSendMessage(
             activeSession.id,
             textToSend,
             profile.contact_name
           );
-          setMessages((prev) => [...prev, textMsg]);
-          setQuotedMessage(null);
         } catch (sendErr: any) {
           // 如果发送消息报会话不存在（比如本地旧的异常假会话），则自动重新初始化真实会话并重试发送！
           if (
@@ -600,15 +1013,55 @@ export function CustomerChatWorkbenchPage({
             activeSession = reInit.session;
             setCurrentSession(activeSession);
             syncSessionToStorage(activeSession);
-            const retryMsg = await clientSendMessage(
+            addOngoingSessionId(activeSession.id);
+            await clientSendMessage(
               activeSession.id,
               textToSend,
               profile.contact_name
             );
-            setMessages((prev) => [...prev, retryMsg]);
-            setQuotedMessage(null);
           } else {
             throw sendErr;
+          }
+        } finally {
+          // 保证前端平稳展示“问题正常分析中，请耐心等待...”至少 2 秒，消除瞬间闪烁与不自然答复（测试环境下跳过）
+          if (import.meta.env.MODE !== "test") {
+            const elapsed = Date.now() - sendStartTime;
+            if (elapsed < 2000) {
+              await new Promise((resolve) => setTimeout(resolve, 2000 - elapsed));
+            }
+          }
+          // 接口调用完成后立即刷新最新消息列表与会话状态，大模型答复落库后关闭分析状态并呈现答复
+          try {
+            const [latestMsgs, sessionsRes] = await Promise.all([
+              clientFetchMessages(activeSession.id),
+              clientFetchSessions(profile.contact_phone),
+            ]);
+            if (latestMsgs && latestMsgs.length > 0) {
+              setMessages(latestMsgs);
+            }
+            if (activeSession && sessionsRes) {
+              setSessionsGroup(sessionsRes);
+              const targetId = activeSession.id;
+              const all = [...(sessionsRes.recent_open || []), ...(sessionsRes.closed || [])];
+              const match = all.find((x) => x.id === targetId);
+              if (match) {
+                activeSession = { ...activeSession, ...match };
+                setCurrentSession(activeSession);
+                syncSessionToStorage(activeSession);
+              }
+            }
+          } catch {
+            // ignore
+          }
+          setIsBotAnalyzing(false);
+          setTimeout(scrollToBottom, 50);
+
+          // 核心闭环：若客户反馈“已解决”导致会话自动关闭，直接弹出满意度评价窗口 (对齐节点 7.1)
+          if (activeSession && activeSession.status === "closed") {
+            removeOngoingSessionId(activeSession.id);
+            setEvaluationModalOpen(true);
+          } else if (activeSession && activeSession.status !== "converted") {
+            addOngoingSessionId(activeSession.id);
           }
         }
       }
@@ -627,11 +1080,29 @@ export function CustomerChatWorkbenchPage({
           );
           setMessages((prev) => [...prev, attMsg]);
         }
+        setStagedAttachments([]);
+        setTimeout(scrollToBottom, 50);
       }
 
-      setInputMessage("");
-      setStagedAttachments([]);
-      setTimeout(scrollToBottom, 50);
+      // 只要在会话中成功发送新消息或附件，确保该会话晋升进入进行中分类
+      if (activeSession && activeSession.status !== "closed" && activeSession.status !== "converted") {
+        addOngoingSessionId(activeSession.id);
+      }
+
+      // 再次补查一次，确保大模型答复渲染万无一失
+      setTimeout(async () => {
+        try {
+          const followUp = await clientFetchMessages(activeSession.id);
+          if (followUp && followUp.length > 0) {
+            setMessages(followUp);
+            setIsBotAnalyzing(false);
+            setTimeout(scrollToBottom, 50);
+          }
+        } catch {
+          // ignore
+        }
+      }, 500);
+
       await refreshSessions();
     } catch (err) {
       console.error("发送消息失败:", err);
@@ -650,6 +1121,7 @@ export function CustomerChatWorkbenchPage({
       const closed: SessionItem = { ...currentSession, status: "closed" as const };
       setCurrentSession(closed);
       syncSessionToStorage(closed);
+      removeOngoingSessionId(currentSession.id);
       const newMsgs = await clientFetchMessages(currentSession.id);
       setMessages(newMsgs);
       await refreshSessions();
@@ -669,12 +1141,91 @@ export function CustomerChatWorkbenchPage({
     setTimeout(scrollToBottom, 50);
   };
 
+  // 快捷发送（点击选项胶囊或快捷按钮）
+  const handleQuickSend = (text: string) => {
+    handleSendMessage(text);
+  };
+
+  interface OptionCapsuleItem {
+    label: string;
+    value: string;
+    action: "resolve" | "unresolve" | "transfer_human" | "transfer_ticket" | "send";
+  }
+
+  interface ParsedOptionCapsules {
+    type: "resolve_or_unresolve" | "transfer_action" | "numbered_option";
+    options: OptionCapsuleItem[];
+  }
+
+  // 智能解析回复中的交互选项（解决/未解决，转人工/转工单，或多选编号方案）
+  const parseOptionCapsules = (content: string, senderType?: string): ParsedOptionCapsules | null => {
+    if (!content) return null;
+
+    // 1. 识别转人工/工单引导提示 (优先匹配未解决后或包含转人工提示的消息)
+    const hasTransferPrompt =
+      /(?:未能解决|没能解决|转接在线人工|转接人工|转人工|人工坐席|在线人工|提交售后工单|转工单|人工专家)/.test(content);
+    if (hasTransferPrompt) {
+      return {
+        type: "transfer_action",
+        options: [
+          { label: "👤 转人工", value: "转人工", action: "transfer_human" },
+          { label: "📝 转工单", value: "转工单", action: "transfer_ticket" },
+        ],
+      };
+    }
+
+    // 2. 识别数字编号选项（如 1. 标准版 2. 星瀚旗舰版...）
+    const optionMatches = content.match(/^[1-9][.、]\s*([^\n\r]+)/gm);
+    if (optionMatches && optionMatches.length >= 2 && optionMatches.length <= 6) {
+      const opts: OptionCapsuleItem[] = optionMatches.map((opt) => {
+        const clean = opt.trim();
+        return {
+          label: clean.length > 22 ? clean.slice(0, 20) + "..." : clean,
+          value: clean,
+          action: "send",
+        };
+      });
+      return {
+        type: "numbered_option",
+        options: opts,
+      };
+    }
+
+    // 3. 排除欢迎语
+    const isWelcomeMessage =
+      content.includes("欢迎使用发票云售后在线支持") ||
+      content.includes("请问有什么可以帮您") ||
+      content.includes("我是数电发票智能专家") ||
+      content.includes("我是税务申报智能助手") ||
+      content.includes("我是发票云智能综合助手");
+
+    // 4. 普通 Bot 业务问答解答：
+    // 需求2优化：只有真正给出方案、指导或排查结论的【结果答复类】消息才显示「解决 / 未解决」；
+    // 如果是信息收集、问题确认、反问询问类的回复（如“请问您遇到的是什么问题，使用的是哪款产品呢？请描述一下具体情况”），坚决不展示！
+    if (!isWelcomeMessage && (senderType === "bot" || content.length > 20)) {
+      if (isClarificationOrInquiryResponse(content)) {
+        return null;
+      }
+
+      return {
+        type: "resolve_or_unresolve",
+        options: [
+          { label: "👍 1 解决", value: "1 解决", action: "resolve" },
+          { label: "👎 2 未解决", value: "2 未解决", action: "unresolve" },
+        ],
+      };
+    }
+
+    return null;
+  };
+
   // 解析并渲染消息内容（支持引用、图片/文件/文本，字体加2个号）
   const renderMessageContent = (content: string, isCustomer: boolean) => {
     // 检查是否包含引用：格式为 「引用 发送人: 引用内容」\n回复正文
     const quoteMatch = content.match(/^「引用\s+([^:：]+)[:：]\s*([\s\S]*?)」\n([\s\S]*)$/);
 
-    const renderBody = (body: string) => {
+    const renderBody = (rawBody: string) => {
+      const body = !isCustomer ? cleanBotAnswerText(rawBody) : rawBody;
       const imageMatch = body.match(/^\[图片:\s*([^\]]+)\]\n(data:image\/[^\s]+)/s);
       if (imageMatch) {
         const imgName = imageMatch[1];
@@ -770,13 +1321,29 @@ export function CustomerChatWorkbenchPage({
     currentSession !== null &&
     (currentSession.status === "closed" || currentSession.status === "converted");
 
-  // 左侧“24小时内未关闭会话”列表过滤掉正在进行中的会话
-  const otherRecentOpenSessions = currentSession
-    ? sessionsGroup.recent_open.filter((s) => s.id !== currentSession.id)
-    : sessionsGroup.recent_open;
+  // 1. 进行中会话：属于 ongoingSessionIds 且未关闭的会话（支持多个）
+  const ongoingSessions = sessionsGroup.recent_open.filter(
+    (s) => ongoingSessionIds.includes(s.id) && s.status !== "closed" && s.status !== "converted"
+  );
+  if (
+    currentSession &&
+    !isClosed &&
+    ongoingSessionIds.includes(currentSession.id) &&
+    !ongoingSessions.some((s) => s.id === currentSession.id)
+  ) {
+    ongoingSessions.unshift(currentSession);
+  }
+
+  // 2. 24小时内未关闭会话：所有未结单但不属于当前进行中集合的历史会话
+  const unclosedSessions = sessionsGroup.recent_open.filter(
+    (s) => !ongoingSessionIds.includes(s.id) && s.status !== "closed" && s.status !== "converted"
+  );
+
+  // 3. 已结束会话
+  const closedSessions = sessionsGroup.closed || [];
 
   return (
-    <div className="h-screen w-screen bg-slate-100 flex flex-col font-hub overflow-hidden select-none">
+    <div className="h-screen w-screen bg-slate-100 flex flex-col font-hub overflow-hidden select-text">
       {/* 顶部全局导航栏 */}
       <header className="h-12 bg-white border-b border-slate-200 flex items-center justify-between px-4 z-20 flex-none shadow-2xs">
         <div className="flex items-center gap-2.5">
@@ -832,7 +1399,9 @@ export function CustomerChatWorkbenchPage({
           <div className="hidden sm:flex items-center gap-2 text-[14px] text-slate-600">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
             <span className="font-medium text-slate-800">{profile.contact_name}</span>
-            <span className="text-slate-400 font-mono">({profile.contact_phone})</span>
+            {profile.contact_phone && profile.contact_phone !== profile.contact_name && (
+              <span className="text-slate-400 font-mono">({profile.contact_phone})</span>
+            )}
           </div>
           <button
             type="button"
@@ -916,17 +1485,17 @@ export function CustomerChatWorkbenchPage({
                     {currentSession?.is_in_service || "服务期内"}
                   </span>
                 </div>
-                <div className="text-[16px] font-bold text-slate-900 leading-snug break-words">
+                <div className="text-[16px] font-bold text-slate-900 leading-snug break-words select-text cursor-text">
                   {currentSession?.company_name || profile.company_name}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[13px] pt-1">
-                  <div className="text-slate-600 font-mono">
+                  <div className="text-slate-600 font-mono select-text cursor-text">
                     <span className="text-slate-400">统一信用代码: </span>
                     <span className="font-semibold text-slate-800">
                       {currentSession?.tax_no || profile.tax_no || "—"}
                     </span>
                   </div>
-                  <div className="text-slate-600">
+                  <div className="text-slate-600 select-text cursor-text">
                     <span className="text-slate-400">归属租户: </span>
                     <span className="font-medium text-slate-800">
                       {currentSession?.tenant_name || profile.tenant_name || "—"}
@@ -943,13 +1512,13 @@ export function CustomerChatWorkbenchPage({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[14px]">
                   <div>
                     <span className="text-slate-400 text-[13px] block mb-0.5">咨询人姓名</span>
-                    <span className="font-medium text-slate-800">
+                    <span className="font-medium text-slate-800 select-text cursor-text">
                       {currentSession?.contact_name || profile.contact_name}
                     </span>
                   </div>
                   <div>
                     <span className="text-slate-400 text-[13px] block mb-0.5">联系电话</span>
-                    <span className="font-mono font-medium text-slate-800">
+                    <span className="font-mono font-medium text-slate-800 select-text cursor-text">
                       {currentSession?.contact_phone || profile.contact_phone}
                     </span>
                   </div>
@@ -1125,32 +1694,32 @@ export function CustomerChatWorkbenchPage({
                               className="py-3.5 px-3 max-w-[150px] align-top"
                               title={ticket.source_ticket_id || ticket.ticket_number}
                             >
-                              <div className="font-mono font-semibold text-slate-900 leading-snug line-clamp-1">
+                              <div className="font-mono font-semibold text-slate-900 leading-snug line-clamp-1 select-text cursor-text">
                                 {ticket.source_ticket_id || ticket.ticket_number}
                               </div>
                               {ticket.title && (
                                 <div
-                                  className="text-[12px] text-slate-400 font-normal truncate mt-1 leading-normal"
+                                  className="text-[12px] text-slate-400 font-normal truncate mt-1 leading-normal select-text cursor-text"
                                   title={ticket.title}
                                 >
                                   {ticket.title.length > 12 ? `${ticket.title.slice(0, 12)}...` : ticket.title}
                                 </div>
                               )}
                             </td>
-                            <td className="py-3.5 px-3 whitespace-nowrap align-top">
+                            <td className="py-3.5 px-3 whitespace-nowrap align-top select-text cursor-text">
                               <span className="inline-block px-2 py-0.5 rounded text-[12px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
                                 {ticket.source_name || ticket.source_code || "客户渠道"}
                               </span>
                             </td>
-                            <td className="py-3.5 px-3 whitespace-nowrap text-slate-700 align-top">
-                              <div className="font-medium text-slate-800 leading-snug">
+                            <td className="py-3.5 px-3 whitespace-nowrap text-slate-700 align-top select-text cursor-text">
+                              <div className="font-medium text-slate-800 leading-snug select-text cursor-text">
                                 {ticket.handler_display_name || ticket.handler_name}
                               </div>
-                              <div className="text-[11px] text-slate-400 mt-1">
+                              <div className="text-[11px] text-slate-400 mt-1 select-text cursor-text">
                                 {ticket.process_stage || (ticket.stage === "rd" ? "产研环节" : "服务环节")}
                               </div>
                             </td>
-                            <td className="py-3.5 px-3 whitespace-nowrap font-mono text-[12px] text-slate-500 align-top">
+                            <td className="py-3.5 px-3 whitespace-nowrap font-mono text-[12px] text-slate-500 align-top select-text cursor-text">
                               {ticket.created_at}
                             </td>
                             <td className="py-3.5 px-3 whitespace-nowrap text-center align-top">
@@ -1209,7 +1778,7 @@ export function CustomerChatWorkbenchPage({
             <div className="flex items-center gap-3">
               {currentSession ? (
                 <>
-                  <span className="text-[15px] font-mono font-bold text-slate-800">
+                  <span className="text-[15px] font-mono font-bold text-slate-800 select-text cursor-text">
                     会话: {currentSession.id}
                   </span>
                   <span
@@ -1228,7 +1797,7 @@ export function CustomerChatWorkbenchPage({
                       : "排队中，客服正接入..."}
                   </span>
                   <span className="hidden sm:inline text-[13px] text-slate-400">
-                    接待人: {currentSession.agent_name || "在线待分配"}
+                    接待人: {parseAgentInfo(currentSession.agent_name, currentSession.agent_avatar).name || "在线待分配"}
                   </span>
                 </>
               ) : (
@@ -1281,8 +1850,67 @@ export function CustomerChatWorkbenchPage({
               messages.map((msg) => {
                 const isCustomer = msg.sender_type === "customer";
                 const isSystem = msg.sender_type === "system";
+                const isBot = msg.sender_type === "bot";
 
                 if (isSystem) {
+                  // 转人工询问交互卡片
+                  if (msg.content.startsWith("[CARD:ask_transfer]")) {
+                    const cardText = msg.content.replace("[CARD:ask_transfer]", "").trim();
+                    return (
+                      <div
+                        key={msg.id}
+                        className="my-3.5 max-w-[92%] md:max-w-[85%] mx-auto bg-amber-50/90 border border-amber-200/90 rounded-2xl p-4 shadow-2xs text-left"
+                      >
+                        <div className="flex items-center gap-2 text-amber-800 font-bold text-sm mb-1.5">
+                          <span className="text-lg">💁</span>
+                          <span>转接人工客服询问</span>
+                        </div>
+                        <p className="text-[13px] text-amber-900 leading-relaxed mb-3">
+                          {cardText}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2.5 pt-2 border-t border-amber-200/60">
+                          <button
+                            type="button"
+                            onClick={handleConfirmEscalateHuman}
+                            disabled={escalating || isClosed}
+                            className="px-3.5 py-1.5 bg-[rgb(35,94,212)] text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition cursor-pointer shadow-xs disabled:opacity-50"
+                          >
+                            {escalating ? "正在转接..." : "👤 确认转接人工坐席"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  // 建议提交工单卡片
+                  if (msg.content.startsWith("[CARD:guide_ticket]")) {
+                    const cardText = msg.content.replace("[CARD:guide_ticket]", "").trim();
+                    return (
+                      <div
+                        key={msg.id}
+                        className="my-3.5 max-w-[92%] md:max-w-[85%] mx-auto bg-slate-50 border border-slate-300 rounded-2xl p-4 shadow-2xs text-left"
+                      >
+                        <div className="flex items-center gap-2 text-slate-800 font-bold text-sm mb-1.5">
+                          <span className="text-lg">📋</span>
+                          <span>在线客服暂无空闲 / 引导提交售后工单</span>
+                        </div>
+                        <p className="text-[13px] text-slate-700 leading-relaxed mb-3">
+                          {cardText}
+                        </p>
+                        <div className="flex items-center gap-2.5 pt-2 border-t border-slate-200">
+                          <button
+                            type="button"
+                            onClick={handleOpenSubmitTicketModal}
+                            disabled={isClosed}
+                            className="px-3.5 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-semibold hover:bg-amber-700 transition cursor-pointer shadow-xs"
+                          >
+                            📝 一键提交售后工单
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+
                   return (
                     <div key={msg.id} className="text-center my-3">
                       <span className="inline-block px-4 py-2 rounded-xl text-[13px] bg-blue-50/90 text-slate-700 border border-blue-100 max-w-[90%] leading-relaxed shadow-2xs text-left">
@@ -1297,19 +1925,52 @@ export function CustomerChatWorkbenchPage({
                     key={msg.id}
                     className={`flex flex-col group ${isCustomer ? "items-end" : "items-start"}`}
                   >
-                    <div className="flex items-center gap-2 mb-1 text-[12.5px] text-slate-400">
-                      <span>{isCustomer ? "我" : `客服 · ${msg.sender_name}`}</span>
-                      <span>{msg.created_at.slice(11, 16)}</span>
+                    <div className="flex items-center gap-1.5 mb-1 text-[12.5px]">
+                      {isCustomer ? (
+                        <>
+                          <span className="text-slate-400 font-normal">{msg.created_at.slice(11, 16)}</span>
+                          <span className="text-slate-600 font-medium">我</span>
+                        </>
+                      ) : isBot ? (
+                        (() => {
+                          const agent = parseAgentInfo(
+                            msg.sender_name,
+                            (msg as any).sender_avatar,
+                            currentSession?.agent_avatar,
+                            currentSession?.agent_name
+                          );
+                          return (
+                            <div className="flex items-center gap-1.5">
+                              <AgentAvatarView avatar={agent.avatar} name={agent.name} />
+                              <span className="text-slate-700 font-semibold text-[13px]">{agent.name}</span>
+                              <span className="text-slate-400 font-normal text-[12px] ml-1">
+                                {msg.created_at.slice(11, 16)}
+                              </span>
+                            </div>
+                          );
+                        })()
+                      ) : (
+                        <div className="flex items-center gap-1.5 text-slate-500">
+                          <span className="font-medium text-slate-700">客服 · {msg.sender_name}</span>
+                          <span className="text-slate-400 font-normal text-[12px] ml-1">
+                            {msg.created_at.slice(11, 16)}
+                          </span>
+                        </div>
+                      )}
                     </div>
                     <div
                       onClick={() => {
+                        const selection = window.getSelection()?.toString();
+                        if (selection && selection.length > 0) return;
                         if (!isCustomer && !isClosed) {
                           handleQuoteMessage(msg);
                         }
                       }}
-                      className={`relative max-w-[85%] md:max-w-[75%] px-4 py-3 rounded-xl text-[14px] leading-relaxed shadow-2xs whitespace-pre-wrap transition ${
+                      className={`relative max-w-[85%] md:max-w-[75%] px-4 py-3 rounded-xl text-[14px] leading-relaxed shadow-2xs whitespace-pre-wrap transition select-text ${
                         isCustomer
                           ? "bg-[rgb(35,94,212)] text-white rounded-tr-none"
+                          : isBot
+                          ? "bg-white text-slate-800 border border-blue-100/90 rounded-tl-none hover:border-[rgb(35,94,212)]/50 cursor-pointer shadow-xs"
                           : "bg-white text-slate-800 border border-slate-200/90 rounded-tl-none hover:border-[rgb(35,94,212)]/50 cursor-pointer"
                       } ${
                         quotedMessage?.id === msg.id
@@ -1318,7 +1979,60 @@ export function CustomerChatWorkbenchPage({
                       }`}
                       title={!isCustomer && !isClosed ? "点击可引用回复此消息" : undefined}
                     >
-                      <div>{renderMessageContent(msg.content, isCustomer)}</div>
+                      <div className="select-text cursor-text">{renderMessageContent(msg.content, isCustomer)}</div>
+
+                      {/* 智能选项与闭环快捷胶囊按钮 (Quick Action Option Capsules) */}
+                      {isBot && !isClosed && (() => {
+                        const capsuleData = parseOptionCapsules(msg.content, msg.sender_type);
+                        if (!capsuleData) return null;
+
+                        return (
+                          <div className="mt-3 pt-2.5 border-t border-blue-100/70 flex flex-wrap items-center gap-2">
+                            <span className="text-[12px] text-slate-500 flex items-center gap-1 font-medium whitespace-nowrap shrink-0 select-none">
+                              <span>⚡ 快捷点击：</span>
+                            </span>
+                            {capsuleData.options.map((opt, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (opt.action === "resolve") {
+                                    handleFeedbackResolved(msg.id);
+                                    handleQuickSend("1 解决");
+                                  } else if (opt.action === "unresolve") {
+                                    handleFeedbackUnresolved(msg.id);
+                                  } else if (opt.action === "transfer_human") {
+                                    handleConfirmEscalateHuman();
+                                  } else if (opt.action === "transfer_ticket") {
+                                    handleOpenSubmitTicketModal();
+                                  } else {
+                                    handleQuickSend(opt.value);
+                                  }
+                                }}
+                                className={`px-3 py-1 rounded-full text-[12.5px] font-medium transition cursor-pointer inline-flex items-center gap-1 shadow-2xs whitespace-nowrap shrink-0 break-keep select-none max-w-full ${
+                                  opt.action === "resolve"
+                                    ? feedbackStatus[msg.id] === "resolved"
+                                      ? "bg-emerald-100 text-emerald-800 border border-emerald-400 ring-1 ring-emerald-400 font-bold"
+                                      : "bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-300"
+                                    : opt.action === "unresolve"
+                                    ? feedbackStatus[msg.id] === "unresolved"
+                                      ? "bg-rose-100 text-rose-800 border border-rose-400 ring-1 ring-rose-400 font-bold"
+                                      : "bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 hover:border-rose-300"
+                                    : opt.action === "transfer_human"
+                                    ? "bg-blue-50 text-[rgb(35,94,212)] border border-blue-200 hover:bg-blue-100 hover:border-blue-300 font-semibold"
+                                    : opt.action === "transfer_ticket"
+                                    ? "bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 hover:border-amber-300 font-semibold"
+                                    : "bg-blue-50 text-[rgb(35,94,212)] border border-blue-200 hover:bg-blue-100 hover:border-blue-300"
+                                }`}
+                                title={opt.label}
+                              >
+                                <span className="truncate">{opt.label}</span>
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })()}
 
                       {/* 对应消息右下角：引用回复操作按钮 */}
                       {!isCustomer && !isClosed && (
@@ -1357,6 +2071,54 @@ export function CustomerChatWorkbenchPage({
                 );
               })
             )}
+
+            {/* 大模型正在分析中动态提示卡片 */}
+            {isBotAnalyzing && (
+              <div className="flex flex-col items-start my-3 animate-fadeIn">
+                <div className="flex items-center gap-2 mb-1.5 text-[12.5px]">
+                  {(() => {
+                    const agent = parseAgentInfo(
+                      currentSession?.agent_name,
+                      currentSession?.agent_avatar,
+                      currentSession?.agent_avatar,
+                      currentSession?.agent_name
+                    );
+                    return (
+                      <div className="flex items-center gap-1.5">
+                        <AgentAvatarView avatar={agent.avatar} name={agent.name} />
+                        <span className="text-slate-700 font-semibold text-[13px]">{agent.name}</span>
+                      </div>
+                    );
+                  })()}
+                  <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 font-medium border border-blue-200 select-none">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping" />
+                    深度分析中
+                  </span>
+                </div>
+                <div className="bg-gradient-to-r from-blue-50/95 via-indigo-50/90 to-blue-50/80 border border-blue-200/90 rounded-2xl rounded-tl-xs px-4 py-3 shadow-xs max-w-[85%] text-left">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-1 select-none">
+                      <span
+                        className="w-2 h-2 rounded-full bg-blue-600 animate-bounce"
+                        style={{ animationDelay: "0ms" }}
+                      />
+                      <span
+                        className="w-2 h-2 rounded-full bg-blue-600 animate-bounce"
+                        style={{ animationDelay: "150ms" }}
+                      />
+                      <span
+                        className="w-2 h-2 rounded-full bg-blue-600 animate-bounce"
+                        style={{ animationDelay: "300ms" }}
+                      />
+                    </div>
+                    <span className="text-[13.5px] text-blue-950 font-medium tracking-wide">
+                      【...后台正在努力分析定位问题，请耐心等待...】
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div ref={messagesEndRef} />
           </div>
 
@@ -1535,7 +2297,11 @@ export function CustomerChatWorkbenchPage({
                       handleSendMessage();
                     }
                   }}
-                  placeholder="请输入您遇到的问题，按 Enter 快捷发送，Shift+Enter 换行；支持拖拽或 Ctrl+V 粘贴截图与文件..."
+                  placeholder={
+                    isBotAnalyzing
+                      ? "🤖 智能客服大模型正在深入分析并生成答复，请耐心等待..."
+                      : "请输入您遇到的问题，按 Enter 快捷发送，Shift+Enter 换行；支持拖拽或 Ctrl+V 粘贴截图与文件..."
+                  }
                   className="w-full h-[95px] min-h-[95px] resize-none border border-slate-200 rounded-md p-3 text-[14px] text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[rgb(35,94,212)] focus:ring-1 focus:ring-[rgb(35,94,212)]/30"
                 />
 
@@ -1553,10 +2319,17 @@ export function CustomerChatWorkbenchPage({
                 <button
                   type="button"
                   onClick={handleSendMessage}
-                  disabled={(!inputMessage.trim() && stagedAttachments.length === 0) || sending}
-                  className="px-6 py-1.5 bg-[rgb(35,94,212)] text-white text-[14px] font-semibold rounded-lg hover:opacity-90 transition cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed"
+                  disabled={
+                    (!inputMessage.trim() && stagedAttachments.length === 0) ||
+                    sending ||
+                    isBotAnalyzing
+                  }
+                  className="px-6 py-1.5 bg-[rgb(35,94,212)] text-white text-[14px] font-semibold rounded-lg hover:opacity-90 transition cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
-                  {sending ? "发送中..." : "发送"}
+                  {isBotAnalyzing && (
+                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  )}
+                  {isBotAnalyzing ? "分析中..." : sending ? "发送中..." : "发送"}
                 </button>
               </div>
             </div>
@@ -1573,7 +2346,7 @@ export function CustomerChatWorkbenchPage({
         >
           {/* 会话分组列表（折叠/展开菜单体系） */}
           <div className="flex-1 overflow-y-auto p-2.5 space-y-3 text-[13px]">
-            {/* 3.1 进行中会话（默认展开） */}
+            {/* 3.1 进行中会话（支持多会话并存展示） */}
             <div className="space-y-1">
               <button
                 type="button"
@@ -1590,45 +2363,59 @@ export function CustomerChatWorkbenchPage({
                   </span>
                   <span className="text-[14px] font-bold text-[rgb(72,80,95)]">进行中会话</span>
                 </div>
-                {currentSession && !isClosed ? (
-                  <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-mono text-[11px] border border-emerald-200 font-medium">
-                    当前活跃
-                  </span>
-                ) : (
-                  <span className="bg-slate-200/70 text-slate-500 px-1.5 py-0.2 rounded font-mono text-[11px]">
-                    0
-                  </span>
-                )}
+                <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-mono text-[11px] border border-emerald-200 font-semibold">
+                  {ongoingSessions.length}
+                </span>
               </button>
 
               {expandedSections.ongoing && (
                 <div className="mt-1.5 ml-2 pl-2 border-l-2 border-slate-200/90 space-y-1.5">
-                  {currentSession && !isClosed ? (
-                    <div className="p-2.5 rounded-lg border border-[rgb(35,94,212)] bg-blue-50/80 text-slate-800 shadow-2xs space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono font-semibold text-slate-900 text-[13px]">
-                          {currentSession.id}
-                        </span>
-                        <span
-                          className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${
-                            currentSession.status === "in_progress"
-                              ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
-                              : "bg-cyan-100 text-cyan-800 border border-cyan-300"
+                  {ongoingSessions.length > 0 ? (
+                    ongoingSessions.map((item) => {
+                      const isSelected = currentSession?.id === item.id;
+                      return (
+                        <div
+                          key={item.id}
+                          onClick={() => handleSelectSession(item)}
+                          className={`p-2.5 rounded-lg border text-slate-800 shadow-2xs space-y-1 cursor-pointer transition ${
+                            isSelected
+                              ? "border-[rgb(35,94,212)] bg-blue-50/80 ring-1 ring-[rgb(35,94,212)]/30"
+                              : "border-slate-200 hover:border-[rgb(35,94,212)]/60 bg-white hover:bg-slate-50"
                           }`}
                         >
-                          {currentSession.status === "in_progress" ? "服务中" : "排队中"}
-                        </span>
-                      </div>
-                      <div
-                        className="text-[13px] text-slate-600 truncate block"
-                        title={currentSession.last_message || "正在沟通中..."}
-                      >
-                        {currentSession.last_message || "正在沟通中..."}
-                      </div>
-                      <div className="text-[12px] text-slate-400 font-mono">
-                        {formatSessionTime(currentSession.created_at)}
-                      </div>
-                    </div>
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono font-semibold text-slate-900 text-[13px] select-text cursor-text">
+                              {item.id}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              {isSelected && (
+                                <span className="bg-blue-100 text-[rgb(35,94,212)] px-1.5 py-0.2 rounded text-[10.5px] font-medium border border-blue-200">
+                                  当前活跃
+                                </span>
+                              )}
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${
+                                  item.status === "in_progress"
+                                    ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                    : "bg-cyan-100 text-cyan-800 border border-cyan-300"
+                                }`}
+                              >
+                                {item.status === "in_progress" ? "服务中" : "排队中"}
+                              </span>
+                            </div>
+                          </div>
+                          <div
+                            className="text-[13px] text-slate-600 truncate block"
+                            title={item.last_message || "正在沟通中..."}
+                          >
+                            {item.last_message || "正在沟通中..."}
+                          </div>
+                          <div className="text-[12px] text-slate-400 font-mono">
+                            {formatSessionTime(item.updated_at || item.created_at)}
+                          </div>
+                        </div>
+                      );
+                    })
                   ) : (
                     <div className="px-3 py-2.5 text-center text-slate-400 text-[13px] bg-slate-50/70 rounded-lg border border-dashed border-slate-200">
                       暂无进行中会话
@@ -1657,37 +2444,44 @@ export function CustomerChatWorkbenchPage({
                   <span className="text-[14px] font-bold text-[rgb(72,80,95)]">24小时内未关闭会话</span>
                 </div>
                 <span className="bg-blue-50 text-[rgb(35,94,212)] px-1.5 py-0.5 rounded font-mono text-[11px] border border-blue-200/70 font-semibold">
-                  {otherRecentOpenSessions.length}
+                  {unclosedSessions.length}
                 </span>
               </button>
 
-              {expandedSections.unclosed && otherRecentOpenSessions.length > 0 && (
+              {expandedSections.unclosed && unclosedSessions.length > 0 && (
                 <div className="mt-1.5 ml-2 pl-2 border-l-2 border-slate-200/90 space-y-1.5">
-                  {otherRecentOpenSessions.map((item) => (
-                    <div
-                      key={item.id}
-                      onClick={() => handleSelectSession(item)}
-                      className="p-2.5 rounded-lg border border-slate-200 hover:border-[rgb(35,94,212)]/60 bg-white hover:bg-slate-50 text-slate-700 cursor-pointer transition space-y-1 shadow-2xs"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono font-semibold text-slate-800 text-[13px]">
-                          {item.id}
-                        </span>
-                        <span className="px-1.5 py-0.5 rounded text-[11px] font-medium bg-cyan-50 text-cyan-700 border border-cyan-200">
-                          未关闭
-                        </span>
-                      </div>
+                  {unclosedSessions.map((item) => {
+                    const isSelected = currentSession?.id === item.id;
+                    return (
                       <div
-                        className="text-[13px] text-slate-500 truncate block"
-                        title={item.last_message || "会话记录"}
+                        key={item.id}
+                        onClick={() => handleSelectSession(item)}
+                        className={`p-2.5 rounded-lg border text-slate-700 cursor-pointer transition space-y-1 shadow-2xs ${
+                          isSelected
+                            ? "border-[rgb(35,94,212)] bg-blue-50/50"
+                            : "border-slate-200 hover:border-[rgb(35,94,212)]/60 bg-white hover:bg-slate-50"
+                        }`}
                       >
-                        {item.last_message || "会话记录"}
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono font-semibold text-slate-800 text-[13px] select-text cursor-text">
+                            {item.id}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded text-[11px] font-medium bg-cyan-50 text-cyan-700 border border-cyan-200">
+                            未关闭
+                          </span>
+                        </div>
+                        <div
+                          className="text-[13px] text-slate-500 truncate block"
+                          title={item.last_message || "会话记录"}
+                        >
+                          {item.last_message || "会话记录"}
+                        </div>
+                        <div className="text-[12px] text-slate-400 font-mono">
+                          {formatSessionTime(item.created_at)}
+                        </div>
                       </div>
-                      <div className="text-[12px] text-slate-400 font-mono">
-                        {formatSessionTime(item.created_at)}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1710,13 +2504,13 @@ export function CustomerChatWorkbenchPage({
                   <span className="text-[14px] font-bold text-[rgb(72,80,95)]">已结束会话</span>
                 </div>
                 <span className="bg-slate-200/70 text-slate-600 px-1.5 py-0.5 rounded font-mono text-[11px] border border-slate-300/70 font-semibold">
-                  {sessionsGroup.closed.length}
+                  {closedSessions.length}
                 </span>
               </button>
 
-              {expandedSections.closed && sessionsGroup.closed.length > 0 && (
+              {expandedSections.closed && closedSessions.length > 0 && (
                 <div className="mt-1.5 ml-2 pl-2 border-l-2 border-slate-200/90 space-y-1.5">
-                  {sessionsGroup.closed.map((item) => {
+                  {closedSessions.map((item) => {
                     const isSelected = currentSession?.id === item.id;
                     return (
                       <div
@@ -1729,7 +2523,7 @@ export function CustomerChatWorkbenchPage({
                         }`}
                       >
                         <div className="flex items-center justify-between">
-                          <span className="font-mono text-slate-700 text-[13px]">{item.id}</span>
+                          <span className="font-mono text-slate-700 text-[13px] select-text cursor-text">{item.id}</span>
                           <span className="px-1.5 py-0.2 rounded text-[11px] bg-slate-100 text-slate-500 border border-slate-200">
                             {item.status === "converted" ? "已转工单" : "已结束"}
                           </span>
@@ -1807,6 +2601,84 @@ export function CustomerChatWorkbenchPage({
                 className="px-6 py-2 bg-[rgb(35,94,212)] text-white rounded-lg text-[14px] font-medium hover:opacity-90 transition cursor-pointer shadow-xs"
               >
                 我知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 一键提交售后工单弹窗 */}
+      {submitTicketModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-4 border border-slate-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">📝</span>
+                <h3 className="font-bold text-slate-800 text-base">一键提交售后工单</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSubmitTicketModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 text-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3.5 text-xs">
+              <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                <div>
+                  <span className="text-slate-400 block mb-0.5">联系人</span>
+                  <span className="font-semibold text-slate-700">{profile.contact_name}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block mb-0.5">联系电话</span>
+                  <span className="font-semibold text-slate-700 font-mono">{profile.contact_phone}</span>
+                </div>
+                <div className="col-span-2">
+                  <span className="text-slate-400 block mb-0.5">企业名称</span>
+                  <span className="font-semibold text-slate-700">{profile.company_name}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-600 font-semibold mb-1">工单标题 *</label>
+                <input
+                  type="text"
+                  value={ticketFormTitle}
+                  onChange={(e) => setTicketFormTitle(e.target.value)}
+                  className="w-full p-2.5 border border-slate-200 rounded-lg text-xs"
+                  placeholder="简述遇到的售后问题"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-600 font-semibold mb-1">问题详情描述 *</label>
+                <textarea
+                  rows={4}
+                  value={ticketFormDesc}
+                  onChange={(e) => setTicketFormDesc(e.target.value)}
+                  className="w-full p-2.5 border border-slate-200 rounded-lg text-xs leading-relaxed"
+                  placeholder="详细描述异常场景、开票软件提示及诉求"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setSubmitTicketModalOpen(false)}
+                className="px-4 py-1.5 border border-slate-200 rounded-xl text-xs text-slate-600 hover:bg-slate-50 cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmitTicketForm}
+                disabled={submittingTicket}
+                className="px-4 py-1.5 bg-[rgb(35,94,212)] text-white rounded-xl text-xs font-semibold hover:bg-blue-700 cursor-pointer shadow-xs disabled:opacity-50"
+              >
+                {submittingTicket ? "提交中..." : "确认提交工单"}
               </button>
             </div>
           </div>

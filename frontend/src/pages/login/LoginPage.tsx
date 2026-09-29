@@ -3,7 +3,7 @@ import { api } from "@/api/client";
 import { appPath } from "@/api/base";
 
 const DEV_DEFAULT_TOKEN =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzNSIsIm5hbWUiOiJcdTY3NjhcdTYxNjdcdTgzODkiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3ODk3MDM0OTQsImV4cCI6MTc5MDMwODI5NH0.q9W9u7I-NE43Zn67kBNgzBFkzkGn8UmXPSuU6X_2n4E";
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzNSIsIm5hbWUiOiLmnajmhafojokiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3OTA2NDc5MTksImV4cCI6MTgyMjE4MzkxOX0.V0fzgGHRPx-nZNmo1zUH2mOavmMl1H_f0-aI_k019qA";
 const DEV_DEFAULT_USER = {
   id: 35,
   name: "杨慧莉",

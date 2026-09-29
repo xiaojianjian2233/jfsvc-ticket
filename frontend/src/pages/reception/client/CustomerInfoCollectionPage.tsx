@@ -217,8 +217,8 @@ export function CustomerInfoCollectionPage({ onSuccess }: CustomerInfoCollection
         purchasedProducts = purchasedProducts || profileRes.purchased_products;
       }
 
-      // 咨询人姓名：若为空，后端逻辑自动以手机号或默认规则补全
-      const finalContactName = contactName.trim() || `客户_${phone.trim().slice(-4)}`;
+      // 咨询人姓名：若未录入姓名，默认等于联系电话
+      const finalContactName = contactName.trim() || phone.trim();
 
       const customerProfile: CustomerProfile = {
         contact_name: finalContactName,
