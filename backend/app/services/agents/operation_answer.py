@@ -200,7 +200,7 @@ def _is_hub_already_settled(db: Session, hub: HubIssue) -> bool:
     """检查 Hub 是否已完成答复、已关单、已转单退回或正在补充资料，防并发覆盖。"""
     if hub.op_status in (OP_ANSWERED, OP_CLOSED, OP_TRANSFERRED_RETURN, OP_SUPPLEMENTING):
         return True
-    if hub.status in ("answered", "resolved", "closed", "returned"):
+    if hub.status in ("answered", "resolved", "closed", "returned", "transferred_return"):
         return True
     if bool(hub.reply_content and not hub.reply_is_draft):
         return True

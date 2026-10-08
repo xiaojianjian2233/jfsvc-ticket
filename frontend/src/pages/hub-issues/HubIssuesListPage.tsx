@@ -504,7 +504,29 @@ export function HubIssuesListPage() {
                         </span>
                       </td>
                       <td className="px-3 py-2.5 whitespace-nowrap">
-                        {h.type === "Operation" ? (
+                        {h.status === "dev_returned" ? (
+                          <span
+                            className="text-[10px] font-bold px-2 py-0.5 rounded-full border"
+                            style={{
+                              background: "#fbf1ef",
+                              color: "#b04a4a",
+                              borderColor: "#eed7d2",
+                            }}
+                          >
+                            产研退回
+                          </span>
+                        ) : h.status === "transferred_return" || h.status === "returned" ? (
+                          <span
+                            className="text-[10px] font-bold px-2 py-0.5 rounded-full border"
+                            style={{
+                              background: "#fbf1ef",
+                              color: "#b04a4a",
+                              borderColor: "#eed7d2",
+                            }}
+                          >
+                            退回转单
+                          </span>
+                        ) : h.type === "Operation" ? (
                           <OpStatusBadge status={h.op_status} />
                         ) : h.status === "pending_review" ? (
                           <span

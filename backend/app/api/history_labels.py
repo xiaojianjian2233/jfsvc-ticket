@@ -48,6 +48,7 @@ STATUS_ZH: dict[str, str] = {
     "pending_linear_review": "待确认推送",
     "created": "已创建",
     "transferred_return": "转单退回",
+    "dev_returned": "产研退回",
 }
 
 # sync_outbox.kind 英文枚举 → 中文（工单详情页「回写失败」横幅展示用）。

@@ -308,7 +308,7 @@ def _push_via_webhook(
     hub.linear_identifier = identifier
     hub.linear_status = "已转产研"
     hub.linear_status_synced_at = datetime.now(UTC)
-    if hub.status in ("pending", "returned"):
+    if hub.status in ("pending", "returned", "dev_returned"):
         prev_status = hub.status
         hub.status = "processing"
         StatusHistoryRepository(db).record(
@@ -359,7 +359,7 @@ def push_hub_issue_to_linear(
             return None
         if (
             hub.linear_uuid is not None or hub.linear_identifier is not None
-        ) and hub.status != "returned":
+        ) and hub.status not in ("returned", "dev_returned"):
             logger.info(
                 "linear_push_already_pushed",
                 hub_issue_id=hub_issue_id,
@@ -376,7 +376,7 @@ def push_hub_issue_to_linear(
             logger.info("linear_push_skip_superseded", hub_issue_id=hub_issue_id)
             return None
         # hub 级语义去重：与已推的同产品线 hub 重复 → supersede，不重复建
-        if settings.hub_dedup_enabled and hub.status != "returned":
+        if settings.hub_dedup_enabled and hub.status not in ("returned", "dev_returned"):
             dup_id = maybe_supersede_duplicate(db, hub)
             if dup_id is not None:
                 return None
@@ -470,9 +470,9 @@ def push_hub_issue_to_linear(
         hub.linear_status_synced_at = datetime.now(UTC)
         hub.linear_status = "待处理"
         prev_status = hub.status
-        if prev_status in ("pending", "returned"):
-            # pending 解除恢复 created；returned 重推恢复 processing
-            hub.status = "processing" if prev_status == "returned" else "created"
+        if prev_status in ("pending", "returned", "dev_returned"):
+            # pending 解除恢复 created；returned / dev_returned 重推恢复 processing
+            hub.status = "processing" if prev_status in ("returned", "dev_returned") else "created"
             StatusHistoryRepository(db).record(
                 entity_type="hub_issue",
                 entity_id=hub.id,
@@ -481,7 +481,7 @@ def push_hub_issue_to_linear(
                 changed_by="agent:linear_push",
                 reason=(
                     f"Linear 重新推送成功（{created.identifier}），恢复处理中"
-                    if prev_status == "returned"
+                    if prev_status in ("returned", "dev_returned")
                     else f"Linear 重推成功（{created.identifier}），pending 解除"
                 ),
             )

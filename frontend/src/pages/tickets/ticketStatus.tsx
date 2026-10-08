@@ -41,11 +41,12 @@ export const TICKET_STATUS_BADGE: Record<string, { label: string; bg: string; fg
   pending_linear_review: { label: "待确认推送", bg: "#eef1fb", fg: "#4b4fb3", bd: "#d4d8f2" },
   pending: { label: "待人工处理", bg: "#faf3e3", fg: "#9a6c1c", bd: "#eddfba" },
   draft: { label: "待确认", bg: "#faf3e3", fg: "#9a6c1c", bd: "#eddfba" },
-  returned: { label: "已退回", bg: "#fbf1ef", fg: "#b04a4a", bd: "#eed7d2" },
+  returned: { label: "退回转单", bg: "#fbf1ef", fg: "#b04a4a", bd: "#eed7d2" },
+  dev_returned: { label: "产研退回", bg: "#fbf1ef", fg: "#b04a4a", bd: "#eed7d2" },
   completed: { label: "已完成", bg: "#edf5ee", fg: "#2f7d4f", bd: "#bcd9c4" },
 };
 
-/** 子任务专用精简状态映射：待确认 / 处理中 / 处理完成 / 已完成 / 退回转单 / 处理关闭 */
+/** 子任务专用精简状态映射：待确认 / 处理中 / 处理完成 / 已完成 / 退回转单 / 产研退回 / 处理关闭 */
 export function subtaskStatusBadge(status: string | null | undefined): {
   label: string;
   bg: string;
@@ -59,7 +60,10 @@ export function subtaskStatusBadge(status: string | null | undefined): {
   if (["answered", "released", "done", "replied"].includes(s)) {
     return { label: "处理完成", bg: "#edf5ee", fg: "#2f7d4f", bd: "#bcd9c4" };
   }
-  if (["returned", "canceled", "transferred_return", "transferred"].includes(s)) {
+  if (["dev_returned", "canceled"].includes(s)) {
+    return { label: "产研退回", bg: "#fbf1ef", fg: "#b04a4a", bd: "#eed7d2" };
+  }
+  if (["transferred_return", "transferred", "returned"].includes(s)) {
     return { label: "退回转单", bg: "#fbf1ef", fg: "#b04a4a", bd: "#eed7d2" };
   }
   if (["closed", "resolved"].includes(s)) {

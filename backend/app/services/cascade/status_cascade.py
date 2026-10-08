@@ -82,7 +82,7 @@ def apply_hub_status(
     result.changed = True
 
     if to_status not in _TICKET_CASCADE_STATUSES:
-        if to_status == "returned":
+        if to_status in ("returned", "transferred_return", "dev_returned"):
             tickets = (
                 db.query(Ticket)
                 .filter(

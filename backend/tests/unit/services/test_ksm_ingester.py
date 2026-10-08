@@ -821,7 +821,7 @@ def test_ingest_ignores_status_2_echo_at_return_target(db_session, monkeypatch) 
     db_session.refresh(hub)
     assert existing.status == "transferred_return"
     assert existing.ksm_takeover_status is None
-    assert hub.status == "returned"
+    assert hub.status == "transferred_return"
     assert hub.op_status == OP_TRANSFERRED_RETURN
 
 
@@ -967,7 +967,7 @@ def test_ingest_status_6_reconciles_returned_state_and_stops_outbox(db_session) 
     assert existing.status == "transferred_return"
     assert existing.process_stage == "完成"
     assert existing.ksm_takeover_status is None
-    assert hub.status == "returned"
+    assert hub.status == "transferred_return"
     assert hub.op_status == OP_TRANSFERRED_RETURN
     assert row.status == "skipped"
     assert row.attempts == 4

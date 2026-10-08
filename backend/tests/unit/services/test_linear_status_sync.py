@@ -85,7 +85,7 @@ def test_completed_cascades_to_released_with_timestamp(db_session: Session) -> N
 
 
 def test_canceled_records_display_only(db_session: Session) -> None:
-    """canceled 同步将 hub 状态置为 returned。"""
+    """canceled 同步将 hub 状态置为 dev_returned（产研退回）。"""
     hub = _hub(db_session, 3, status="in_progress")
     rep = sync_linear_statuses(
         db_session, client=_FakeLinearClient([_state(3, "Canceled", "canceled")])
@@ -93,7 +93,7 @@ def test_canceled_records_display_only(db_session: Session) -> None:
     assert rep.status_changed == 1
     assert rep.linear_status_refreshed == 1
     db_session.refresh(hub)
-    assert hub.status == "returned"
+    assert hub.status == "dev_returned"
     assert hub.linear_status == "Canceled"
 
 

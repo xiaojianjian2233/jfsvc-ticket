@@ -15,6 +15,12 @@ import {
 } from "./knowledgeBaseStore";
 import { stripHtmlToCleanText } from "@/pages/tickets/replyNoteUtils";
 
+export interface AnswerMeta {
+  title: string;
+  productLineCode: string;
+  moduleCode: string;
+}
+
 export interface KnowledgeBaseDrawerProps {
   open: boolean;
   onClose: () => void;
@@ -29,8 +35,8 @@ export interface KnowledgeBaseDrawerProps {
   actionType?: "submit_only" | "answer_only" | "both";
   ticketHandlerName?: string;
   ticketId?: number;
-  // 提供 onAnswerAndSubmit 则显示「提交并作答」按钮，并将内容回写触发工单
-  onAnswerAndSubmit?: (content: string) => void;
+  // 提供 onAnswerAndSubmit 则显示「作答」相关按钮，并将内容与修改后的属性回传工单
+  onAnswerAndSubmit?: (content: string, meta?: AnswerMeta) => void;
   onSubmitSuccess?: (item: KnowledgeItem) => void;
 }
 
@@ -297,16 +303,37 @@ export function KnowledgeBaseDrawer({
     });
 
     if (answerCurrentTicket && onAnswerAndSubmit) {
-      onAnswerAndSubmit(cleanContent);
+      onAnswerAndSubmit(cleanContent, {
+        title: trimmedTitle,
+        productLineCode,
+        moduleCode,
+      });
     }
 
     onSubmitSuccess?.(newItem);
     onClose();
   };
 
-  // 3.8 仅作答：不向知识库接口发请求，不写入知识库列表，仅回写当前工单任务解决方案并关闭
+  // 3.8 仅作答：不向知识库接口发请求，不写入知识库列表，仅回写当前工单任务解决方案及修改后的标题/分类/模块并关闭
   const handleAnswerOnly = () => {
     setFormError(null);
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      setFormError("请录入知识标题");
+      return;
+    }
+    if (trimmedTitle.length > 200) {
+      setFormError("标题最多录入 200 字");
+      return;
+    }
+    if (!productLineCode) {
+      setFormError("请选择适用的产品线");
+      return;
+    }
+    if (!moduleCode) {
+      setFormError("请选择适用的问题模块");
+      return;
+    }
     const trimmedContent = content.trim();
     if (!trimmedContent) {
       setFormError("请录入详细的知识/答复内容");
@@ -322,7 +349,11 @@ export function KnowledgeBaseDrawer({
       return;
     }
     if (onAnswerAndSubmit) {
-      onAnswerAndSubmit(cleanContent);
+      onAnswerAndSubmit(cleanContent, {
+        title: trimmedTitle,
+        productLineCode,
+        moduleCode,
+      });
     }
     onClose();
   };

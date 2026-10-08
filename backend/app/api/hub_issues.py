@@ -1395,7 +1395,7 @@ def confirm_subtask_endpoint(
 
         msg = (
             f"任务已重新推送到 Linear（{hub.linear_identifier or ''}），状态变更为处理中"
-            if prev_hub_status == "returned"
+            if prev_hub_status in ("returned", "dev_returned")
             else "任务已推送到 Linear，状态变更为处理中"
         )
         return ConfirmSubTaskResponse(

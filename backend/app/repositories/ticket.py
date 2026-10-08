@@ -428,7 +428,10 @@ class TicketRepository:
                 )
             if "transferred_return" in targets:
                 conds.append(
-                    or_(HubIssue.op_status == "transferred_return", HubIssue.status == "returned")
+                    or_(
+                        HubIssue.op_status == "transferred_return",
+                        HubIssue.status.in_(("returned", "transferred_return")),
+                    )
                 )
             if "closed" in targets:
                 conds.append(

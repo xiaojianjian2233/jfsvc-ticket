@@ -79,14 +79,14 @@ def apply_ksm_returned(
             )
             .first()
         )
-        if active is None and hub.status != "returned":
+        if active is None and hub.status != "transferred_return":
             previous_hub_status = hub.status
-            hub.status = "returned"
+            hub.status = "transferred_return"
             history.record(
                 entity_type="hub_issue",
                 entity_id=hub.id,
                 from_status=previous_hub_status,
-                to_status="returned",
+                to_status="transferred_return",
                 changed_by=changed_by,
                 reason=reason,
             )
@@ -105,9 +105,9 @@ def apply_ksm_returned(
         .where(
             HubIssue.ticket_id == ticket.id,
             HubIssue.deleted_at.is_(None),
-            HubIssue.status.notin_(("released", "answered", "closed", "returned")),
+            HubIssue.status.notin_(("released", "answered", "closed", "transferred_return", "returned")),
         )
-        .values(status="returned")
+        .values(status="transferred_return")
     )
 
     if reconcile_return_outbox:

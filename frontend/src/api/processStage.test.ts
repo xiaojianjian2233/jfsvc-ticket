@@ -152,3 +152,18 @@ describe("devProgressLabel / devProgressTone", () => {
     expect(devProgressTone(null)).toBe("neutral");
   });
 });
+
+import { subtaskStatusBadge } from "../pages/tickets/ticketStatus";
+
+describe("subtaskStatusBadge", () => {
+  it("退回KSM关联任务状态 transferred_return → 退回转单", () => {
+    expect(subtaskStatusBadge("transferred_return").label).toBe("退回转单");
+    expect(subtaskStatusBadge("returned").label).toBe("退回转单");
+  });
+
+  it("产研取消驳回任务状态 dev_returned → 产研退回", () => {
+    expect(subtaskStatusBadge("dev_returned").label).toBe("产研退回");
+    expect(subtaskStatusBadge("canceled").label).toBe("产研退回");
+  });
+});
+

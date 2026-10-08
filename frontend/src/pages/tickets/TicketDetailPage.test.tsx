@@ -1805,6 +1805,68 @@ describe("TicketDetailPage 出站回写失败横幅", () => {
       const modBtn = within(drawer).getByRole("button", { name: "知识库问题模块" });
       expect(modBtn).toHaveTextContent(/开票模块|m-test/);
     });
+
+    it("维护知识库抽屉修改标题并点击【仅作答】，任务标题与解决方案同步更新并调用后端更新接口", async () => {
+      let patchSubtaskPayload: any = null;
+      renderTicket(
+        {
+          id: 504,
+          status: "in_progress",
+          predicted_type: "Operation",
+          product_line_code: "pl-test",
+          module: "m-test",
+          hub_issue_id: 888,
+        },
+        undefined,
+        [
+          http.get("*/api/admin/product-lines", () =>
+            HttpResponse.json([{ code: "pl-test", name: "发票标准版", is_active: true }]),
+          ),
+          http.get("*/api/hub-issues/catalog/modules", () =>
+            HttpResponse.json([{ code: "m-test", name: "开票模块", is_active: true }]),
+          ),
+          http.patch("*/api/hub-issues/:hub_issue_id/subtask", async ({ request }) => {
+            patchSubtaskPayload = await request.json();
+            return HttpResponse.json({ success: true, hub_issue_id: 888, solution: patchSubtaskPayload?.solution });
+          }),
+        ],
+      );
+
+      const enrichBtn = await screen.findByRole("button", { name: "无方案，去完善" });
+      fireEvent.click(enrichBtn);
+
+      const drawer = await screen.findByRole("dialog");
+      expect(drawer).toBeInTheDocument();
+
+      // 修改标题
+      const titleInput = within(drawer).getByPlaceholderText("简短说明本次知识的概要或者对应的问题...");
+      fireEvent.change(titleInput, { target: { value: "修改后的专属任务标题" } });
+
+      // 录入内容
+      const editorBox = within(drawer).getByRole("textbox", { name: "富文本知识内容" });
+      editorBox.innerHTML = "排查完成方案生效";
+      fireEvent.input(editorBox);
+
+      // 点击【仅作答】
+      const answerOnlyBtn = within(drawer).getByRole("button", { name: "仅作答" });
+      fireEvent.click(answerOnlyBtn);
+
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+
+      // 验证后端 subtask 持久化接口被调用，包含修改后的标题和解决方案
+      expect(patchSubtaskPayload).toMatchObject({
+        title: "修改后的专属任务标题",
+        solution: "排查完成方案生效",
+        product_line_code: "pl-test",
+        module: "m-test",
+      });
+
+      // 验证任务列表中更新后的标题与方案展示
+      expect(screen.getByText("修改后的专属任务标题")).toBeInTheDocument();
+      expect(screen.getAllByText(/排查完成方案生效/).length).toBeGreaterThanOrEqual(1);
+    });
   });
 });
 

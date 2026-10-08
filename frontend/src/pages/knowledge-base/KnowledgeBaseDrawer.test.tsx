@@ -135,4 +135,82 @@ describe("KnowledgeBaseDrawer 知识库面板与富文本样式净化", () => {
 
     expect(clipboardData.getData).toHaveBeenCalledWith("text/plain");
   });
+
+  it("修改标题、产品分类、问题模块后点击【仅作答】，回写回调携带修改后的元数据（标题、产品分类、问题模块）", async () => {
+    const onAnswerAndSubmit = vi.fn();
+    const onClose = vi.fn();
+
+    renderDrawer({
+      defaultTitle: "默认任务标题",
+      defaultContent: "解决方案说明正文",
+      defaultProductLine: "pl-invoice",
+      defaultModule: "m-issue",
+      actionType: "answer_only",
+      onAnswerAndSubmit,
+      onClose,
+    });
+
+    const titleInput = screen.getByPlaceholderText("简短说明本次知识的概要或者对应的问题...");
+    expect(titleInput).toHaveValue("默认任务标题");
+
+    // 修改标题
+    fireEvent.change(titleInput, { target: { value: "修改后的自定义任务标题" } });
+    expect(titleInput).toHaveValue("修改后的自定义任务标题");
+
+    const answerOnlyBtn = await screen.findByRole("button", { name: "仅作答" });
+    fireEvent.click(answerOnlyBtn);
+
+    expect(onAnswerAndSubmit).toHaveBeenCalledTimes(1);
+    const [contentArg, metaArg] = onAnswerAndSubmit.mock.calls[0];
+    expect(contentArg).toBe("解决方案说明正文");
+    expect(metaArg).toEqual({
+      title: "修改后的自定义任务标题",
+      productLineCode: "pl-invoice",
+      moduleCode: "m-issue",
+    });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("修改标题后点击【作答并新增知识库】，新生成的知识库记录以修改后的标题入库，且回传元数据完整", async () => {
+    const onAnswerAndSubmit = vi.fn();
+    const onClose = vi.fn();
+    const onSubmitSuccess = vi.fn();
+
+    renderDrawer({
+      defaultTitle: "原标题-开票组件异常",
+      defaultContent: "重新安装驱动组件解决",
+      defaultProductLine: "pl-invoice",
+      defaultModule: "m-issue",
+      actionType: "both",
+      onAnswerAndSubmit,
+      onClose,
+      onSubmitSuccess,
+    });
+
+    const titleInput = screen.getByPlaceholderText("简短说明本次知识的概要或者对应的问题...");
+    fireEvent.change(titleInput, { target: { value: "优化后的知识库入库新标题" } });
+
+    const bothBtn = await screen.findByRole("button", { name: "作答并新增知识库" });
+    fireEvent.click(bothBtn);
+
+    await waitFor(() => {
+      expect(onAnswerAndSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    const [contentArg, metaArg] = onAnswerAndSubmit.mock.calls[0];
+    expect(contentArg).toBe("重新安装驱动组件解决");
+    expect(metaArg).toEqual({
+      title: "优化后的知识库入库新标题",
+      productLineCode: "pl-invoice",
+      moduleCode: "m-issue",
+    });
+
+    expect(onSubmitSuccess).toHaveBeenCalledTimes(1);
+    const newItem = onSubmitSuccess.mock.calls[0][0];
+    // 验证新增知识库记录的标题使用的是修改后的内容入库
+    expect(newItem.title).toBe("优化后的知识库入库新标题");
+    expect(newItem.content).toBe("重新安装驱动组件解决");
+    expect(onClose).toHaveBeenCalled();
+  });
 });
+

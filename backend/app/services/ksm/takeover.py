@@ -101,7 +101,10 @@ def takeover_ksm_ticket(
     # 若所挂 Operation hub 处于转单退回状态，坚决不重新接管
     if ticket.hub_issue_id:
         hub = db.get(HubIssue, ticket.hub_issue_id)
-        if hub is not None and (hub.op_status == OP_TRANSFERRED_RETURN or hub.status == "returned"):
+        if hub is not None and (
+            hub.op_status == OP_TRANSFERRED_RETURN
+            or hub.status in ("returned", "transferred_return")
+        ):
             logger.info(
                 "ksm_takeover_skip_hub_transferred_return",
                 bill_id=bill_id,

@@ -545,12 +545,13 @@ def test_push_override_unmatched_individual_marks_pending(world: Session) -> Non
     assert hub.status == "pending"
 
 
-def test_push_allows_repush_when_returned(world: Session) -> None:
-    """被研发退回（status='returned' 且已存在 linear_uuid）的任务，允许重新推送到 Linear。"""
+@pytest.mark.parametrize("initial_status", ["dev_returned", "returned"])
+def test_push_allows_repush_when_returned(world: Session, initial_status: str) -> None:
+    """被产研退回（status='dev_returned' 或历史 'returned' 且已存在 linear_uuid）的任务，允许重新推送到 Linear。"""
     hub = _make_hub(
         world,
         99,
-        status="returned",
+        status=initial_status,
         linear_uuid="old-linear-uuid",
         linear_identifier="OLD-ENG-1",
         reply_content="已补充更详细排查说明",
@@ -569,6 +570,8 @@ def test_push_allows_repush_when_returned(world: Session) -> None:
         .order_by(StatusHistory.id.desc())
         .first()
     )
+    assert sh is not None
+    assert sh.from_status == initial_status
     assert "Linear 重新推送成功" in (sh.reason or "")
 
 

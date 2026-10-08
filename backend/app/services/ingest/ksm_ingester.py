@@ -308,7 +308,7 @@ class KSMIngester:
             is_reopened_from_returned = (
                 existing.status == "transferred_return"
                 or op == OP_TRANSFERRED_RETURN
-                or (hub is not None and hub.status == "returned")
+                or (hub is not None and hub.status in ("returned", "transferred_return"))
             )
             if is_reopened_from_returned:
                 # returnKsmOrder 成功后 KSM 会立即推一次 status=2；此时

@@ -4079,11 +4079,11 @@ function SubTicketList({
               let effStatus = isOpCompleted && isOp
                 ? "completed"
                 : (st.status ?? (st.confirmed ? "processing" : (self.status || "draft")));
-              if (isDevTransferred && isDev) {
+              if (isDevTransferred && isDev && effStatus !== "dev_returned") {
                 effStatus = "processing";
               }
               const b = subtaskStatusBadge(effStatus);
-              const isRowLocked = isDevTransferred && isDev;
+              const isRowLocked = isDevTransferred && isDev && effStatus !== "dev_returned";
               const currentAssigneeName =
                 st.assigned_user_name ??
                 self.assigned_user_name ??
@@ -4437,7 +4437,8 @@ function SubTicketList({
               });
               const rowTitle = st.title || stk.title || `子任务 #${stk.id}`;
               const isDev = isDemandOrBug(st.type);
-              const isRowLocked = isDevTransferred && isDev;
+              const rawRowStatus = st.status ?? stk.status;
+              const isRowLocked = isDevTransferred && isDev && rawRowStatus !== "dev_returned";
               const currentAssigneeName =
                 st.assigned_user_name ??
                 stk.assigned_user_name ??
@@ -4542,7 +4543,7 @@ function SubTicketList({
                       let effStatus = isOpCompleted && isOp
                         ? "completed"
                         : (st.status ?? (st.confirmed ? "processing" : (stk.status || "draft")));
-                      if (isDevTransferred && isDev) {
+                      if (isDevTransferred && isDev && effStatus !== "dev_returned") {
                         effStatus = "processing";
                       }
                       const b = subtaskStatusBadge(effStatus);
@@ -5168,18 +5169,80 @@ function SubTicketList({
           actionType="answer_only"
           ticketHandlerName={ticketHandlerName ?? undefined}
           ticketId={ticketId}
-          onAnswerAndSubmit={(content) => {
+          onAnswerAndSubmit={(content, meta) => {
             const cleanContent = stripHtmlToCleanText(content);
             const targetKey = kbDrawerState.key;
-            updateRow(targetKey, { solution: cleanContent });
-            if (typeof targetKey === "number") {
-              updateSubtaskMutation.mutate({ hubId: targetKey, body: { solution: cleanContent } });
+            const newTitle = meta?.title ?? kbDrawerState.title;
+            const newPlc = meta?.productLineCode ?? kbDrawerState.product_line_code;
+            const newMod = meta?.moduleCode ?? kbDrawerState.module;
+
+            updateRow(targetKey, {
+              title: newTitle,
+              product_line_code: newPlc,
+              module: newMod,
+              solution: cleanContent,
+            });
+            if (targetKey === "self" && self.hub_id) {
+              updateRow(self.hub_id, {
+                title: newTitle,
+                product_line_code: newPlc,
+                module: newMod,
+                solution: cleanContent,
+              });
+            } else if (typeof targetKey === "number" && targetKey === self.hub_id) {
+              updateRow("self", {
+                title: newTitle,
+                product_line_code: newPlc,
+                module: newMod,
+                solution: cleanContent,
+              });
             }
-            onSyncNote?.(kbDrawerState.title, cleanContent);
-            const nextTasks = getAllTasks({ key: targetKey, solution: cleanContent });
+
+            onTaskSolutionChange?.(targetKey, cleanContent);
+            if (targetKey === "self" && self.hub_id) {
+              onTaskSolutionChange?.(self.hub_id, cleanContent);
+            } else if (typeof targetKey === "number" && targetKey === self.hub_id) {
+              onTaskSolutionChange?.("self", cleanContent);
+            }
+
+            if (typeof targetKey === "string" && targetKey.startsWith("draft-")) {
+              const draftIdx = parseInt(targetKey.replace("draft-", ""), 10);
+              if (!isNaN(draftIdx) && drafts[draftIdx]) {
+                drafts[draftIdx].title = newTitle;
+                drafts[draftIdx].product_line = newPlc;
+                drafts[draftIdx].module = newMod;
+                (drafts[draftIdx] as any).solution = cleanContent;
+              }
+            }
+
+            const targetHubId =
+              typeof targetKey === "number"
+                ? targetKey
+                : targetKey === "self"
+                ? self.hub_id
+                : undefined;
+            if (targetHubId) {
+              updateSubtaskMutation.mutate({
+                hubId: targetHubId,
+                body: {
+                  title: newTitle,
+                  product_line_code: newPlc,
+                  module: newMod,
+                  solution: cleanContent,
+                },
+              });
+            }
+
+            onSyncNote?.(newTitle, cleanContent);
+            const nextTasks = getAllTasks({
+              key: targetKey,
+              title: newTitle,
+              solution: cleanContent,
+            });
             onSyncAllTasksNote?.(formatTasksReplyNote(nextTasks));
+
             if (onToast) {
-              onToast("已更新任务解决方案并同步至工单处理说明", "success");
+              onToast("已更新任务并同步至工单处理说明", "success");
             }
             setKbDrawerState(null);
           }}

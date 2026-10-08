@@ -57,7 +57,7 @@ logger = get_logger(__name__)
 _CASCADE_MAP = {
     "started": "processing",
     "completed": "answered",
-    "canceled": "returned",
+    "canceled": "dev_returned",
 }
 
 _SCAN_LIMIT = 200  # most-recently-updated first; plenty at current volume
