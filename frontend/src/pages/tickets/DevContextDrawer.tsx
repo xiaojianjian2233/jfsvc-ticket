@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
-import { postByPath } from "@/api/client";
+import { useState, useEffect, useRef } from "react";
+import { postByPath, rawRequest } from "@/api/client";
 import { API_BASE } from "@/api/base";
+import { RichTextEditor } from "@/components/RichTextEditor";
 import { extractDevSolutionParts, sanitizeTaskTitle } from "./replyNoteUtils";
 
 export interface TaskAttachment {
@@ -51,6 +52,19 @@ export interface DevContextDrawerProps {
   canEdit?: boolean;
 }
 
+function dedupTaskAttachments(list: TaskAttachment[] | undefined): TaskAttachment[] {
+  if (!list || list.length === 0) return [];
+  const seen = new Set<string>();
+  const out: TaskAttachment[] = [];
+  for (const item of list) {
+    if (!seen.has(item.id)) {
+      seen.add(item.id);
+      out.push(item);
+    }
+  }
+  return out;
+}
+
 export function DevContextDrawer({
   open,
   onClose,
@@ -76,6 +90,11 @@ export function DevContextDrawer({
   const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
   const [previewImgUrl, setPreviewImgUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const newlyUploadedIdsRef = useRef<Set<string>>(new Set());
+  const removedServerIdsRef = useRef<Set<string>>(new Set());
+  const handledPasteEventsRef = useRef<WeakSet<Event>>(new WeakSet());
 
   useEffect(() => {
     if (open) {
@@ -83,25 +102,16 @@ export function DevContextDrawer({
       const { communicationNote, feedbackNote } = extractDevSolutionParts(
         initialSolution,
         ticketContent,
+        { preserveRichHtml: true },
       );
       setCommunicationRecord(communicationNote);
       setFeedbackRecord(feedbackNote);
-      setAttachments(initialAttachments ? [...initialAttachments] : []);
+      setAttachments(dedupTaskAttachments(initialAttachments));
+      newlyUploadedIdsRef.current = new Set();
+      removedServerIdsRef.current = new Set();
       setError(null);
     }
   }, [open, initialTitle, initialSolution, initialAttachments, ticketContent]);
-
-  if (!open) return null;
-
-  // 格式化类型展示
-  const isDemand =
-    taskType === "Demand" || taskType?.toLowerCase().includes("demand") || taskType?.includes("需求");
-  const displayType = isDemand ? "需求" : "BUG";
-  const displayProductLine = productLineName || productLineCode || "—";
-  const displayModule = moduleName || "—";
-  const displayAssignee = assigneeName || "—";
-
-  const [isUploading, setIsUploading] = useState(false);
 
   // 添加上传附件（真实流式写入后端 MinIO 与 attachments 表）
   const handleAddFiles = async (files: FileList | File[]) => {
@@ -151,6 +161,7 @@ export function DevContextDrawer({
           );
           attachId = String(res.id);
           downloadUrl = res.download_url;
+          newlyUploadedIdsRef.current.add(attachId);
         }
       } catch (err: any) {
         console.error("Failed to upload attachment", err);
@@ -163,7 +174,11 @@ export function DevContextDrawer({
         originalName: f.name || fullName,
         size: f.size,
         type: f.type || "application/octet-stream",
-        url: downloadUrl || (typeof URL !== "undefined" && typeof URL.createObjectURL === "function" ? URL.createObjectURL(f) : undefined),
+        url:
+          downloadUrl ||
+          (typeof URL !== "undefined" && typeof URL.createObjectURL === "function"
+            ? URL.createObjectURL(f)
+            : undefined),
         file: f,
         uploadedAt: timeStr,
         taskCode: taskCode || "",
@@ -171,12 +186,97 @@ export function DevContextDrawer({
       });
     }
 
-    setAttachments((prev) => [...prev, ...newItems]);
+    setAttachments((prev) => dedupTaskAttachments([...prev, ...newItems]));
     setIsUploading(false);
   };
 
+  const extractClipboardFiles = (clipboardData: DataTransfer | null | undefined): File[] => {
+    if (!clipboardData) return [];
+    const files: File[] = [];
+    if (clipboardData.items && clipboardData.items.length > 0) {
+      for (let i = 0; i < clipboardData.items.length; i++) {
+        const item = clipboardData.items[i];
+        if (item.kind === "file") {
+          const f = item.getAsFile();
+          if (f) {
+            const rawExt = f.type ? f.type.split("/")[1] : "";
+            const ext = (rawExt ? rawExt.replace(/[^a-zA-Z0-9]/g, "") : "") || "png";
+            const hasExt = Boolean(f.name && f.name.includes("."));
+            const fallbackName = `粘贴截图_${Date.now()}.${ext}`;
+            const named = hasExt
+              ? f
+              : new File([f], f.name ? `${f.name}.${ext}` : fallbackName, {
+                  type: f.type || "image/png",
+                });
+            files.push(named);
+          }
+        }
+      }
+    } else if (clipboardData.files && clipboardData.files.length > 0) {
+      for (let i = 0; i < clipboardData.files.length; i++) {
+        const f = clipboardData.files[i];
+        if (f) {
+          const rawExt = f.type ? f.type.split("/")[1] : "";
+          const ext = (rawExt ? rawExt.replace(/[^a-zA-Z0-9]/g, "") : "") || "png";
+          const hasExt = Boolean(f.name && f.name.includes("."));
+          const named = hasExt
+            ? f
+            : new File([f], f.name ? `${f.name}.${ext}` : `粘贴截图_${Date.now()}.${ext}`, {
+                type: f.type || "image/png",
+              });
+          files.push(named);
+        }
+      }
+    }
+    return files;
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    if (!canEdit) return;
+    const nativeEvt = e.nativeEvent;
+    if (nativeEvt && handledPasteEventsRef.current.has(nativeEvt)) return;
+    const files = extractClipboardFiles(e.clipboardData);
+    if (files.length > 0) {
+      if (nativeEvt) handledPasteEventsRef.current.add(nativeEvt);
+      e.preventDefault();
+      e.stopPropagation();
+      void handleAddFiles(files);
+    }
+  };
+
+  useEffect(() => {
+    if (!open || !canEdit) return;
+    const onDocPaste = (e: ClipboardEvent) => {
+      if (handledPasteEventsRef.current.has(e)) return;
+      const files = extractClipboardFiles(e.clipboardData);
+      if (files.length > 0) {
+        handledPasteEventsRef.current.add(e);
+        e.preventDefault();
+        e.stopPropagation();
+        void handleAddFiles(files);
+      }
+    };
+    document.addEventListener("paste", onDocPaste);
+    return () => {
+      document.removeEventListener("paste", onDocPaste);
+    };
+  });
+
+  if (!open) return null;
+
+  // 格式化类型展示
+  const isDemand =
+    taskType === "Demand" || taskType?.toLowerCase().includes("demand") || taskType?.includes("需求");
+  const displayType = isDemand ? "需求" : "BUG";
+  const displayProductLine = productLineName || productLineCode || "—";
+  const displayModule = moduleName || "—";
+  const displayAssignee = assigneeName || "—";
+
   // 删除附件
   const handleRemoveAttachment = (id: string) => {
+    if (/^\d+$/.test(id)) {
+      removedServerIdsRef.current.add(id);
+    }
     setAttachments((prev) => {
       const target = prev.find((x) => x.id === id);
       if (target?.url && typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
@@ -186,11 +286,34 @@ export function DevContextDrawer({
     });
   };
 
+  const handleCancel = () => {
+    if (ticketId && newlyUploadedIdsRef.current.size > 0) {
+      for (const attId of newlyUploadedIdsRef.current) {
+        if (/^\d+$/.test(attId)) {
+          void rawRequest(`/api/tickets/${ticketId}/attachments/${attId}`, {
+            method: "DELETE",
+          }).catch(() => {});
+        }
+      }
+    }
+    onClose();
+  };
+
   const handleConfirm = () => {
     const trimmedTitle = sanitizeTaskTitle(title, ticketContent);
     if (!trimmedTitle) {
       setError("任务说明不能为空");
       return;
+    }
+
+    if (ticketId && removedServerIdsRef.current.size > 0) {
+      for (const attId of removedServerIdsRef.current) {
+        if (/^\d+$/.test(attId)) {
+          void rawRequest(`/api/tickets/${ticketId}/attachments/${attId}`, {
+            method: "DELETE",
+          }).catch(() => {});
+        }
+      }
     }
 
     const trimmedComm = communicationRecord.trim();
@@ -204,7 +327,7 @@ export function DevContextDrawer({
     onConfirm({
       title: trimmedTitle,
       solution: finalSolution,
-      attachments,
+      attachments: dedupTaskAttachments(attachments),
     });
     onClose();
   };
@@ -214,7 +337,7 @@ export function DevContextDrawer({
       {/* 半透明遮罩 */}
       <div
         className="fixed inset-0 bg-black/40 transition-opacity"
-        onClick={onClose}
+        onClick={handleCancel}
         aria-hidden="true"
       />
 
@@ -224,6 +347,7 @@ export function DevContextDrawer({
         role="dialog"
         aria-modal="true"
         aria-labelledby="dev-drawer-title"
+        onPaste={handlePaste}
       >
         {/* 标题栏【转研发上下文补充】+ 下方横线 */}
         <div className="px-6 py-4 flex items-center justify-between border-b border-hub-borderLight flex-none bg-white">
@@ -239,7 +363,7 @@ export function DevContextDrawer({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleCancel}
             aria-label="关闭抽屉"
             className="w-7 h-7 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer text-[16px]"
           >
@@ -322,28 +446,35 @@ export function DevContextDrawer({
             />
           </div>
 
-          {/* 4. 沟通记录 */}
-          <div>
+          {/* 4. 沟通记录（富文本录入框，支持字体大小、粗细、颜色、超链接与图片，高度根据内容自适应最高 800px，下方沟通附件同步下移） */}
+          <div data-testid="dev-drawer-comm-record-section">
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-[12.5px] font-bold text-slate-800">
                 沟通记录
               </label>
               <span className="text-[11px] text-slate-400">包括客户沟通记录、日志、版本号、截图等</span>
             </div>
-            <textarea
+            <RichTextEditor
               disabled={!canEdit}
-              rows={6}
               value={communicationRecord}
-              onChange={(e) => setCommunicationRecord(e.target.value)}
+              onChange={setCommunicationRecord}
               placeholder="请录入客户沟通记录、日志、版本号、排查过程或截图说明..."
-              className="w-full text-[12.5px] border border-hub-border rounded-[7px] p-3 bg-white text-slate-800 focus:outline-none focus:border-[#6085e7] focus:ring-1 focus:ring-[#6085e7] leading-relaxed resize-y min-h-[130px] disabled:bg-slate-50 disabled:text-slate-500"
+              minHeight={130}
+              maxHeight={800}
+              autoGrow={true}
+              ariaLabel="沟通记录富文本"
             />
           </div>
 
           {/* 5. 沟通记录附件录入口 */}
-          <div>
+          <div
+            data-testid="dev-drawer-attachments-paste-zone"
+            onPaste={handlePaste}
+            tabIndex={0}
+            className="outline-none"
+          >
             <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <label className="text-[12.5px] font-bold text-slate-800">
                   沟通记录附件
                 </label>
@@ -351,7 +482,7 @@ export function DevContextDrawer({
                   ({attachments.length})
                 </span>
                 <span className="text-[11px] text-slate-400">
-                  支持图片、文件、视频格式（命名遵循：任务编号-流水号）
+                  支持点击上传、拖拽、Ctrl+V / ⌘+V 粘贴上传图片/文件/视频（命名遵循：任务编号-流水号）
                 </span>
               </div>
               {canEdit && (
@@ -397,14 +528,21 @@ export function DevContextDrawer({
                 className="border border-dashed border-slate-300 hover:border-[#6085e7] rounded-[8px] p-4 text-center transition-colors bg-slate-50/60"
               >
                 <p className="text-[12px] text-slate-500 m-0">
-                  暂无附件，点击上方「上传附件」或拖拽图片、视频、文件至此处
+                  暂无附件，点击上方「上传附件」、拖拽或按 Ctrl+V / ⌘+V 直接粘贴图片、视频、文件至此处
                 </p>
                 <p className="text-[11px] text-slate-400 m-0 mt-1">
                   附件自动按「{taskCode || "任务编号"}-流水号」规范命名，如 {taskCode || "HUB-002053"}-1
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[220px] overflow-y-auto pr-1">
+              <div
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (e.dataTransfer.files) handleAddFiles(e.dataTransfer.files);
+                }}
+                className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[220px] overflow-y-auto pr-1"
+              >
                 {attachments.map((att) => {
                   const isImg = att.type.startsWith("image/");
                   const isVideo = att.type.startsWith("video/");
@@ -488,7 +626,7 @@ export function DevContextDrawer({
         <div className="px-6 py-3.5 border-t border-hub-borderLight flex items-center justify-end gap-3 flex-none bg-slate-50">
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleCancel}
             className="px-4 py-1.5 text-[12px] font-semibold rounded-[7px] border border-hub-border bg-white text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
           >
             取消

@@ -212,5 +212,154 @@ describe("KnowledgeBaseDrawer 知识库面板与富文本样式净化", () => {
     expect(newItem.content).toBe("重新安装驱动组件解决");
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("维护知识库附件上传区域支持本地上传、拖拽上传及 Ctrl+V / ⌘+V 黏贴上传", async () => {
+    const onSubmitSuccess = vi.fn();
+    renderDrawer({
+      defaultTitle: "附件多通道上传测试",
+      defaultContent: "测试三种上传方式",
+      actionType: "submit_only",
+      onSubmitSuccess,
+    });
+
+    const uploadZone = await screen.findByTestId("kb-attachment-upload-zone");
+    expect(uploadZone).toBeInTheDocument();
+    expect(
+      screen.getByText(/支持本地上传、将文件拖拽至此处上传，或按 Ctrl\+V \/ ⌘\+V 黏贴上传/),
+    ).toBeInTheDocument();
+
+    // 1. 本地点击选择文件上传
+    const fileInput = screen.getByTestId("kb-attachment-file-input") as HTMLInputElement;
+    const localImg = new File(["local-img-bytes"], "local_guide.png", { type: "image/png" });
+    fireEvent.change(fileInput, { target: { files: [localImg] } });
+
+    expect(await screen.findByText(/local_guide\.png/)).toBeInTheDocument();
+
+    // 2. 拖动文件到附件上传区域上传
+    const droppedImg = new File(["dropped-img-bytes"], "dragged_step.jpg", { type: "image/jpeg" });
+    fireEvent.dragOver(uploadZone);
+    fireEvent.drop(uploadZone, {
+      dataTransfer: {
+        files: [droppedImg],
+      },
+    });
+
+    expect(await screen.findByText(/dragged_step\.jpg/)).toBeInTheDocument();
+
+    // 3. 通过 Ctrl+V / ⌘+V 黏贴上传
+    const pastedVideo = new File(["video-stream-bytes"], "demo_clip.mp4", { type: "video/mp4" });
+    fireEvent.paste(uploadZone, {
+      clipboardData: {
+        items: [
+          {
+            kind: "file",
+            type: "video/mp4",
+            getAsFile: () => pastedVideo,
+          },
+        ],
+        files: [],
+      },
+    });
+
+    expect(await screen.findByText(/demo_clip\.mp4/)).toBeInTheDocument();
+
+    // 提交后验证 3 个附件全部写入知识库条目
+    const submitBtn = screen.getByRole("button", { name: "提交" });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(onSubmitSuccess).toHaveBeenCalledTimes(1);
+    });
+    const createdItem = onSubmitSuccess.mock.calls[0][0];
+    expect(createdItem.attachments).toHaveLength(3);
+    expect(createdItem.attachments.map((a: any) => a.name)).toEqual([
+      "local_guide.png",
+      "dragged_step.jpg",
+      "demo_clip.mp4",
+    ]);
+  });
+
+  it("维护知识库操作按钮已上移至附件上传区域的下方，不放在抽屉最底部固定栏", async () => {
+    renderDrawer({
+      defaultTitle: "按钮位置布局验证",
+      defaultContent: "正文内容",
+      actionType: "both",
+    });
+
+    const uploadZone = await screen.findByTestId("kb-attachment-upload-zone");
+    const actionButtons = screen.getByTestId("kb-action-buttons");
+
+    // 验证操作按钮与附件上传区同处于表单滚动容器内，且紧跟在附件上传区之后
+    expect(uploadZone.parentElement).toBe(actionButtons.parentElement);
+    expect(uploadZone.nextElementSibling).toBe(actionButtons);
+
+    // 验证按钮均在 actionButtons 容器内部
+    expect(actionButtons).toContainElement(screen.getByRole("button", { name: "取消" }));
+    expect(actionButtons).toContainElement(screen.getByRole("button", { name: "仅作答" }));
+    expect(actionButtons).toContainElement(screen.getByRole("button", { name: "作答并新增知识库" }));
+  });
+
+  it("在子任务上下文中上传附件：按 任务编号-流水号 规则命名，点击【仅作答】或【作答并新增知识库】均同步回传附件列表", async () => {
+    const onAnswerAndSubmit = vi.fn();
+    const onSubmitSuccess = vi.fn();
+
+    renderDrawer({
+      defaultTitle: "数电票版式文件下载指引",
+      defaultContent: "请点击下载按钮获取 PDF 版式文件",
+      taskCode: "HUB-002053",
+      taskKey: "self",
+      actionType: "both",
+      onAnswerAndSubmit,
+      onSubmitSuccess,
+    });
+
+    const fileInput = await screen.findByTestId("kb-attachment-file-input");
+    const file1 = new File(["img-1"], "操作截图.png", { type: "image/png" });
+    const file2 = new File(["video-2"], "演示录屏.mp4", { type: "video/mp4" });
+    fireEvent.change(fileInput, { target: { files: [file1, file2] } });
+
+    // 验证抽屉内展示命名规则与转产研上下文补充一致：HUB-002053-1 (操作截图.png)、HUB-002053-2 (演示录屏.mp4)
+    expect(await screen.findByText(/HUB-002053-1/)).toBeInTheDocument();
+    expect(screen.getByText(/\(操作截图\.png\)/)).toBeInTheDocument();
+    expect(screen.getByText(/HUB-002053-2/)).toBeInTheDocument();
+    expect(screen.getByText(/\(演示录屏\.mp4\)/)).toBeInTheDocument();
+
+    // 1. 点击【仅作答】，验证回传的 taskAttachments 命名与元数据
+    fireEvent.click(screen.getByRole("button", { name: "仅作答" }));
+    expect(onAnswerAndSubmit).toHaveBeenCalledTimes(1);
+    const [, meta1, syncedAtts1] = onAnswerAndSubmit.mock.calls[0];
+    expect(syncedAtts1).toHaveLength(2);
+    expect(syncedAtts1[0]).toMatchObject({
+      name: "HUB-002053-1.png",
+      displayName: "HUB-002053-1",
+      originalName: "操作截图.png",
+      taskCode: "HUB-002053",
+      taskKey: "self",
+    });
+    expect(syncedAtts1[1]).toMatchObject({
+      name: "HUB-002053-2.mp4",
+      displayName: "HUB-002053-2",
+      originalName: "演示录屏.mp4",
+      taskCode: "HUB-002053",
+      taskKey: "self",
+    });
+    expect(meta1.taskAttachments).toHaveLength(2);
+
+    // 2. 点击【作答并新增知识库】，同样验证回传的 taskAttachments 与入库附件一致
+    fireEvent.click(screen.getByRole("button", { name: "作答并新增知识库" }));
+    await waitFor(() => {
+      expect(onAnswerAndSubmit).toHaveBeenCalledTimes(2);
+    });
+    const [, meta2, syncedAtts2] = onAnswerAndSubmit.mock.calls[1];
+    expect(syncedAtts2).toHaveLength(2);
+    expect(syncedAtts2.map((a: any) => a.displayName)).toEqual([
+      "HUB-002053-1",
+      "HUB-002053-2",
+    ]);
+    expect(meta2.taskAttachments).toHaveLength(2);
+    expect(onSubmitSuccess).toHaveBeenCalledTimes(1);
+  });
 });
+
+
 

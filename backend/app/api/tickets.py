@@ -759,11 +759,13 @@ def build_ticket_detail(db: Session, ticket: Ticket) -> TicketDetail:
             detail.ksm_contact_mobile = c_mobile
         if not detail.ksm_contact_email:
             detail.ksm_contact_email = c_email
-    # 附件（attachments 表）：智齿 file_str / KSM / ai_cs 同步下来的截图等。
+    # 附件（attachments 表）：智齿 file_str / KSM / ai_cs 同步下来的截图等（不含关联子任务的处理附件）。
     # download_url 走后端代理端点，前端不碰 MinIO 内网地址 / 需鉴权的原始 URL。
     atts = (
         db.execute(
-            select(Attachment).where(Attachment.ticket_id == ticket_id).order_by(Attachment.id)
+            select(Attachment)
+            .where(Attachment.ticket_id == ticket_id, Attachment.hub_issue_id.is_(None))
+            .order_by(Attachment.id)
         )
         .scalars()
         .all()
@@ -1054,6 +1056,33 @@ def upload_attachment(
         download_url=f"/api/tickets/{ticket_id}/attachments/{att.id}/download",
         hub_issue_id=att.hub_issue_id,
     )
+
+
+@router.delete("/{ticket_id}/attachments/{attachment_id}")
+def delete_attachment(
+    ticket_id: int,
+    attachment_id: int,
+    _user: AuthedUser = Depends(require_assignee),
+    db: Session = Depends(get_session),
+) -> dict[str, object]:
+    """删除工单/子任务附件，确保删除或取消上传后前后端附件数一致。"""
+    ticket = db.get(Ticket, ticket_id)
+    if ticket is None or ticket.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="ticket not found")
+
+    handler_id = ticket.handler_user_id or ticket.assigned_user_id
+    if _user.role not in ("admin", "supervisor") and handler_id != _user.user_id:
+        raise HTTPException(
+            status_code=403, detail="需要主管/管理员权限，或本工单的处理人才能删除附件"
+        )
+
+    att = db.get(Attachment, attachment_id)
+    if att is None or att.ticket_id != ticket_id:
+        return {"ok": True, "deleted": False}
+
+    db.delete(att)
+    db.commit()
+    return {"ok": True, "deleted": True, "id": attachment_id}
 
 
 def _thumb_key(key: str) -> str:

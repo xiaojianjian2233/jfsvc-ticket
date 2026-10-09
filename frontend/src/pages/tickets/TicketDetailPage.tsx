@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, deleteByPath, getByPath, patchByPath, postByPath } from "@/api/client";
+import { api, deleteByPath, getByPath, patchByPath, postByPath, rawRequest } from "@/api/client";
 import { currentRole, currentUserId, isSupervisor } from "@/api/auth";
 import { HUB_TYPES, HUB_TYPE_LABELS } from "@/api/hubTypes";
 import type { paths } from "@/api/types";
@@ -411,36 +411,60 @@ export function TicketDetailPage() {
   // 各子任务在转产研上下文抽屉中上传的附件映射 (key -> TaskAttachment[])
   const [taskAttachmentsMap, setTaskAttachmentsMap] = useState<Record<string | number, TaskAttachment[]>>({});
 
-  // 汇聚所有子任务附件
+  // 汇聚所有子任务附件（按附件 ID 去重，防止 "self" 与 hub_id 双键或重复数据生成多条）
   const subtaskAttachmentsList = useMemo(() => {
-    return Object.values(taskAttachmentsMap).flat();
+    const seen = new Set<string>();
+    const list: TaskAttachment[] = [];
+    for (const items of Object.values(taskAttachmentsMap)) {
+      if (!Array.isArray(items)) continue;
+      for (const att of items) {
+        if (!att || !att.id || seen.has(att.id)) continue;
+        seen.add(att.id);
+        list.push(att);
+      }
+    }
+    return list;
   }, [taskAttachmentsMap]);
 
-  // 处理附件小节统一汇聚展示：主工单直接上传 + 所有子任务转产研上下文上传
+  // 处理附件小节统一汇聚展示：主工单直接上传 + 所有子任务转产研上下文上传（按 ID 去重）
   const allProcAttachments = useMemo(() => {
-    return [...procAttachments, ...subtaskAttachmentsList];
+    const seen = new Set<string>();
+    const merged = [...procAttachments, ...subtaskAttachmentsList];
+    return merged.filter((att) => {
+      if (!att || !att.id || seen.has(att.id)) return false;
+      seen.add(att.id);
+      return true;
+    });
   }, [procAttachments, subtaskAttachmentsList]);
 
-  const handleRemoveAnyAttachment = (id: string) => {
+  const handleRemoveAnyAttachment = (attId: string) => {
     // 1. 若属于主工单直接上传的附件
-    if (procAttachments.some((x) => x.id === id)) {
-      handleRemoveProcAttachment(id);
+    if (procAttachments.some((x) => x.id === attId)) {
+      handleRemoveProcAttachment(attId);
       return;
     }
-    // 2. 若属于某个子任务上传的附件
+    // 2. 若属于某个子任务上传的附件（清理所有包含该附件 ID 的键，并同步删除服务端附件记录）
+    if (!Number.isNaN(id) && /^\d+$/.test(attId)) {
+      rawRequest(`/api/tickets/${id}/attachments/${attId}`, {
+        method: "DELETE",
+      }).catch(() => {});
+    }
     setTaskAttachmentsMap((prev) => {
       let found = false;
+      let revoked = false;
       const next = { ...prev };
       for (const key of Object.keys(next)) {
         const list = next[key];
-        if (list && list.some((x) => x.id === id)) {
-          const item = list.find((x) => x.id === id);
-          if (item?.url && typeof URL.revokeObjectURL === "function") {
-            URL.revokeObjectURL(item.url);
+        if (list && list.some((x) => x.id === attId)) {
+          if (!revoked) {
+            const item = list.find((x) => x.id === attId);
+            if (item?.url && item.url.startsWith("blob:") && typeof URL.revokeObjectURL === "function") {
+              URL.revokeObjectURL(item.url);
+            }
+            revoked = true;
           }
-          next[key] = list.filter((x) => x.id !== id);
+          next[key] = list.filter((x) => x.id !== attId);
           found = true;
-          break;
         }
       }
       return found ? next : prev;
@@ -3162,13 +3186,15 @@ function SubTicketList({
 
   const subtasks = subtasksQuery.data ?? [];
 
-  // 从服务端加载各子任务持久化的真实附件
+  // 从服务端加载各子任务持久化的真实附件（主任务统一归口在 "self" 键，避免 "self" 与 self.hub_id 双键重复）
   useEffect(() => {
     if (!subtasksQuery.data || !onTaskAttachmentsChange) return;
     const serverMap: Record<string | number, TaskAttachment[]> = {};
     for (const stk of subtasksQuery.data) {
       if (stk.attachments && stk.attachments.length > 0) {
-        serverMap[stk.id] = stk.attachments.map((a: any) => ({
+        const isSelfTask = Boolean(self.hub_id && stk.id === self.hub_id);
+        const canonicalKey: string | number = isSelfTask ? "self" : stk.id;
+        const mapped: TaskAttachment[] = stk.attachments.map((a: any) => ({
           id: String(a.id),
           name: a.filename || "attachment",
           displayName: (a.filename || "attachment").replace(/\.[^/.]+$/, ""),
@@ -3178,24 +3204,39 @@ function SubTicketList({
           url: a.download_url,
           uploadedAt: "已保存",
           taskCode: stk.short_code,
-          taskKey: stk.id,
+          taskKey: canonicalKey,
         }));
-        if (self.hub_id && stk.id === self.hub_id) {
-          serverMap["self"] = serverMap[stk.id];
-        }
+        const seen = new Set<string>();
+        serverMap[canonicalKey] = mapped.filter((item) => {
+          if (!item.id || seen.has(item.id)) return false;
+          seen.add(item.id);
+          return true;
+        });
       }
     }
-    if (Object.keys(serverMap).length > 0) {
-      onTaskAttachmentsChange((prev) => {
-        const next = { ...prev };
-        for (const [k, v] of Object.entries(serverMap)) {
-          if (!next[k] || next[k].length === 0) {
-            next[k] = v;
-          }
+    onTaskAttachmentsChange((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      // 若存在 self.hub_id 与 "self" 双键，合并去重到 "self" 并移除 self.hub_id 冗余键
+      if (self.hub_id && self.hub_id in next) {
+        const merged = [...(next["self"] ?? []), ...(next[self.hub_id] ?? [])];
+        const seen = new Set<string>();
+        next["self"] = merged.filter((item) => {
+          if (!item?.id || seen.has(item.id)) return false;
+          seen.add(item.id);
+          return true;
+        });
+        delete next[self.hub_id];
+        changed = true;
+      }
+      for (const [k, v] of Object.entries(serverMap)) {
+        if (!(k in next)) {
+          next[k] = v;
+          changed = true;
         }
-        return next;
-      });
-    }
+      }
+      return changed ? next : prev;
+    });
   }, [subtasksQuery.data, self.hub_id, onTaskAttachmentsChange]);
 
   // 行内更新 mutation
@@ -3238,7 +3279,15 @@ function SubTicketList({
   const deleteSubtaskMutation = useMutation({
     mutationFn: (hubId: number) =>
       deleteByPath("/api/hub-issues/{hub_issue_id}/subtask", { hub_issue_id: hubId }),
-    onSuccess: () => {
+    onSuccess: (_res, hubId) => {
+      if (onTaskAttachmentsChange) {
+        onTaskAttachmentsChange((prev) => {
+          if (!(hubId in prev)) return prev;
+          const next = { ...prev };
+          delete next[hubId];
+          return next;
+        });
+      }
       void qc.invalidateQueries({ queryKey: ["ticket-subtasks", ticketId] });
       void qc.invalidateQueries({ queryKey: ["ticket-detail", ticketId] });
       if (onToast) onToast("子任务已删除", "success");
@@ -3337,6 +3386,7 @@ function SubTicketList({
   const [aiStatusMap, setAiStatusMap] = useState<Record<string | number, "idle" | "loading" | "done">>({});
   const [kbDrawerState, setKbDrawerState] = useState<{
     key: string | number;
+    code?: string;
     title: string;
     product_line_code: string;
     module: string;
@@ -4529,6 +4579,7 @@ function SubTicketList({
                           onClick={() =>
                             setKbDrawerState({
                               key: rowKey,
+                              code: self.short_code,
                               title: rowTitle,
                               product_line_code: st.product_line_code || self.product_line_code || "",
                               module: st.module || self.module || "",
@@ -4632,6 +4683,7 @@ function SubTicketList({
                             onClick={() => {
                               setKbDrawerState({
                                 key: rowKey,
+                                code: self.short_code,
                                 title: rowTitle,
                                 product_line_code: st.product_line_code || self.product_line_code || "",
                                 module: st.module || self.module || "",
@@ -4895,6 +4947,7 @@ function SubTicketList({
                           onClick={() =>
                             setKbDrawerState({
                               key: rowKey,
+                              code: stk.short_code ?? `#${stk.id}`,
                               title: rowTitle,
                               product_line_code: st.product_line_code || stk.product_line_code || self.product_line_code || "",
                               module: st.module || stk.module || self.module || "",
@@ -4912,7 +4965,9 @@ function SubTicketList({
                     )}
                   </td>
                   <td className="px-2.5 py-1.5 text-center whitespace-nowrap font-mono text-slate-600">
-                    {(taskAttachmentsMap?.[rowKey]?.length ?? 0) + (stk.attachments_count ?? (Array.isArray(stk.attachments) ? stk.attachments.length : 0))}
+                    {taskAttachmentsMap?.[rowKey] !== undefined
+                      ? taskAttachmentsMap[rowKey].length
+                      : (stk.attachments_count ?? (Array.isArray(stk.attachments) ? stk.attachments.length : 0))}
                   </td>
                   <td className="px-2.5 py-1.5 whitespace-nowrap">
                     {canEditThisRow || isRowLocked ? (
@@ -4998,6 +5053,7 @@ function SubTicketList({
                             onClick={() => {
                               setKbDrawerState({
                                 key: rowKey,
+                                code: stk.short_code ?? `#${stk.id}`,
                                 title: rowTitle,
                                 product_line_code: st.product_line_code || stk.product_line_code || self.product_line_code || "",
                                 module: st.module || stk.module || self.module || "",
@@ -5238,6 +5294,7 @@ function SubTicketList({
                           onClick={() =>
                             setKbDrawerState({
                               key: draftKey,
+                              code: `${self.short_code}-${subtasks.length + i + 1}`,
                               title: rowTitle,
                               product_line_code: st.product_line_code || dft.product_line || self.product_line_code || "",
                               module: st.module || dft.module || self.module || "",
@@ -5320,6 +5377,7 @@ function SubTicketList({
                             onClick={() => {
                               setKbDrawerState({
                                 key: draftKey,
+                                code: `${self.short_code}-${subtasks.length + i + 1}`,
                                 title: rowTitle,
                                 product_line_code: st.product_line_code || dft.product_line || self.product_line_code || "",
                                 module: st.module || dft.module || self.module || "",
@@ -5418,12 +5476,34 @@ function SubTicketList({
           actionType="answer_only"
           ticketHandlerName={ticketHandlerName ?? undefined}
           ticketId={ticketId}
-          onAnswerAndSubmit={(content, meta) => {
+          hubIssueId={
+            typeof kbDrawerState.key === "number"
+              ? kbDrawerState.key
+              : kbDrawerState.key === "self"
+              ? self.hub_id
+              : undefined
+          }
+          taskCode={
+            kbDrawerState.code ||
+            (kbDrawerState.key === "self" ? self.short_code : undefined)
+          }
+          taskKey={kbDrawerState.key}
+          initialTaskAttachments={
+            taskAttachmentsMap?.[kbDrawerState.key] ??
+            (self.hub_id && kbDrawerState.key === self.hub_id
+              ? taskAttachmentsMap?.["self"]
+              : undefined) ??
+            []
+          }
+          onAnswerAndSubmit={(content, meta, syncedAttachments) => {
             const cleanContent = stripHtmlToCleanText(content);
             const targetKey = kbDrawerState.key;
+            const canonicalKey: string | number =
+              self.hub_id && targetKey === self.hub_id ? "self" : targetKey;
             const newTitle = meta?.title ?? kbDrawerState.title;
             const newPlc = meta?.productLineCode ?? kbDrawerState.product_line_code;
             const newMod = meta?.moduleCode ?? kbDrawerState.module;
+            const incomingAttachments = syncedAttachments ?? meta?.taskAttachments;
 
             updateRow(targetKey, {
               title: newTitle,
@@ -5452,6 +5532,25 @@ function SubTicketList({
               onTaskSolutionChange?.(self.hub_id, cleanContent);
             } else if (typeof targetKey === "number" && targetKey === self.hub_id) {
               onTaskSolutionChange?.("self", cleanContent);
+            }
+
+            if (onTaskAttachmentsChange && incomingAttachments !== undefined) {
+              const seen = new Set<string>();
+              const dedupedAttachments = incomingAttachments.filter((att) => {
+                if (!att?.id || seen.has(att.id)) return false;
+                seen.add(att.id);
+                return true;
+              });
+              onTaskAttachmentsChange((prev) => {
+                const next = {
+                  ...prev,
+                  [canonicalKey]: dedupedAttachments,
+                };
+                if (canonicalKey === "self" && self.hub_id && self.hub_id in next) {
+                  delete next[self.hub_id];
+                }
+                return next;
+              });
             }
 
             if (typeof targetKey === "string" && targetKey.startsWith("draft-")) {
@@ -5521,10 +5620,18 @@ function SubTicketList({
           assigneeName={devDrawerState.assignee_name}
           initialTitle={devDrawerState.title}
           initialSolution={devDrawerState.solution}
-          initialAttachments={taskAttachmentsMap?.[devDrawerState.key] || []}
+          initialAttachments={
+            taskAttachmentsMap?.[devDrawerState.key] ??
+            (self.hub_id && devDrawerState.key === self.hub_id
+              ? taskAttachmentsMap?.["self"]
+              : undefined) ??
+            []
+          }
           canEdit={canEdit && !isDevTransferred}
           onConfirm={({ title: newTitle, solution: newSolution, attachments: newAttachments }) => {
             const targetKey = devDrawerState.key;
+            const canonicalKey: string | number =
+              self.hub_id && targetKey === self.hub_id ? "self" : targetKey;
             updateRow(targetKey, { title: newTitle, solution: newSolution });
             if (targetKey === "self" && self.hub_id) {
               updateRow(self.hub_id, { title: newTitle, solution: newSolution });
@@ -5540,10 +5647,22 @@ function SubTicketList({
             }
 
             if (onTaskAttachmentsChange) {
-              onTaskAttachmentsChange((prev) => ({
-                ...prev,
-                [targetKey]: newAttachments,
-              }));
+              const seen = new Set<string>();
+              const dedupedAttachments = newAttachments.filter((att) => {
+                if (!att?.id || seen.has(att.id)) return false;
+                seen.add(att.id);
+                return true;
+              });
+              onTaskAttachmentsChange((prev) => {
+                const next = {
+                  ...prev,
+                  [canonicalKey]: dedupedAttachments,
+                };
+                if (canonicalKey === "self" && self.hub_id && self.hub_id in next) {
+                  delete next[self.hub_id];
+                }
+                return next;
+              });
             }
 
             const targetHubId =

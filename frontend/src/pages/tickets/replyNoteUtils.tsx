@@ -84,12 +84,15 @@ export function sanitizeTaskTitle(
 export function extractDevSolutionParts(
   solutionText: string | null | undefined,
   ticketContent?: string | null,
+  options?: { preserveRichHtml?: boolean },
 ): {
   communicationNote: string;
   feedbackNote: string;
 } {
   if (!solutionText) return { communicationNote: "", feedbackNote: "" };
-  let text = stripHtmlToCleanText(solutionText).trim();
+  let text = options?.preserveRichHtml
+    ? solutionText.trim()
+    : stripHtmlToCleanText(solutionText).trim();
 
   // 递归剥离可能残留的多任务外层包装（如 问题1:【需求】...）
   text = text.replace(/^工单包含问题数[量]?[：:]?\s*\d+\s*/i, "");
@@ -144,13 +147,16 @@ export function extractDevSolutionParts(
   }
 
   comm = comm.replace(/^[：:]\s*/, "").trim();
-  fb = fb.replace(/^[：:]\s*/, "").trim();
+  fb = (options?.preserveRichHtml ? stripHtmlToCleanText(fb) : fb)
+    .replace(/^[：:]\s*/, "")
+    .trim();
 
   // 若沟通记录中混入了客户原始问题内容，将其剔除
   if (ticketContent && ticketContent.trim()) {
     const cleanTicket = stripHtmlToCleanText(ticketContent).trim();
+    const commClean = stripHtmlToCleanText(comm).trim();
     if (cleanTicket) {
-      if (comm === cleanTicket) {
+      if (comm === cleanTicket || commClean === cleanTicket) {
         comm = "";
       } else if (comm.startsWith(cleanTicket + "\n")) {
         comm = comm.slice(cleanTicket.length).trim();
@@ -285,6 +291,7 @@ export function stripHtmlToCleanText(html: string | null | undefined): string {
  */
 export function isValidSolution(sol?: string | null): boolean {
   if (!sol) return false;
+  if (/<img\b[^>]*src=/i.test(sol)) return true;
   const clean = stripHtmlToCleanText(sol);
   const raw = clean.trim();
   if (!raw || isPlaceholderWord(raw)) return false;

@@ -1408,6 +1408,256 @@ describe("TicketDetailPage 出站回写失败横幅", () => {
       expect(screen.getByRole("cell", { name: "0" })).toBeInTheDocument();
       expect(screen.queryByText("HUB-CANCEL-001-1")).not.toBeInTheDocument();
     });
+
+    it("转产研上下文抽屉支持通过 Ctrl+V / ⌘+V 黏贴上传沟通记录附件（含沟通记录输入框及附件区黏贴）", async () => {
+      renderTicket({
+        status: "in_progress",
+        short_code: "HUB-PASTE-001",
+        title: "销项发票打印错位",
+        predicted_type: "Bug_fix",
+      });
+
+      const supplementBtn = await screen.findByRole("button", { name: "去补充" });
+      fireEvent.click(supplementBtn);
+
+      const drawer = await screen.findByRole("dialog");
+      expect(within(drawer).getByText(/Ctrl\+V \/ ⌘\+V 粘贴上传/)).toBeInTheDocument();
+
+      // 1. 在沟通记录输入框内通过 Ctrl+V 黏贴截图（clipboardData.items）
+      const commTextarea = within(drawer).getByPlaceholderText(
+        "请录入客户沟通记录、日志、版本号、排查过程或截图说明...",
+      );
+      const pastedImg = new File(["img-binary"], "clipboard.png", { type: "image/png" });
+      fireEvent.paste(commTextarea, {
+        clipboardData: {
+          items: [
+            {
+              kind: "file",
+              type: "image/png",
+              getAsFile: () => pastedImg,
+            },
+          ],
+          files: [],
+        },
+      });
+
+      // 验证第1个黏贴附件已按规范命名并上传成功，且单次粘贴只生成 1 条记录
+      expect(await within(drawer).findByText("HUB-PASTE-001-1")).toBeInTheDocument();
+      expect(within(drawer).getAllByText("HUB-PASTE-001-1")).toHaveLength(1);
+      expect(within(drawer).getByText("(1)")).toBeInTheDocument();
+
+      // 2. 在沟通记录附件区域直接通过 Ctrl+V 黏贴文件（clipboardData.files 兜底）
+      const pasteZone = within(drawer).getByTestId("dev-drawer-attachments-paste-zone");
+      const pastedLog = new File(["error log"], "app_error.txt", { type: "text/plain" });
+      fireEvent.paste(pasteZone, {
+        clipboardData: {
+          items: [],
+          files: [pastedLog],
+        },
+      });
+
+      expect(await within(drawer).findByText("HUB-PASTE-001-2")).toBeInTheDocument();
+      expect(within(drawer).getByText("(app_error.txt)")).toBeInTheDocument();
+      expect(within(drawer).getByText("(2)")).toBeInTheDocument();
+
+      // 3. 点击确认后，子任务附件数与工单处理附件数均为 2
+      fireEvent.click(within(drawer).getByRole("button", { name: "确认" }));
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+      expect(screen.getByRole("cell", { name: "2" })).toBeInTheDocument();
+      expect(screen.getByText("(2)")).toBeInTheDocument();
+    });
+
+    it("上传附件后点击确认按钮，工单【处理附件】不会生成两条重复记录，且处理附件数量与关联子任务附件数量保持严格一致", async () => {
+      const uploadedServerList: Array<{
+        id: number;
+        filename: string;
+        mime: string;
+        size_bytes: number;
+        download_url: string;
+      }> = [];
+      let nextAttId = 9001;
+
+      renderTicket(
+        {
+          id: 777,
+          hub_issue_id: 2053,
+          status: "in_progress",
+          short_code: "HUB-002053",
+          title: "进项勾选认证异常",
+          predicted_type: "Bug_fix",
+          product_line_code: "pl-test",
+          module: "m-test",
+        },
+        {
+          id: 2053,
+          short_code: "HUB-002053",
+          title: "进项勾选认证异常",
+          type: "Bug_fix",
+          status: "processing",
+          op_status: "processing",
+        },
+        [
+          http.post("*/api/tickets/777/attachments", () => {
+            const created = {
+              id: nextAttId++,
+              filename: `HUB-002053-${uploadedServerList.length + 1}.png`,
+              mime: "image/png",
+              size_bytes: 2048,
+              download_url: `/api/tickets/777/attachments/${nextAttId - 1}/download`,
+            };
+            uploadedServerList.push(created);
+            return HttpResponse.json(created, { status: 201 });
+          }),
+          http.patch("*/api/hub-issues/2053/subtask", async ({ request }) => {
+            const body = (await request.json()) as any;
+            return HttpResponse.json({
+              success: true,
+              hub_issue_id: 2053,
+              solution: body?.solution ?? "",
+            });
+          }),
+          http.get("*/api/tickets/777/subtasks", () =>
+            HttpResponse.json([
+              {
+                id: 2053,
+                short_code: "HUB-002053",
+                ticket_id: 777,
+                title: "进项勾选认证异常",
+                type: "Bug_fix",
+                product_line_code: "pl-test",
+                module: "m-test",
+                status: "processing",
+                solution: "【沟通记录】已上传截图",
+                attachments_count: uploadedServerList.length,
+                attachments: uploadedServerList,
+              },
+            ]),
+          ),
+        ],
+      );
+
+      const supplementBtn = await screen.findByRole("button", { name: "去补充" });
+      fireEvent.click(supplementBtn);
+
+      const drawer = await screen.findByRole("dialog");
+      const fileInput = drawer.querySelector('input[type="file"]') as HTMLInputElement;
+      const fakeImage = new File(["fake-image-content"], "bug_shot.png", { type: "image/png" });
+      fireEvent.change(fileInput, { target: { files: [fakeImage] } });
+
+      expect(await within(drawer).findByText("HUB-002053-1")).toBeInTheDocument();
+      expect(within(drawer).getByText("(1)")).toBeInTheDocument();
+
+      // 点击确认，触发 updateSubtaskMutation 并重新拉取 /api/tickets/777/subtasks（同时存在 "self" 与 hub_id=2053）
+      fireEvent.click(within(drawer).getByRole("button", { name: "确认" }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+
+      // 验证：子任务列表「附件」列计数为 1，处理附件小节计数也为 (1)，且 HUB-002053-1 只出现 1 次（绝不出现 2 条重复记录）
+      await waitFor(() => {
+        expect(screen.getByRole("cell", { name: "1" })).toBeInTheDocument();
+        expect(screen.getByText("(1)")).toBeInTheDocument();
+        expect(screen.getAllByText("HUB-002053-1")).toHaveLength(1);
+      });
+    });
+
+    it("转产研上下文补充：沟通记录录入框为富文本编辑器，支持根据内容自适应高度（最大 800px，下方附件同步下移），支持设置字体大小、粗细、颜色及插入超链接和图片", async () => {
+      renderTicket({
+        status: "in_progress",
+        short_code: "HUB-RICH-001",
+        title: "进项发票认证勾选超时",
+        predicted_type: "Bug_fix",
+      });
+
+      const supplementBtn = await screen.findByRole("button", { name: "去补充" });
+      fireEvent.click(supplementBtn);
+
+      const drawer = await screen.findByRole("dialog");
+      const commSection = within(drawer).getByTestId("dev-drawer-comm-record-section");
+      const attachSection = within(drawer).getByTestId("dev-drawer-attachments-paste-zone");
+
+      // 1. 验证沟通记录区域与沟通记录附件处于同一文档流，且附件紧跟在沟通记录下方，随高度变化同步下移
+      expect(commSection.parentElement).toBe(attachSection.parentElement);
+      expect(commSection.nextElementSibling).toBe(attachSection);
+
+      // 2. 验证沟通记录录入框为富文本编辑器，初始最小高度 130px，最大高度限制为 800px
+      const richEditor = within(drawer).getByRole("textbox", { name: "沟通记录富文本" });
+      expect(richEditor).toBeInTheDocument();
+      expect(richEditor.style.minHeight).toBe("130px");
+      expect(richEditor.style.maxHeight).toBe("800px");
+
+      // 模拟内容增长触发自适应高度：当 scrollHeight 为 420px 时高度调整为 420px；当超过 800px（如 1100px）时封顶为 800px
+      Object.defineProperty(richEditor, "scrollHeight", {
+        configurable: true,
+        get: () => 420,
+      });
+      richEditor.innerHTML = "第一阶段排查日志记录";
+      fireEvent.input(richEditor);
+      expect(richEditor.style.height).toBe("420px");
+
+      Object.defineProperty(richEditor, "scrollHeight", {
+        configurable: true,
+        get: () => 1100,
+      });
+      richEditor.innerHTML = "超长排查日志内容...".repeat(50);
+      fireEvent.input(richEditor);
+      expect(richEditor.style.height).toBe("800px");
+
+      // 3. 验证富文本工具栏支持设置字体大小、粗细（加粗）、字体颜色、超链接与图片
+      richEditor.innerHTML = "关键报错信息";
+      fireEvent.input(richEditor);
+
+      // (a) 设置字体粗细（加粗）
+      const boldBtn = within(drawer).getByRole("button", { name: "加粗" });
+      fireEvent.click(boldBtn);
+      expect(richEditor.innerHTML).toMatch(/<(strong|b)>.*关键报错信息.*<\/(strong|b)>/i);
+
+      // (b) 设置字体大小
+      const fontSizeSelect = within(drawer).getByRole("combobox", { name: "字体大小" });
+      fireEvent.change(fontSizeSelect, { target: { value: "18px" } });
+      expect(richEditor.innerHTML).toContain("font-size: 18px");
+
+      // (c) 设置字体颜色
+      const fontColorSelect = within(drawer).getByRole("combobox", { name: "字体颜色" });
+      fireEvent.change(fontColorSelect, { target: { value: "#ef4444" } });
+      expect(richEditor.innerHTML).toMatch(/color:\s*(#ef4444|rgb\(239,\s*68,\s*68\))/i);
+
+      // (d) 插入超链接
+      const linkBtn = within(drawer).getByRole("button", { name: "插入超链接" });
+      fireEvent.click(linkBtn);
+      const urlInput = within(drawer).getByPlaceholderText("https://example.com");
+      const textInput = within(drawer).getByPlaceholderText("若不填默认显示网址");
+      fireEvent.change(urlInput, { target: { value: "https://log.example.com/trace/123" } });
+      fireEvent.change(textInput, { target: { value: "查看链路日志" } });
+      fireEvent.click(within(drawer).getByRole("button", { name: "插入" }));
+      expect(richEditor.innerHTML).toContain('href="https://log.example.com/trace/123"');
+      expect(richEditor.innerHTML).toContain("查看链路日志");
+
+      // (e) 插入网络图片
+      const imgUrlBtn = within(drawer).getByRole("button", { name: "网络图片" });
+      fireEvent.click(imgUrlBtn);
+      const imgInput = within(drawer).getByPlaceholderText("https://example.com/image.png");
+      fireEvent.change(imgInput, { target: { value: "https://cdn.example.com/err.png" } });
+      fireEvent.click(within(drawer).getByRole("button", { name: "插入" }));
+      expect(richEditor.innerHTML).toContain('src="https://cdn.example.com/err.png"');
+
+      // 4. 点击【确认】后再次打开抽屉，富文本内容与样式得以保留
+      fireEvent.click(within(drawer).getByRole("button", { name: "确认" }));
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+
+      // 点击已录入的解决方案重新打开抽屉
+      const solCellBtn = await screen.findByRole("button", { name: /关键报错信息/ });
+      fireEvent.click(solCellBtn);
+      const reopenedDrawer = await screen.findByRole("dialog");
+      const reopenedEditor = within(reopenedDrawer).getByRole("textbox", { name: "沟通记录富文本" });
+      expect(reopenedEditor.innerHTML).toContain('href="https://log.example.com/trace/123"');
+      expect(reopenedEditor.innerHTML).toContain('src="https://cdn.example.com/err.png"');
+    });
   });
 
   describe("场景2：处理说明已有内容时点击【转产研】增强与禁用联动", () => {
@@ -1867,6 +2117,145 @@ describe("TicketDetailPage 出站回写失败横幅", () => {
       // 验证任务列表中更新后的标题与方案展示
       expect(screen.getByText("修改后的专属任务标题")).toBeInTheDocument();
       expect(screen.getAllByText(/排查完成方案生效/).length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("维护知识库抽屉上传附件后，点击【仅作答】或【作答并新增知识库】，将上传的附件按统一命名规则（任务编号-流水号）同步到工单处理附件及子任务附件计数", async () => {
+      const uploadedServerList: any[] = [];
+      let nextAttId = 9001;
+
+      renderTicket(
+        {
+          id: 505,
+          short_code: "HUB-002053",
+          status: "in_progress",
+          predicted_type: "Operation",
+          product_line_code: "pl-test",
+          module: "m-test",
+          hub_issue_id: 2053,
+        },
+        {
+          id: 2053,
+          short_code: "HUB-002053",
+          title: "数电票版式文件下载咨询",
+          type: "Operation",
+          status: "processing",
+          op_status: "processing",
+        },
+        [
+          http.get("*/api/admin/product-lines", () =>
+            HttpResponse.json([{ code: "pl-test", name: "发票标准版", is_active: true }]),
+          ),
+          http.get("*/api/hub-issues/catalog/modules", () =>
+            HttpResponse.json([{ code: "m-test", name: "开票模块", is_active: true }]),
+          ),
+          http.post("*/api/tickets/505/attachments/upload", async ({ request }) => {
+            const body = (await request.json()) as any;
+            const created = {
+              id: nextAttId++,
+              hub_issue_id: body.hub_issue_id,
+              filename: body.filename || `HUB-002053-${uploadedServerList.length + 1}.png`,
+              mime: body.mime || "image/png",
+              size_bytes: 1024,
+              download_url: `/api/tickets/505/attachments/${nextAttId - 1}/download`,
+            };
+            uploadedServerList.push(created);
+            return HttpResponse.json(created, { status: 201 });
+          }),
+          http.patch("*/api/hub-issues/:hubId/subtask", async ({ request, params }) => {
+            const body = (await request.json()) as any;
+            return HttpResponse.json({
+              success: true,
+              hub_issue_id: Number(params.hubId),
+              solution: body?.solution ?? "",
+            });
+          }),
+          http.post("*/api/knowledge-base", () => HttpResponse.json({ ok: true })),
+        ],
+        [
+          {
+            id: 2053,
+            short_code: "HUB-002053",
+            ticket_id: 505,
+            title: "数电票版式文件下载咨询",
+            type: "Operation",
+            product_line_code: "pl-test",
+            module: "m-test",
+            status: "processing",
+            solution: "",
+          },
+          {
+            id: 2054,
+            short_code: "HUB-002054",
+            ticket_id: 505,
+            title: "数电票红冲操作咨询",
+            type: "Operation",
+            product_line_code: "pl-test",
+            module: "m-test",
+            status: "processing",
+            solution: "",
+          },
+        ],
+      );
+
+      // 1. 等待子任务列表加载完成，打开第 1 个子任务（HUB-002053）的维护知识库面板，上传附件并点击【仅作答】
+      await screen.findByText("数电票红冲操作咨询");
+      const enrichBtns = screen.getAllByRole("button", { name: "无方案，去完善" });
+      expect(enrichBtns).toHaveLength(2);
+      fireEvent.click(enrichBtns[0]);
+
+      const drawer1 = await screen.findByRole("dialog");
+      const editorBox1 = within(drawer1).getByRole("textbox", { name: "富文本知识内容" });
+      editorBox1.innerHTML = "请按附件截图步骤下载版式文件";
+      fireEvent.input(editorBox1);
+
+      const fileInput1 = within(drawer1).getByTestId("kb-attachment-file-input") as HTMLInputElement;
+      const imgFile = new File(["step1-bytes"], "step1.png", { type: "image/png" });
+      fireEvent.change(fileInput1, { target: { files: [imgFile] } });
+
+      // 抽屉内展示为 HUB-002053-1 (step1.png)
+      expect(await within(drawer1).findByText(/HUB-002053-1/)).toBeInTheDocument();
+
+      fireEvent.click(within(drawer1).getByRole("button", { name: "仅作答" }));
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+
+      // 验证：工单【处理附件】处已同步展示 HUB-002053-1，且子任务列表「附件」列计数更新为 1
+      await waitFor(() => {
+        expect(screen.getByRole("cell", { name: "1" })).toBeInTheDocument();
+        expect(screen.getByText("(1)")).toBeInTheDocument();
+        expect(screen.getAllByText("HUB-002053-1")).toHaveLength(1);
+      });
+
+      // 2. 打开第 2 个子任务（HUB-002054）的维护知识库面板，上传附件并点击【作答并新增知识库】
+      const enrichBtn2 = await screen.findByRole("button", { name: "无方案，去完善" });
+      fireEvent.click(enrichBtn2);
+
+      const drawer2 = await screen.findByRole("dialog");
+      const titleInput2 = within(drawer2).getByPlaceholderText("简短说明本次知识的概要或者对应的问题...");
+      fireEvent.change(titleInput2, { target: { value: "数电票红冲操作说明" } });
+      const editorBox2 = within(drawer2).getByRole("textbox", { name: "富文本知识内容" });
+      editorBox2.innerHTML = "请进入红字信息确认单模块发起红冲";
+      fireEvent.input(editorBox2);
+
+      const fileInput2 = within(drawer2).getByTestId("kb-attachment-file-input") as HTMLInputElement;
+      const imgFile2 = new File(["step2-bytes"], "red_flush.png", { type: "image/png" });
+      fireEvent.change(fileInput2, { target: { files: [imgFile2] } });
+
+      // 第 2 个子任务编号为 HUB-002054，其第 1 个附件命名为 HUB-002054-1
+      expect(await within(drawer2).findByText(/HUB-002054-1/)).toBeInTheDocument();
+
+      fireEvent.click(within(drawer2).getByRole("button", { name: "作答并新增知识库" }));
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+
+      // 验证：工单【处理附件】处同步累加至 (2)，包含 HUB-002053-1 与 HUB-002054-1
+      await waitFor(() => {
+        expect(screen.getByText("(2)")).toBeInTheDocument();
+        expect(screen.getByText("HUB-002053-1")).toBeInTheDocument();
+        expect(screen.getByText("HUB-002054-1")).toBeInTheDocument();
+      });
     });
 
     it("子任务列表点击任务编号（HUB-xxx）打开对应任务详情页标签页", async () => {

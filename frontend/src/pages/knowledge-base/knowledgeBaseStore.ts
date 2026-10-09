@@ -18,10 +18,18 @@ export type ProductLineOut = { code: string; name: string; is_active?: boolean }
 export type CatalogModuleOut = { code: string; name: string; product_line_code?: string; is_active?: boolean };
 
 export interface KnowledgeAttachment {
+  id?: string;
   name: string;
+  displayName?: string;
+  originalName?: string;
   size: number;
   type: "image" | "video";
+  mime?: string;
   url?: string;
+  file?: File;
+  uploadedAt?: string;
+  taskCode?: string;
+  taskKey?: string | number;
 }
 
 export interface KnowledgeItem {
