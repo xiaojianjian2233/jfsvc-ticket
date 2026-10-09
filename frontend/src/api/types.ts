@@ -4451,6 +4451,8 @@ export interface components {
             product: string | null;
             /** Product Line Code */
             product_line_code: string | null;
+            /** Product Name */
+            product_name?: string | null;
             /**
              * Reject Count
              * @default 0
@@ -4471,6 +4473,10 @@ export interface components {
             reply_is_draft: boolean;
             /** Reply Updated At */
             reply_updated_at: string | null;
+            /** Responsible User Name */
+            responsible_user_name?: string | null;
+            /** Dev Transferred At */
+            dev_transferred_at?: string | null;
             /** Root Cause Analysis */
             root_cause_analysis: string | null;
             /** Scheduled Iteration */
@@ -4528,6 +4534,8 @@ export interface components {
             assigned_user_id: number | null;
             /** Closed At */
             closed_at: string | null;
+            /** Dev Transferred At */
+            dev_transferred_at?: string | null;
             /** Expected Resolved At */
             expected_resolved_at: string | null;
             /** Feedback Note */
@@ -4581,6 +4589,8 @@ export interface components {
             reject_count: number;
             /** Release Notified At */
             release_notified_at?: string | null;
+            /** Reply Content */
+            reply_content?: string | null;
             /** Reply Content Version */
             reply_content_version: number;
             /** Reply Updated At */
@@ -4915,16 +4925,28 @@ export interface components {
         };
         /** LinkedTicket */
         LinkedTicket: {
+            /** Assigned User Id */
+            assigned_user_id?: number | null;
+            /** Body */
+            body?: string | null;
+            /** Handler User Id */
+            handler_user_id?: number | null;
             /** Id */
             id: number;
+            /** Process Stage */
+            process_stage?: string | null;
             /** Short Code */
             short_code: string;
             /** Source Code */
             source_code: string | null;
             /** Source Ticket Id */
             source_ticket_id: string | null;
+            /** Source Ticket Number */
+            source_ticket_number?: string | null;
             /** Status */
             status: string;
+            /** Title */
+            title?: string | null;
         };
         /** LogOut */
         LogOut: {

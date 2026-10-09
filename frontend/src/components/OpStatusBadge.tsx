@@ -19,6 +19,16 @@ export const OP_STATUS_LABEL: Record<string, { label: string; bg: string; fg: st
   exception: { label: "处理异常", bg: "#fbf1ef", fg: "#b04a4a", bd: "#eed7d2" },
 };
 
+/** 后端 HubIssue.op_status 实际在使用的状态值（对齐 backend OP_STATUS_VALUES） */
+export const HUB_OP_STATUS_VALUES = [
+  "processing",
+  "answered",
+  "closed",
+  "supplementing",
+  "exception",
+  "transferred_return",
+] as const;
+
 function _badge(c: { label: string; bg: string; fg: string; bd: string }) {
   return (
     <span

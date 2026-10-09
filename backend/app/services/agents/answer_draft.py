@@ -172,7 +172,7 @@ def _generate_answer_draft(
     # A concurrent/manual reply remains authoritative, including closed tickets.
     if (
         hub is not None
-        and (hub.type == "Operation" or hub.ticket_id is not None)
+        and (hub.type == "Operation" or (not initial and hub.ticket_id is not None))
         and (
             not hub.reply_content
             or (hub.reply_is_draft and hub.reply_authored_by == "agent:ai_cs:draft")

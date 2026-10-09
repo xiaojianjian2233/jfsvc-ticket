@@ -44,7 +44,18 @@ function loadPersisted(): Persisted | null {
     if (!raw) return null;
     const p = JSON.parse(raw) as Persisted;
     if (!Array.isArray(p.tabs) || p.tabs.length === 0) return null;
-    return p;
+    const validTabs = p.tabs.filter(
+      (t) =>
+        t &&
+        typeof t.key === "string" &&
+        typeof t.path === "string" &&
+        typeof t.title === "string",
+    );
+    if (validTabs.length === 0) return null;
+    return {
+      tabs: validTabs,
+      activeKey: typeof p.activeKey === "string" ? p.activeKey : validTabs[0].key,
+    };
   } catch {
     return null;
   }

@@ -61,6 +61,7 @@ class IssueState:
     identifier: str  # e.g. "CNPRD-809"
     state_name: str
     state_type: str
+    comments: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True, frozen=True)

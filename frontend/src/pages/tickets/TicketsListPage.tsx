@@ -1279,7 +1279,7 @@ export function TicketsListPage() {
         accessorKey: "handler_user_name",
         size: 110,
         cell: ({ row }) =>
-          row.original.handler_user_id != null ? (
+          row.original.handler_user_id != null || row.original.handler_user_name ? (
             <span className="flex items-center gap-1.5">
               <span className="w-[18px] h-[18px] rounded-full bg-hub-teal text-white text-[9px] font-bold flex items-center justify-center flex-none">
                 {(row.original.handler_user_name ?? "#").slice(-1)}

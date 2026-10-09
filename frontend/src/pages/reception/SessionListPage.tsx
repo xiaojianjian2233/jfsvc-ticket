@@ -49,7 +49,6 @@ function exportSessionsToExcel(targetSessions: SessionItem[], fileName: string) 
 
   const rows = targetSessions.map((s) => ({
     会话ID: s.id,
-    大模型CID: s.ai_agent_cid ?? "—",
     咨询企业: s.company_name,
     咨询企业税号: s.tax_no ?? "—",
     归属租户: s.tenant_name || s.tenant_no || "—",
@@ -61,12 +60,12 @@ function exportSessionsToExcel(targetSessions: SessionItem[], fileName: string) 
     最后接待人: s.agent_name || "—",
     关联工单号: s.ticket_short_code ?? "—",
     客户问题总结: s.summary ?? "—",
+    大模型CID: s.ai_agent_cid ?? "—",
   }));
 
   const ws = XLSX.utils.json_to_sheet(rows);
   ws["!cols"] = [
     { wch: 20 }, // 会话ID
-    { wch: 26 }, // 大模型CID
     { wch: 28 }, // 咨询企业
     { wch: 22 }, // 咨询企业税号
     { wch: 20 }, // 归属租户
@@ -78,6 +77,7 @@ function exportSessionsToExcel(targetSessions: SessionItem[], fileName: string) 
     { wch: 14 }, // 最后接待人
     { wch: 18 }, // 关联工单号
     { wch: 45 }, // 客户问题总结
+    { wch: 26 }, // 大模型CID
   ];
 
   const wb = XLSX.utils.book_new();
@@ -431,7 +431,7 @@ export function SessionListPage() {
           <h1 className="text-[16px] font-bold text-slate-800 leading-none">
             会话记录列表
           </h1>
-          <span className="text-[12px] text-slate-500 leading-none">
+          <span className="text-[10px] text-slate-500 leading-none">
             记录所有在线与热线会话的历史详情，包含完整沟通语料明细、转人工判定及问题总结
           </span>
         </div>
@@ -442,7 +442,7 @@ export function SessionListPage() {
               <button
                 type="button"
                 onClick={() => setSelectedIds([])}
-                className="text-slate-400 hover:text-slate-600 underline cursor-pointer ml-1 text-[11px]"
+                className="text-slate-400 hover:text-slate-600 underline cursor-pointer ml-1 text-[12px]"
               >
                 取消
               </button>
@@ -454,13 +454,13 @@ export function SessionListPage() {
         </div>
       </div>
 
-      {/* 3, 4, 5, 6. 筛选条件录入区：字体 13 号，录入框高 25px，宽 300px，一行展示 4 个筛选条件 */}
-      <div className="bg-white rounded-[5px] p-3 border border-slate-200 shadow-sm space-y-3 text-[13px] flex-none">
+      {/* 3, 4, 5, 6. 筛选条件录入区：字体 12 号，录入框高 25px，宽 300px，一行展示 4 个筛选条件 */}
+      <div className="bg-white rounded-[5px] p-3 border border-slate-200 shadow-sm space-y-3 text-[12px] flex-none">
         {/* 第 1 行：4 个筛选条件 */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
           {/* 咨询企业 */}
           <div className="flex items-center gap-2">
-            <span className="text-slate-600 font-medium whitespace-nowrap w-[85px] text-right text-[13px]">
+            <span className="text-slate-600 font-medium whitespace-nowrap w-[85px] text-right text-[12px]">
               咨询企业：
             </span>
             <input
@@ -469,13 +469,13 @@ export function SessionListPage() {
               onChange={(e) => setFilterCompany(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && loadData(1)}
               placeholder="录入企业名称查找"
-              className="w-[300px] h-[25px] px-2.5 border border-slate-200 rounded-[5px] text-[13px] focus:outline-none focus:border-[rgb(102,139,221)] bg-white"
+              className="w-[300px] h-[25px] px-2.5 border border-slate-200 rounded-[5px] text-[12px] focus:outline-none focus:border-[rgb(102,139,221)] bg-white"
             />
           </div>
 
           {/* 联系人电话 */}
           <div className="flex items-center gap-2">
-            <span className="text-slate-600 font-medium whitespace-nowrap w-[85px] text-right text-[13px]">
+            <span className="text-slate-600 font-medium whitespace-nowrap w-[85px] text-right text-[12px]">
               联系人电话：
             </span>
             <input
@@ -484,13 +484,13 @@ export function SessionListPage() {
               onChange={(e) => setFilterPhone(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && loadData(1)}
               placeholder="录入手机号查找"
-              className="w-[300px] h-[25px] px-2.5 border border-slate-200 rounded-[5px] text-[13px] focus:outline-none focus:border-[rgb(102,139,221)] font-mono bg-white"
+              className="w-[300px] h-[25px] px-2.5 border border-slate-200 rounded-[5px] text-[12px] focus:outline-none focus:border-[rgb(102,139,221)] font-mono bg-white"
             />
           </div>
 
           {/* 会话状态（多选，增加【排队中】） */}
           <div className="relative flex items-center gap-2">
-            <span className="text-slate-600 font-medium whitespace-nowrap w-[85px] text-right text-[13px]">
+            <span className="text-slate-600 font-medium whitespace-nowrap w-[85px] text-right text-[12px]">
               会话状态：
             </span>
             <div ref={statusDropdownRef} className="relative w-[300px]">
@@ -498,7 +498,7 @@ export function SessionListPage() {
                 type="button"
                 aria-label="会话状态选择"
                 onClick={() => setStatusDropdownOpen((v) => !v)}
-                className="w-[300px] h-[25px] px-2.5 border border-slate-200 rounded-[5px] text-left flex items-center justify-between bg-white text-[13px] hover:border-slate-300 cursor-pointer"
+                className="w-[300px] h-[25px] px-2.5 border border-slate-200 rounded-[5px] text-left flex items-center justify-between bg-white text-[12px] hover:border-slate-300 cursor-pointer"
               >
                 <span className="truncate text-slate-700">
                   {filterStatuses.join("、")}
@@ -507,7 +507,7 @@ export function SessionListPage() {
               </button>
 
               {statusDropdownOpen && (
-                <div className="absolute top-[28px] left-0 w-[300px] bg-white border border-slate-200 rounded-[5px] shadow-lg p-2 z-30 space-y-1 text-[13px]">
+                <div className="absolute top-[28px] left-0 w-[300px] bg-white border border-slate-200 rounded-[5px] shadow-lg p-2 z-30 space-y-1 text-[12px]">
                   {SESSION_STATUS_OPTIONS.map((opt) => {
                     const checked = filterStatuses.includes(opt);
                     return (
@@ -532,13 +532,13 @@ export function SessionListPage() {
 
           {/* 是否转人工接待（单选） */}
           <div className="flex items-center gap-2">
-            <span className="text-slate-600 font-medium whitespace-nowrap w-[85px] text-right text-[13px]">
+            <span className="text-slate-600 font-medium whitespace-nowrap w-[85px] text-right text-[12px]">
               转人工接待：
             </span>
             <select
               value={filterIsHuman}
               onChange={(e) => setFilterIsHuman(e.target.value)}
-              className="w-[300px] h-[25px] px-2.5 border border-slate-200 rounded-[5px] bg-white text-slate-700 text-[13px] focus:outline-none focus:border-[rgb(102,139,221)]"
+              className="w-[300px] h-[25px] px-2.5 border border-slate-200 rounded-[5px] bg-white text-slate-700 text-[12px] focus:outline-none focus:border-[rgb(102,139,221)]"
             >
               <option value="不限">不限</option>
               <option value="是">是</option>
@@ -552,7 +552,7 @@ export function SessionListPage() {
           <div className="flex items-center gap-6">
             {/* 最后接待人 */}
             <div className="flex items-center gap-2">
-              <span className="text-slate-600 font-medium whitespace-nowrap w-[85px] text-right text-[13px]">
+              <span className="text-slate-600 font-medium whitespace-nowrap w-[85px] text-right text-[12px]">
                 最后接待人：
               </span>
               <input
@@ -561,13 +561,13 @@ export function SessionListPage() {
                 onChange={(e) => setFilterAgentName(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && loadData(1)}
                 placeholder="录入接待人姓名查找"
-                className="w-[300px] h-[25px] px-2.5 border border-slate-200 rounded-[5px] text-[13px] focus:outline-none focus:border-[rgb(102,139,221)] bg-white"
+                className="w-[300px] h-[25px] px-2.5 border border-slate-200 rounded-[5px] text-[12px] focus:outline-none focus:border-[rgb(102,139,221)] bg-white"
               />
             </div>
 
             {/* 创建时间（起止时间在一个输入框内，精确到 hh:mm） */}
             <div className="flex items-center gap-2">
-              <span className="text-slate-600 font-medium whitespace-nowrap w-[85px] text-right text-[13px]">
+              <span className="text-slate-600 font-medium whitespace-nowrap w-[85px] text-right text-[12px]">
                 创建时间：
               </span>
               <div className="w-[300px]">
@@ -577,25 +577,25 @@ export function SessionListPage() {
                   onChange={(from, to) => setTimeRange({ start: from, end: to })}
                   placeholderFrom="开始时间"
                   placeholderTo="截止时间"
-                  className="!h-[25px] !w-[300px] !rounded-[5px] !text-[13px] !border-slate-200"
+                  className="!h-[25px] !w-[300px] !rounded-[5px] !text-[12px] !border-slate-200"
                 />
               </div>
             </div>
           </div>
 
-          {/* 查询与重置操作按钮组合：高 25px，宽 100px，圆角 5px，查询背景色 rgb(102, 139, 221)，字体 13 号 */}
+          {/* 查询与重置操作按钮组合：高 25px，宽 100px，圆角 5px，查询背景色 rgb(102, 139, 221)，字体 12 号 */}
           <div className="flex items-center gap-2.5 flex-none">
             <button
               type="button"
               onClick={() => loadData(1)}
-              className="w-[100px] h-[25px] bg-[rgb(102,139,221)] text-white rounded-[5px] text-[13px] font-medium hover:opacity-90 transition cursor-pointer flex items-center justify-center shadow-xs"
+              className="w-[100px] h-[25px] bg-[rgb(102,139,221)] text-white rounded-[5px] text-[12px] font-medium hover:opacity-90 transition cursor-pointer flex items-center justify-center shadow-xs"
             >
               查询
             </button>
             <button
               type="button"
               onClick={handleReset}
-              className="w-[100px] h-[25px] border border-slate-200 text-slate-600 rounded-[5px] text-[13px] bg-white hover:bg-slate-50 transition cursor-pointer flex items-center justify-center"
+              className="w-[100px] h-[25px] border border-slate-200 text-slate-600 rounded-[5px] text-[12px] bg-white hover:bg-slate-50 transition cursor-pointer flex items-center justify-center"
             >
               重置
             </button>
@@ -603,7 +603,7 @@ export function SessionListPage() {
         </div>
       </div>
 
-      {/* 7, 8, 9, 10. 会话表格展示区：字体 13 号，不换行，完整展示咨询企业和归属租户，高度固定 */}
+      {/* 7, 8, 9, 10. 会话表格展示区：字体 12 号，不换行，完整展示咨询企业和归属租户，高度固定 */}
       <div className="bg-white rounded-[5px] border border-slate-200 shadow-sm overflow-hidden flex-1 min-h-0 flex flex-col">
         {/* 列表左上角操作区：导出按钮位于左上角，填充颜色 rgb(35, 94, 212) */}
         <div className="px-3.5 py-2 border-b border-slate-200 flex items-center justify-between flex-none bg-white">
@@ -612,7 +612,7 @@ export function SessionListPage() {
               type="button"
               onClick={handleExport}
               disabled={exporting}
-              className="w-[100px] h-[25px] bg-[rgb(35,94,212)] text-white rounded-[5px] text-[13px] font-medium hover:opacity-90 transition cursor-pointer flex items-center justify-center gap-1.5 shadow-xs disabled:opacity-60"
+              className="w-[100px] h-[25px] bg-[rgb(35,94,212)] text-white rounded-[5px] text-[12px] font-medium hover:opacity-90 transition cursor-pointer flex items-center justify-center gap-1.5 shadow-xs disabled:opacity-60"
               title={
                 selectedIds.length > 0
                   ? `导出选中的 ${selectedIds.length} 条记录`
@@ -638,7 +638,7 @@ export function SessionListPage() {
               type="button"
               onClick={() => loadData(page)}
               disabled={loading}
-              className="w-[80px] h-[25px] border border-slate-300 text-slate-700 rounded-[5px] text-[13px] bg-white hover:bg-slate-50 transition cursor-pointer flex items-center justify-center gap-1.5 font-medium shadow-2xs disabled:opacity-60"
+              className="w-[80px] h-[25px] border border-slate-300 text-slate-700 rounded-[5px] text-[12px] bg-white hover:bg-slate-50 transition cursor-pointer flex items-center justify-center gap-1.5 font-medium shadow-2xs disabled:opacity-60"
               title="刷新会话列表"
             >
               <svg
@@ -668,12 +668,12 @@ export function SessionListPage() {
         </div>
 
         <div className="overflow-auto flex-1 min-h-0">
-          <table className="w-full text-left text-[13px] border-collapse min-w-[1430px]">
+          <table className="w-full text-left text-[12px] border-collapse min-w-[1430px]">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-700">
                 {/* 勾选多选框列：固定在最左侧 left-0 */}
                 <th
-                  className="px-3 py-2.5 w-[44px] min-w-[44px] text-center whitespace-nowrap text-[13px] font-bold sticky top-0 left-0 z-30 bg-slate-50 border-r border-slate-200 shadow-[1px_0_2px_rgba(0,0,0,0.03)]"
+                  className="px-3 py-2.5 w-[44px] min-w-[44px] text-center whitespace-nowrap text-[12px] font-bold sticky top-0 left-0 z-30 bg-slate-50 border-r border-slate-200 shadow-[1px_0_2px_rgba(0,0,0,0.03)]"
                 >
                   <input
                     type="checkbox"
@@ -696,59 +696,59 @@ export function SessionListPage() {
                 </th>
                 {/* 会话ID列固定：left-[44px]，不随左右拖动移动，永远在顶层，防止重叠 */}
                 <th
-                  className="px-3.5 py-2.5 whitespace-nowrap text-[13px] font-bold sticky top-0 left-[44px] z-30 bg-slate-50 border-r border-slate-200 shadow-[2px_0_4px_rgba(0,0,0,0.04)]"
+                  className="px-3.5 py-2.5 whitespace-nowrap text-[12px] font-bold sticky top-0 left-[44px] z-30 bg-slate-50 border-r border-slate-200 shadow-[2px_0_4px_rgba(0,0,0,0.04)]"
                   style={{ width: 170, minWidth: 170 }}
                 >
                   会话ID
                 </th>
-                <th className="px-3.5 py-2.5 whitespace-nowrap text-[13px] font-bold sticky top-0 z-20 bg-slate-50 min-w-[150px]">
-                  大模型CID
-                </th>
-                <th className="px-3.5 py-2.5 whitespace-nowrap text-[13px] font-bold sticky top-0 z-20 bg-slate-50">
+                <th className="px-3.5 py-2.5 whitespace-nowrap text-[12px] font-bold sticky top-0 z-20 bg-slate-50">
                   咨询企业
                 </th>
-                <th className="px-3.5 py-2.5 whitespace-nowrap text-[13px] font-bold sticky top-0 z-20 bg-slate-50">
+                <th className="px-3.5 py-2.5 whitespace-nowrap text-[12px] font-bold sticky top-0 z-20 bg-slate-50">
                   咨询企业税号
                 </th>
-                <th className="px-3.5 py-2.5 whitespace-nowrap text-[13px] font-bold sticky top-0 z-20 bg-slate-50">
+                <th className="px-3.5 py-2.5 whitespace-nowrap text-[12px] font-bold sticky top-0 z-20 bg-slate-50">
                   归属租户
                 </th>
-                <th className="px-3.5 py-2.5 whitespace-nowrap text-[13px] font-bold sticky top-0 z-20 bg-slate-50">
+                <th className="px-3.5 py-2.5 whitespace-nowrap text-[12px] font-bold sticky top-0 z-20 bg-slate-50">
                   咨询人
                 </th>
-                <th className="px-3.5 py-2.5 whitespace-nowrap text-[13px] font-bold sticky top-0 z-20 bg-slate-50">
+                <th className="px-3.5 py-2.5 whitespace-nowrap text-[12px] font-bold sticky top-0 z-20 bg-slate-50">
                   咨询人电话
                 </th>
-                <th className="px-3.5 py-2.5 whitespace-nowrap min-w-[140px] text-[13px] font-bold sticky top-0 z-20 bg-slate-50">
+                <th className="px-3.5 py-2.5 whitespace-nowrap min-w-[140px] text-[12px] font-bold sticky top-0 z-20 bg-slate-50">
                   会话创建时间
                 </th>
-                <th className="px-3.5 py-2.5 whitespace-nowrap text-center text-[13px] font-bold sticky top-0 z-20 bg-slate-50">
+                <th className="px-3.5 py-2.5 whitespace-nowrap text-center text-[12px] font-bold sticky top-0 z-20 bg-slate-50">
                   会话状态
                 </th>
-                <th className="px-3.5 py-2.5 whitespace-nowrap text-center text-[13px] font-bold sticky top-0 z-20 bg-slate-50">
+                <th className="px-3.5 py-2.5 whitespace-nowrap text-center text-[12px] font-bold sticky top-0 z-20 bg-slate-50">
                   是否转人工
                 </th>
-                <th className="px-3.5 py-2.5 whitespace-nowrap text-[13px] font-bold sticky top-0 z-20 bg-slate-50">
+                <th className="px-3.5 py-2.5 whitespace-nowrap text-[12px] font-bold sticky top-0 z-20 bg-slate-50">
                   最后接待人
                 </th>
-                <th className="px-3.5 py-2.5 whitespace-nowrap text-[13px] font-bold sticky top-0 z-20 bg-slate-50">
+                <th className="px-3.5 py-2.5 whitespace-nowrap text-[12px] font-bold sticky top-0 z-20 bg-slate-50">
                   关联工单号
                 </th>
-                <th className="px-3.5 py-2.5 min-w-[220px] whitespace-nowrap text-[13px] font-bold sticky top-0 z-20 bg-slate-50">
+                <th className="px-3.5 py-2.5 min-w-[220px] whitespace-nowrap text-[12px] font-bold sticky top-0 z-20 bg-slate-50">
                   客户问题总结
+                </th>
+                <th className="px-3.5 py-2.5 whitespace-nowrap text-[12px] font-bold sticky top-0 z-20 bg-slate-50 min-w-[150px]">
+                  大模型CID
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={14} className="text-center py-16 text-slate-400 text-[13px] whitespace-nowrap">
+                  <td colSpan={14} className="text-center py-16 text-slate-400 text-[12px] whitespace-nowrap">
                     数据加载中...
                   </td>
                 </tr>
               ) : sessions.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="text-center py-16 text-slate-400 text-[13px] whitespace-nowrap">
+                  <td colSpan={14} className="text-center py-16 text-slate-400 text-[12px] whitespace-nowrap">
                     暂无符合条件的会话记录
                   </td>
                 </tr>
@@ -775,24 +775,11 @@ export function SessionListPage() {
                       <button
                         type="button"
                         onClick={() => handleOpenDetail(s)}
-                        className="text-[rgb(102,139,221)] hover:underline cursor-pointer font-mono font-medium text-[13px]"
+                        className="text-[rgb(102,139,221)] hover:underline cursor-pointer font-mono font-medium text-[12px]"
                         title="点击查看会话详情"
                       >
                         {s.id}
                       </button>
-                    </td>
-                    {/* 大模型CID：展示与会话 1 对 1 绑定的 ai_agent_cid */}
-                    <td className="px-3.5 py-2.5 font-mono whitespace-nowrap">
-                      {s.ai_agent_cid ? (
-                        <span
-                          className="inline-block px-1.5 py-0.5 rounded text-[12px] font-medium bg-purple-50 text-purple-700 border border-purple-200 font-mono"
-                          title={`大模型会话CID (1对1绑定): ${s.ai_agent_cid}`}
-                        >
-                          {s.ai_agent_cid}
-                        </span>
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
                     </td>
                     {/* 咨询企业：不换行，完整展示 */}
                     <td className="px-3.5 py-2.5 font-medium text-slate-800 whitespace-nowrap">
@@ -859,6 +846,19 @@ export function SessionListPage() {
                         {s.summary ?? "—"}
                       </div>
                     </td>
+                    {/* 大模型CID：移动到客户问题总结列后面，展示与会话 1 对 1 绑定的 ai_agent_cid */}
+                    <td className="px-3.5 py-2.5 font-mono whitespace-nowrap">
+                      {s.ai_agent_cid ? (
+                        <span
+                          className="inline-block px-1.5 py-0.5 rounded text-[12px] font-medium bg-purple-50 text-purple-700 border border-purple-200 font-mono"
+                          title={`大模型会话CID (1对1绑定): ${s.ai_agent_cid}`}
+                        >
+                          {s.ai_agent_cid}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
                   </tr>
                 ))
               )}
@@ -866,8 +866,8 @@ export function SessionListPage() {
           </table>
         </div>
 
-        {/* 分页栏：和窗口底部对齐，字体 13 号 */}
-        <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-[13px] text-slate-500 flex-none">
+        {/* 分页栏：和窗口底部对齐，字体 12 号 */}
+        <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-[12px] text-slate-500 flex-none">
           <span>
             第 {page} 页 / 共 {Math.ceil(total / 20) || 1} 页（总计 {total} 条）
           </span>
@@ -876,7 +876,7 @@ export function SessionListPage() {
               type="button"
               disabled={page <= 1}
               onClick={() => loadData(page - 1)}
-              className="px-3 py-1 border border-slate-200 rounded-[5px] bg-white hover:bg-slate-50 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed text-[13px]"
+              className="px-3 py-1 border border-slate-200 rounded-[5px] bg-white hover:bg-slate-50 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed text-[12px]"
             >
               上一页
             </button>
@@ -884,7 +884,7 @@ export function SessionListPage() {
               type="button"
               disabled={page >= Math.ceil(total / 20)}
               onClick={() => loadData(page + 1)}
-              className="px-3 py-1 border border-slate-200 rounded-[5px] bg-white hover:bg-slate-50 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed text-[13px]"
+              className="px-3 py-1 border border-slate-200 rounded-[5px] bg-white hover:bg-slate-50 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed text-[12px]"
             >
               下一页
             </button>
@@ -1154,7 +1154,7 @@ export function SessionListPage() {
               <button
                 type="button"
                 onClick={() => setDrawerOpen(false)}
-                className="px-4 py-1.5 bg-slate-200 text-slate-700 rounded-[5px] text-[13px] hover:bg-slate-300 transition cursor-pointer"
+                className="px-4 py-1.5 bg-slate-200 text-slate-700 rounded-[5px] text-[12px] hover:bg-slate-300 transition cursor-pointer"
               >
                 关闭
               </button>

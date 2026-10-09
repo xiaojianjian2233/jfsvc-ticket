@@ -11,6 +11,7 @@ import {
   renderFormattedReplyNote,
   parseReplyNoteSolutions,
   extractDevSolutionParts,
+  sanitizeTaskTitle,
 } from "./TicketDetailPage";
 
 function renderTicket(
@@ -1867,8 +1868,187 @@ describe("TicketDetailPage 出站回写失败横幅", () => {
       expect(screen.getByText("修改后的专属任务标题")).toBeInTheDocument();
       expect(screen.getAllByText(/排查完成方案生效/).length).toBeGreaterThanOrEqual(1);
     });
+
+    it("子任务列表点击任务编号（HUB-xxx）打开对应任务详情页标签页", async () => {
+      let capturedTabs: { key: string; title: string }[] = [];
+      let currentActiveKey = "";
+      function TabWatcher() {
+        const { tabs, activeKey } = useTabs();
+        capturedTabs = tabs;
+        currentActiveKey = activeKey;
+        return null;
+      }
+
+      const tId = 601;
+      const ticket = {
+        id: tId,
+        short_code: "TKT-000601",
+        source_ticket_number: "SRC-601",
+        type: "Raw",
+        status: "in_progress",
+        title: "测试点击任务编号打开任务详情",
+        product_line_code: "pl-1",
+        module: "m-1",
+        can_operate: true,
+      };
+      const subtasks = [
+        {
+          id: 2107,
+          short_code: "HUB-002107",
+          ticket_id: tId,
+          title: "标准版销项单据列表筛选需求",
+          type: "Demand",
+          product_line_code: "pl-1",
+          module: "m-1",
+          status: "processing",
+          solution: "【沟通记录】需要支持多选过滤",
+        },
+      ];
+
+      server.use(
+        http.get(`*/api/tickets/${tId}`, () => HttpResponse.json(ticket)),
+        http.get(`*/api/tickets/${tId}/history`, () => HttpResponse.json({ ticket_id: tId, items: [] })),
+        http.get(`*/api/tickets/${tId}/subtasks`, () => HttpResponse.json(subtasks)),
+        http.get("*/api/admin/product-lines", () => HttpResponse.json([])),
+        http.get("*/api/hub-issues/catalog/modules", () => HttpResponse.json([])),
+        http.get("*/api/admin/users", () => HttpResponse.json([])),
+      );
+
+      const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={qc}>
+          <MemoryRouter initialEntries={[`/tickets/${tId}`]}>
+            <TabsProvider initialPath={`/tickets/${tId}`} resolveTitle={() => "工单…"}>
+              <TabWatcher />
+              <Routes>
+                <Route path="/tickets/:ticketId" element={<TicketDetailPage />} />
+                <Route path="/hub-issues/:hubIssueId" element={<div>任务详情页-2107</div>} />
+              </Routes>
+            </TabsProvider>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+
+      const taskCodeBtn = await screen.findByRole("button", { name: "HUB-002107" });
+      fireEvent.click(taskCodeBtn);
+
+      await waitFor(() => {
+        const openedTab = capturedTabs.find((t) => t.key === "/hub-issues/2107");
+        expect(openedTab).toBeDefined();
+        expect(openedTab?.title).toBe("HUB-002107");
+        expect(currentActiveKey).toBe("/hub-issues/2107");
+      });
+    });
+
+    it("需求/bug子任务处理说明：剥离标题或方案中的原始问题内容，转产研后展示【产研反馈】且样式与【沟通记录】一致", () => {
+      // 1. sanitizeTaskTitle 剥离多行原始问题及提示词头
+      const dirtyTitle =
+        "你当前处于发票云工单系统的测试界面，请帮我测试一下：\n" +
+        "标准版销项——单据列表增加单据来源筛选且支持多选\n" +
+        "1. 麻烦在单据列表增加单据来源筛选，并且支持多选";
+      expect(sanitizeTaskTitle(dirtyTitle)).toBe("标准版销项——单据列表增加单据来源筛选且支持多选");
+
+      // 2. 单子任务（Bug）：转产研后但产研未回复，显示【产研反馈】：产研分析中暂无回复
+      const singleBugPending = formatTasksReplyNote([
+        {
+          code: "HUB-002108",
+          title: dirtyTitle,
+          type: "Bug_fix",
+          status: "processing",
+          isDevTransferred: true,
+          solution: "【原始问题】1. 麻烦在单据列表增加单据来源筛选\n【沟通记录】已复现，必现异常",
+        },
+      ]);
+      expect(singleBugPending).toBe(
+        "【bug】-标准版销项——单据列表增加单据来源筛选且支持多选\n" +
+          "【沟通记录】已复现，必现异常\n" +
+          "【产研反馈】：产研分析中暂无回复",
+      );
+      expect(singleBugPending).not.toContain("1. 麻烦在单据列表增加单据来源筛选");
+
+      // 3. 单子任务（Bug）：收到产研退回或处理完成有反馈后，显示真实产研反馈
+      const singleBugReplied = formatTasksReplyNote([
+        {
+          code: "HUB-002108",
+          title: "销项开票接口超时",
+          type: "Bug_fix",
+          status: "dev_returned",
+          isDevTransferred: false,
+          solution: "【沟通记录】xxx\n【产研反馈】：产品已经做兼容，直接升级",
+        },
+      ]);
+      expect(singleBugReplied).toBe(
+        "【bug】-销项开票接口超时\n" +
+          "【沟通记录】xxx\n" +
+          "【产研反馈】：产品已经做兼容，直接升级",
+      );
+
+      // 4. renderFormattedReplyNote 将【产研反馈】：与【沟通记录】以完全一致的 font-bold text-slate-900 渲染
+      const { container } = render(<>{renderFormattedReplyNote(singleBugReplied)}</>);
+      const strongs = Array.from(container.querySelectorAll("strong"));
+      const commStrong = strongs.find((el) => el.textContent?.includes("【沟通记录】"));
+      const fbStrong = strongs.find((el) => el.textContent?.includes("【产研反馈】"));
+      expect(commStrong).toBeDefined();
+      expect(fbStrong).toBeDefined();
+      expect(fbStrong?.className).toBe(commStrong?.className);
+    });
+
+    it("当关联的子任务类型修改为应用类时，工单处理说明清空不显示产研模板", async () => {
+      renderTicket(
+        {
+          id: 99,
+          hub_issue_id: 299,
+          status: "in_progress",
+          predicted_type: "Bug_fix",
+          short_code: "HUB-000299",
+          title: "销项开票接口超时",
+          product_line_code: "pl-test",
+          module: "m-test",
+          cached_reply_content:
+            "【bug】-销项开票接口超时\n【沟通记录】已复现异常\n【产研反馈】：产研分析中暂无回复",
+        },
+        {
+          id: 299,
+          short_code: "HUB-000299",
+          title: "销项开票接口超时",
+          type: "Bug_fix",
+          status: "processing",
+          op_status: "processing",
+          reply_content:
+            "【bug】-销项开票接口超时\n【沟通记录】已复现异常\n【产研反馈】：产研分析中暂无回复",
+        },
+        undefined,
+        [
+          {
+            id: 299,
+            short_code: "HUB-000299",
+            title: "销项开票接口超时",
+            type: "Bug_fix",
+            product_line_code: "pl-test",
+            module: "m-test",
+            status: "processing",
+            solution:
+              "【bug】-销项开票接口超时\n【沟通记录】已复现异常\n【产研反馈】：产研分析中暂无回复",
+          },
+        ],
+      );
+
+      // 初始为 Bug 类，处理说明展示【bug】及【沟通记录】模板
+      await waitFor(() => {
+        expect(screen.getAllByText(/【沟通记录】/).length).toBeGreaterThan(0);
+      });
+
+      // 将子任务类型下拉修改为应用类 (Operation)
+      const selects = screen.getAllByRole("combobox");
+      const typeSelect = selects.find((el) => (el as HTMLSelectElement).value === "Bug_fix");
+      expect(typeSelect).toBeDefined();
+      fireEvent.change(typeSelect!, { target: { value: "Operation" } });
+
+      // 修改为应用类后，处理说明应清空不显示产研模板，呈现“暂无处理说明”
+      await waitFor(() => {
+        expect(screen.queryByText(/【沟通记录】/)).not.toBeInTheDocument();
+        expect(screen.getByText("暂无处理说明")).toBeInTheDocument();
+      });
+    });
   });
 });
-
-
-

@@ -9,7 +9,6 @@ import { HubCollabActions } from "@/components/hubActions";
 import { linearStatusToCN, LINEAR_STAGE_IDX } from "@/api/processStage";
 import { useTabTitle } from "@/tabs/useTabTitle";
 import type { paths } from "@/api/types";
-import { StatusBadge } from "../tickets/ticketStatus";
 
 type HubIssueDetail =
   paths["/api/hub-issues/{hub_issue_id}"]["get"]["responses"]["200"]["content"]["application/json"];
@@ -105,13 +104,6 @@ export function HubIssueDetailPage() {
             <SubIssuesSection data={detail.data} />
           )}
           <LinkedTickets tickets={detail.data.linked_tickets} />
-          {detail.data.canonical_body && (
-            <Section title="规范化正文">
-              <pre className="text-xs whitespace-pre-wrap p-3 bg-hub-panel rounded-[10px] border border-hub-border">
-                {detail.data.canonical_body}
-              </pre>
-            </Section>
-          )}
         </div>
       )}
     </div>
@@ -156,13 +148,83 @@ const FEEDBACK_STATUS_ZH: Record<string, string> = {
   stillbad: "未解决",
 };
 
+function cleanPersonName(raw: string | null | undefined): string {
+  if (!raw) return "";
+  let s = raw.trim();
+  if (s.startsWith("user:")) s = s.slice(5).trim();
+  s = s.replace(/\buser#\d+\b/gi, "").trim();
+  s = s.replace(/用户\s*#\d+/g, "").trim();
+  s = s.replace(/^#\d+$/, "").trim();
+  return s;
+}
+
+/**
+ * 根据关联工单处理环节动态计算负责人/任务处理人姓名（只显示姓名，不显示系统编号）：
+ * - 服务处理（服务环节）：取工单对应的处理人（handler_user_id / op_handler）
+ * - 产研处理（研发处理 / 查验处理）：取责任田责任人（module_owner / owner_user_id / assigned_user_id）
+ */
+function useResponsiblePersonName(data: HubIssueDetail): string {
+  const users = useQuery({
+    queryKey: ["admin", "users"],
+    queryFn: () => api.get("/api/admin/users"),
+    staleTime: 60_000,
+  });
+
+  const primaryTicket = data.linked_tickets?.[0];
+  const stage = primaryTicket?.process_stage || "服务处理";
+  const isDevStage =
+    stage === "研发处理" || stage === "产研处理" || stage === "查验处理";
+
+  const moduleOwner = useQuery({
+    queryKey: ["hub-issue-module-owner", data.product_line_code, data.module],
+    queryFn: () =>
+      api.get("/api/hub-issues/catalog/module-owner", {
+        product_line_code: data.product_line_code!,
+        module: data.module!,
+      }),
+    enabled: Boolean(data.product_line_code && data.module),
+    staleTime: 60_000,
+  });
+
+  const nameById = (userId: number | null | undefined): string => {
+    if (userId == null) return "";
+    const found = ((users.data ?? []) as { id: number; name: string }[]).find(
+      (u) => u.id === userId,
+    );
+    return cleanPersonName(found?.name);
+  };
+
+  if (isDevStage) {
+    return (
+      cleanPersonName(data.responsible_user_name) ||
+      cleanPersonName(moduleOwner.data?.user_name) ||
+      nameById(data.owner_user_id) ||
+      nameById(data.assigned_user_id) ||
+      nameById(primaryTicket?.assigned_user_id) ||
+      ""
+    );
+  }
+
+  return (
+    nameById(primaryTicket?.handler_user_id) ||
+    nameById(data.op_handler_user_id) ||
+    (data.op_handler && data.op_handler !== "agent" ? cleanPersonName(data.op_handler) : "") ||
+    nameById(data.assigned_user_id) ||
+    nameById(primaryTicket?.assigned_user_id) ||
+    cleanPersonName(data.responsible_user_name) ||
+    cleanPersonName(moduleOwner.data?.user_name) ||
+    ""
+  );
+}
+
 function Header({ data }: { data: HubIssueDetail }) {
   const t = TYPE_BADGE[data.type];
+  const responsibleName = useResponsiblePersonName(data);
   return (
     <header className="space-y-2">
-      <h1 className="text-[17px] font-bold flex items-center gap-3 flex-wrap">
-        <span className="font-mono text-hub-textMuted">{data.short_code}</span>
-        <span>{data.title}</span>
+      <h1 className="text-[16px] font-bold text-[rgb(43,42,38)] flex items-center gap-3 flex-wrap">
+        <span className="font-mono text-[rgb(43,42,38)]">{data.short_code}</span>
+        <span className="text-[rgb(43,42,38)]">{data.title}</span>
         <span
           className="text-[10px] font-bold px-2 py-0.5 rounded-full border"
           style={t ? { background: t.bg, color: t.fg, borderColor: t.bd } : undefined}
@@ -170,7 +232,7 @@ function Header({ data }: { data: HubIssueDetail }) {
           {TYPE_LABEL[data.type] ?? data.type}
         </span>
       </h1>
-      <div className="text-[11.5px] text-hub-textMuted flex gap-2 flex-wrap items-center">
+      <div className="text-[12px] text-hub-textMuted flex gap-2 flex-wrap items-center">
         <span>状态: {HUB_STATUS_ZH[data.status] ?? data.status}</span>
         <span className="text-hub-textFaint">·</span>
         <span>出现 {data.occurrence_count} 次</span>
@@ -180,23 +242,17 @@ function Header({ data }: { data: HubIssueDetail }) {
             <span>优先级 {PRIORITY_ZH[data.priority] ?? data.priority}</span>
           </>
         )}
-        {data.assigned_user_id != null && (
+        {responsibleName && (
           <>
             <span className="text-hub-textFaint">·</span>
-            <span>负责人 user#{data.assigned_user_id}</span>
+            <span>负责人 {responsibleName}</span>
           </>
         )}
         {data.type === "Operation" && data.op_status && (
           <>
             <span className="text-hub-textFaint">·</span>
             <OpStatusBadge status={data.op_status} />
-            <span>
-              {data.op_handler === "agent"
-                ? "AI 处理"
-                : data.op_handler
-                  ? `处理人 ${data.op_handler}`
-                  : ""}
-            </span>
+            {data.op_handler === "agent" && <span>AI 处理</span>}
             {data.reject_count > 0 && (
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-hub-rose-light text-hub-rose border border-hub-rose-border">
                 驳回 {data.reject_count} 次
@@ -247,44 +303,32 @@ function cumulativeHoursDetail(data: HubIssueDetail): string {
  * 创建时间/关闭时间/关联工单，每行 3~4 字段平均分布铺满容器，字段名/值上下结构。
  */
 function TaskInfoCard({ data }: { data: HubIssueDetail }) {
-  // 处理人/责任人 id→name（hub 详情不返回名，join /api/admin/users）
-  const users = useQuery({
-    queryKey: ["admin", "users"],
-    queryFn: () => api.get("/api/admin/users"),
+  const responsibleName = useResponsiblePersonName(data);
+  const productLines = useQuery({
+    queryKey: ["admin", "product-lines"],
+    queryFn: () => api.get("/api/admin/product-lines"),
     staleTime: 60_000,
-    enabled: data.assigned_user_id != null || data.owner_user_id != null,
   });
-  const nameOf = (userId: number | null | undefined) =>
-    userId != null
-      ? (((users.data ?? []) as { id: number; name: string }[]).find((u) => u.id === userId)
-          ?.name ?? `用户 #${userId}`)
-      : "—";
-  const userName = nameOf(data.assigned_user_id);
-  const assignee =
-    data.type === "Operation" && data.op_handler
-      ? data.op_handler === "agent"
-        ? "AI 处理"
-        : data.op_handler
-      : userName;
-  // 推 Linear 责任人（owner_user_id）：默认=处理人，推送后=推送时确定的模块负责人，
-  // 与「任务处理人」是两个可能不同的字段（见 models.py HubIssue.owner_user_id 注释）。
-  // 已成功推送 Linear（linear_identifier 非空）时才展示，避免未推送前误导。
-  const ownerName = nameOf(data.owner_user_id);
+  const productLineNameFromCatalog = ((productLines.data ?? []) as { code: string; name: string }[])
+    .find((pl) => pl.code === data.product_line_code)?.name;
+  // 产品分类只显示产品名称，不显示产品线编号
+  const productDisplayName =
+    (data.product_name || data.product || productLineNameFromCatalog || "").trim() || "—";
+
+  const assigneeDisplay =
+    responsibleName ||
+    (data.type === "Operation" && data.op_handler === "agent" ? "AI 处理" : "—");
+
   return (
     <Card title="任务信息">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
         <Field label="任务类型">{TYPE_LABEL[data.type] ?? data.type}</Field>
         <Field label="任务状态">{HUB_STATUS_ZH[data.status] ?? data.status}</Field>
-        <Field label="产品分类">
-          {[data.product_line_code, data.product, data.module].filter(Boolean).join(" / ") || "—"}
-        </Field>
+        <Field label="产品分类">{productDisplayName}</Field>
         <Field label="研发工程状态">
           {data.linear_status ? linearStatusToCN(data.linear_status) : "—"}
         </Field>
-        <Field label="任务处理人">{assignee}</Field>
-        {(data.type === "Bug_fix" || data.type === "Demand") && data.linear_identifier && (
-          <Field label="推送责任人">{ownerName}</Field>
-        )}
+        <Field label="任务处理人">{assigneeDisplay}</Field>
         <Field label="任务创建时间">{fmtDateTime(data.first_seen_at)}</Field>
         <Field label="任务关闭时间">{fmtDateTime(data.closed_at)}</Field>
         <Field label="关联工单">
@@ -578,40 +622,28 @@ function TaskProgressCard({ data }: { data: HubIssueDetail }) {
         ))}
       </ol>
 
-      {/* C2：处理说明（Operation 常驻可编辑框 + 提交答复/补充资料双按钮；
+      {/* C2：处理说明（Operation 常驻可编辑框 + 右上角提交答复/补充资料双按钮；
           其它类型保留逐节点方案的修改/填写切换） */}
       <div className="mt-3 pt-3 border-t border-hub-borderLight">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-[11px] font-bold text-hub-textMuted tracking-[.3px]">
-            {isOperation ? "处理说明" : `解决方案 · ${nodes[sel]?.label ?? ""}`}
-          </span>
-          {canEdit && !isOperation && !editing && (
-            <button
-              onClick={() => {
-                setNotice(null);
-                setEditing(true);
-              }}
-              className="text-[11.5px] text-hub-teal hover:underline"
-            >
-              {selVal ? "修改" : "填写"}
-            </button>
-          )}
-        </div>
-        {isOperation && canEdit ? (
-          <div className="space-y-2">
-            {isDraft && (
-              <p className="text-[11px] text-hub-amber-deep bg-hub-amber-light border border-hub-amber-border rounded-[7px] px-2.5 py-1.5">
-                以下为 AI 生成的处理建议，请审核后提交
-              </p>
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold text-hub-textMuted tracking-[.3px]">
+              {isOperation ? "处理说明" : `解决方案 · ${nodes[sel]?.label ?? ""}`}
+            </span>
+            {canEdit && !isOperation && !editing && (
+              <button
+                onClick={() => {
+                  setNotice(null);
+                  setEditing(true);
+                }}
+                className="text-[11.5px] text-hub-teal hover:underline"
+              >
+                {selVal ? "修改" : "填写"}
+              </button>
             )}
-            <textarea
-              value={selVal}
-              onChange={(e) => setDrafts((prev) => ({ ...prev, [sel]: e.target.value }))}
-              rows={5}
-              placeholder="填写答复客户的处理说明；KSM 工单也可据此点「补充资料」向客户要料…"
-              className="w-full px-3 py-2 text-xs border border-hub-border rounded-[7px] bg-white outline-none focus:border-hub-teal"
-            />
-            <div className="flex gap-2">
+          </div>
+          {isOperation && canEdit && (
+            <div className="flex items-center gap-2 ml-auto">
               <button
                 onClick={() => save.mutate(selVal)}
                 disabled={save.isPending || supply.isPending || !selVal.trim()}
@@ -629,19 +661,31 @@ function TaskProgressCard({ data }: { data: HubIssueDetail }) {
                 </button>
               )}
             </div>
-            <p className="text-[10.5px] text-hub-textFaint">
-              提交答复：发给客户并置处理完成。补充资料（仅 KSM）：把上述内容作为补料说明提交
-              KSM，工单转补料中；客户补料后自动交 AI 重答。
-            </p>
+          )}
+        </div>
+        {isOperation && canEdit ? (
+          <div className="space-y-2">
+            {isDraft && (
+              <p className="text-[11px] text-hub-amber-deep bg-hub-amber-light border border-hub-amber-border rounded-[7px] px-2.5 py-1.5">
+                以下为 AI 生成的处理建议，请审核后提交
+              </p>
+            )}
+            <textarea
+              value={selVal}
+              onChange={(e) => setDrafts((prev) => ({ ...prev, [sel]: e.target.value }))}
+              placeholder="填写答复客户的处理说明；KSM 工单也可据此点「补充资料」向客户要料…"
+              className="w-full h-[300px] px-3 py-2 text-[13px] border border-hub-border rounded-[7px] bg-white outline-none focus:border-hub-teal resize-y"
+              style={{ height: 300 }}
+            />
           </div>
         ) : editing ? (
           <div className="space-y-2">
             <textarea
               value={selVal}
               onChange={(e) => setDrafts((prev) => ({ ...prev, [sel]: e.target.value }))}
-              rows={5}
               placeholder="输入该节点的处理方案…"
-              className="w-full px-3 py-2 text-xs border border-hub-border rounded-[7px] bg-white outline-none focus:border-hub-teal"
+              className="w-full h-[300px] px-3 py-2 text-[13px] border border-hub-border rounded-[7px] bg-white outline-none focus:border-hub-teal resize-y"
+              style={{ height: 300 }}
             />
             <div className="flex gap-2">
               <button
@@ -658,27 +702,20 @@ function TaskProgressCard({ data }: { data: HubIssueDetail }) {
                 取消
               </button>
             </div>
-            <p className="text-[10.5px] text-hub-textFaint">
-              逐节点方案落库待后端；非运营类当前保存走 hub 回复接口。
-            </p>
           </div>
         ) : nodeSolution(sel) ? (
           <pre
-            className="text-xs whitespace-pre-wrap break-words p-3 bg-hub-teal-light rounded-[10px] border border-hub-teal-border text-hub-teal-deep m-0 overflow-y-auto font-hub"
-            style={{ lineHeight: 1.3, height: 120 }}
+            className="text-[13px] h-[300px] whitespace-pre-wrap break-words p-3 bg-hub-teal-light rounded-[10px] border border-hub-teal-border text-hub-teal-deep m-0 overflow-y-auto font-hub"
+            style={{ lineHeight: 1.4, height: 300 }}
           >
             {nodeSolution(sel)}
           </pre>
         ) : (
-          <p className="text-xs text-hub-textFaint">该节点暂无处理方案</p>
+          <p className="text-[13px] text-hub-textFaint">该节点暂无处理方案</p>
         )}
         {notice && <p className="text-[11px] text-hub-green mt-1">{notice}</p>}
         {error && <p className="text-[11px] text-hub-rose mt-1">{error}</p>}
       </div>
-
-      <p className="text-[10.5px] text-hub-textFaint mt-2">
-        节点开始/结束/耗时依赖逐节点时间戳；逐节点处理方案后端暂无字段，以里程碑/hub 回复近似（待后端支持）。
-      </p>
     </Card>
   );
 }
@@ -897,27 +934,126 @@ function OwnerSplitForm({ data, onDone }: { data: HubIssueDetail; onDone: () => 
   );
 }
 
+function stripHtmlTags(raw: string | null | undefined): string {
+  if (!raw) return "";
+  return raw
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function truncate100(text: string): string {
+  if (text.length <= 100) return text;
+  return `${text.slice(0, 100)}...`;
+}
+
 function LinkedTickets({ tickets }: { tickets: HubIssueDetail["linked_tickets"] }) {
+  const [popover, setPopover] = useState<{ label: string; content: string } | null>(null);
+
   return (
     <Section title={`关联 ticket (${tickets.length})`}>
       {tickets.length === 0 ? (
         <p className="text-xs text-hub-textFaint">尚无关联 ticket</p>
       ) : (
         <div className="bg-white border border-hub-border rounded-[10px] overflow-hidden">
-          {tickets.map((t) => (
-            <div
-              key={t.id}
-              className="flex items-center gap-3 text-xs px-3.5 py-2 border-b border-hub-borderLight last:border-b-0 hover:bg-hub-panel"
-            >
-              <Link to={`/tickets/${t.id}`} className="font-mono text-hub-teal hover:underline">
-                {t.short_code}
-              </Link>
-              <span className="text-[11px] text-hub-textMuted">
-                {t.source_code ?? "—"} #{t.source_ticket_id ?? "—"}
-              </span>
-              <StatusBadge status={t.status} />
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-collapse text-xs">
+              <thead>
+                <tr className="bg-hub-panel border-b border-hub-border text-[11px] font-bold text-hub-textMuted tracking-[.3px]">
+                  <th className="px-3 py-2 text-left whitespace-nowrap w-14">序号</th>
+                  <th className="px-3 py-2 text-left whitespace-nowrap">工单编号</th>
+                  <th className="px-3 py-2 text-left whitespace-nowrap">来源工单编号</th>
+                  <th className="px-3 py-2 text-left whitespace-nowrap">标题</th>
+                  <th className="px-3 py-2 text-left whitespace-nowrap">问题描述</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tickets.map((t, idx) => {
+                  const titleText = (t.title ?? "").trim();
+                  const bodyText = stripHtmlTags(t.body);
+                  const srcNumber = (t.source_ticket_number || t.source_ticket_id || "").trim();
+                  return (
+                    <tr
+                      key={t.id}
+                      className="border-b border-hub-borderLight last:border-b-0 hover:bg-hub-panel align-top"
+                    >
+                      <td className="px-3 py-2.5 text-hub-textMuted font-mono whitespace-nowrap">
+                        {idx + 1}
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap">
+                        <Link
+                          to={`/tickets/${t.id}`}
+                          className="font-mono text-hub-teal hover:underline"
+                        >
+                          {t.short_code}
+                        </Link>
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap text-hub-textSecondary font-mono">
+                        {srcNumber || "—"}
+                      </td>
+                      <td className="px-3 py-2.5 max-w-[300px]">
+                        {titleText ? (
+                          <button
+                            type="button"
+                            onClick={() => setPopover({ label: "标题详情", content: titleText })}
+                            className="text-left text-hub-text hover:text-hub-teal break-words cursor-pointer"
+                            title="点击查看完整标题"
+                          >
+                            {truncate100(titleText)}
+                          </button>
+                        ) : (
+                          <span className="text-hub-textFaint">—</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 max-w-[380px]">
+                        {bodyText ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPopover({ label: "问题描述详情", content: bodyText })
+                            }
+                            className="text-left text-hub-textSecondary hover:text-hub-teal break-words cursor-pointer"
+                            title="点击查看完整问题描述"
+                          >
+                            {truncate100(bodyText)}
+                          </button>
+                        ) : (
+                          <span className="text-hub-textFaint">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {popover && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
+          onClick={() => setPopover(null)}
+        >
+          <div
+            data-testid="linked-ticket-popover"
+            className="w-[500px] h-auto max-h-[80vh] overflow-y-auto bg-white border border-hub-border rounded-[10px] shadow-xl p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-hub-borderLight pb-2 mb-3">
+              <span className="text-xs font-bold text-hub-text">{popover.label}</span>
+              <button
+                type="button"
+                onClick={() => setPopover(null)}
+                className="text-xs text-hub-textMuted hover:text-hub-text px-1.5 py-0.5"
+              >
+                关闭
+              </button>
             </div>
-          ))}
+            <div className="text-xs text-hub-text whitespace-pre-wrap break-words leading-relaxed">
+              {popover.content}
+            </div>
+          </div>
         </div>
       )}
     </Section>

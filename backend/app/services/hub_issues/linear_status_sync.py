@@ -76,6 +76,55 @@ class StatusSyncReport:
     failed: bool = False
 
 
+def _extract_comm_and_feedback(raw_solution: str | None) -> tuple[str, str]:
+    """拆解研发类子任务说明中的【沟通记录】与【产研反馈】/【研发反馈】。"""
+    if not raw_solution:
+        return "", ""
+    text = raw_solution.strip()
+    comm_idx = text.find("【沟通记录】")
+    fb_idx = text.find("【产研反馈】")
+    fb_tag = "【产研反馈】"
+    if fb_idx == -1:
+        fb_idx = text.find("【研发反馈】")
+        fb_tag = "【研发反馈】"
+
+    if comm_idx != -1 or fb_idx != -1:
+        comm = ""
+        fb = ""
+        if comm_idx != -1 and fb_idx != -1:
+            if comm_idx < fb_idx:
+                comm = text[comm_idx + len("【沟通记录】") : fb_idx].strip()
+                fb = text[fb_idx + len(fb_tag) :].strip()
+            else:
+                fb = text[fb_idx + len(fb_tag) : comm_idx].strip()
+                comm = text[comm_idx + len("【沟通记录】") :].strip()
+        elif comm_idx != -1:
+            comm = text[comm_idx + len("【沟通记录】") :].strip()
+        elif fb_idx != -1:
+            fb = text[fb_idx + len(fb_tag) :].strip()
+        comm = comm.lstrip("：:").strip()
+        fb = fb.lstrip("：:").strip()
+        return comm, fb
+    return text, ""
+
+
+def _sync_linear_feedback_to_hub(hub: HubIssue, comments: list[str]) -> bool:
+    """将 Linear 评论/备注写入 hub.reply_content 的【产研反馈】部分。"""
+    clean_comments = [c.strip() for c in (comments or []) if c and c.strip()]
+    comm, existing_fb = _extract_comm_and_feedback(hub.reply_content)
+    if clean_comments:
+        fb_text = "；".join(clean_comments) if len(clean_comments) > 1 else clean_comments[-1]
+    else:
+        fb_text = existing_fb or "产研分析中暂无回复"
+
+    new_reply = f"【沟通记录】{comm}\n【产研反馈】：{fb_text}"
+    if (hub.reply_content or "").strip() != new_reply:
+        hub.reply_content = new_reply
+        hub.reply_is_draft = False
+        return True
+    return False
+
+
 def sync_linear_statuses(
     db: Session,
     *,
@@ -144,6 +193,11 @@ def sync_linear_statuses(
             hub.linear_status = state.state_name
             hub.linear_status_synced_at = now
             report.linear_status_refreshed += 1
+
+        # 同步 Linear 评论/备注至任务处理说明的【产研反馈】
+        state_comments = getattr(state, "comments", None) or []
+        if state_comments or state.state_type in ("completed", "canceled"):
+            _sync_linear_feedback_to_hub(hub, state_comments)
 
         mapped = _CASCADE_MAP.get(state.state_type)
         if mapped is None or hub.status == mapped:

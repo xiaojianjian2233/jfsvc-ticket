@@ -185,3 +185,25 @@ def test_no_key_skips(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> N
     rep = sync_linear_statuses(db_session, client=_FakeLinearClient([]))  # type: ignore[arg-type]
     assert rep.scanned == 0
     get_settings.cache_clear()
+
+
+def test_linear_comments_synced_to_hub_reply_content(db_session: Session) -> None:
+    """Linear 返回的评论/备注同步写入 hub.reply_content 的【产研反馈】，保留【沟通记录】。"""
+    hub = _hub(
+        db_session,
+        12,
+        status="processing",
+        reply_content="【沟通记录】客户反馈升级报错\n【产研反馈】：产研分析中暂无回复",
+    )
+    st = IssueState(
+        id="uuid-12",
+        identifier="CNPRD-12",
+        state_name="Canceled",
+        state_type="canceled",
+        comments=["产品已经做兼容，直接升级"],
+    )
+    sync_linear_statuses(db_session, client=_FakeLinearClient([st]))  # type: ignore[arg-type]
+    db_session.refresh(hub)
+    assert hub.status == "dev_returned"
+    assert hub.reply_content == "【沟通记录】客户反馈升级报错\n【产研反馈】：产品已经做兼容，直接升级"
+

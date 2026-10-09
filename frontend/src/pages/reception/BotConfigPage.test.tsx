@@ -51,7 +51,9 @@ describe("BotConfigPage (智能解答配置优化第二期)", () => {
 
     await waitFor(() => {
       expect(savedConfig?.default_agent_id).toBe("");
-      expect(screen.getByText("智能体更新成功，状态已置为禁用")).toBeInTheDocument();
+      expect(savedConfig?.agents[0].is_enabled).toBe(true);
+      expect(savedConfig?.agents[0].updated_at).toBeTruthy();
+      expect(screen.getByText("智能体更新成功，状态保持启用")).toBeInTheDocument();
     });
     expect(screen.getByText("正常智能体")).toBeInTheDocument();
   });
@@ -96,11 +98,15 @@ describe("BotConfigPage (智能解答配置优化第二期)", () => {
     expect(screen.getByRole("button", { name: /接待与转人工策略/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /消息分流规则/ })).not.toBeInTheDocument();
 
-    // 5 个操作按钮：新增agent, 启用, 禁用, 删除, 刷新
-    expect(screen.getByRole("button", { name: /新增agent/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /启用/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /禁用/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /删除/ })).toBeInTheDocument();
+    // 5 个操作按钮：新增agent, 启用, 禁用, 删除, 刷新（前4个填充颜色为 rgb(44, 103, 202)，字体白色）
+    const addBtn = screen.getByRole("button", { name: /新增agent/ });
+    const enableBtn = screen.getByRole("button", { name: /启用/ });
+    const disableBtn = screen.getByRole("button", { name: /禁用/ });
+    const deleteBtn = screen.getByRole("button", { name: /删除/ });
+    expect(addBtn).toHaveClass("bg-[rgb(44,103,202)]", "text-white");
+    expect(enableBtn).toHaveClass("bg-[rgb(44,103,202)]", "text-white");
+    expect(disableBtn).toHaveClass("bg-[rgb(44,103,202)]", "text-white");
+    expect(deleteBtn).toHaveClass("bg-[rgb(44,103,202)]", "text-white");
     expect(screen.getByRole("button", { name: /刷新/ })).toBeInTheDocument();
 
     // 表格表头字段展示（包含新增的智能体类型和适用来源渠道）
@@ -138,9 +144,10 @@ describe("BotConfigPage (智能解答配置优化第二期)", () => {
     // 正文中的智能体编号配置字段已移除
     expect(screen.queryByPlaceholderText("AGENT0001")).not.toBeInTheDocument();
 
-    // 智能体形象：修改为附件上传
+    // 智能体形象：修改为附件上传，最大 3MB
     expect(screen.getByText("智能体形象")).toBeInTheDocument();
     expect(screen.getByText(/选择图片上传/)).toBeInTheDocument();
+    expect(screen.getByText(/最大 3MB/)).toBeInTheDocument();
 
     // 原智能体形象位置修改为【智能体类型】下拉勾选
     expect(screen.getAllByText("智能体类型").length).toBeGreaterThanOrEqual(1);

@@ -220,7 +220,10 @@ export function BotConfigPage() {
       .map((s) => s.trim())
       .filter(Boolean);
 
-    // 核心约束：新增提交后插入列表且状态为禁用；编辑提交后更新记录且状态为禁用
+    const nowStr = new Date().toISOString().replace("T", " ").slice(0, 19);
+    const keepEnabled = editingAgent ? Boolean(editingAgent.is_enabled) : false;
+
+    // 核心约束：新增提交后插入列表且状态为禁用；编辑提交时若原状态为启用则保持启用不变，并记录更新时间
     const profileToSave: BotAgentProfile = {
       ...agentForm,
       name: trimmedName,
@@ -228,8 +231,12 @@ export function BotConfigPage() {
       description: trimmedDesc,
       skills: skillsList,
       product_lines: agentForm.product_lines.length > 0 ? agentForm.product_lines : ["全部"],
-      source_channels: agentForm.source_channels && agentForm.source_channels.length > 0 ? agentForm.source_channels : ["全部"],
-      is_enabled: false,
+      source_channels:
+        agentForm.source_channels && agentForm.source_channels.length > 0
+          ? agentForm.source_channels
+          : ["全部"],
+      is_enabled: keepEnabled,
+      updated_at: nowStr,
     };
 
     let newAgents: BotAgentProfile[];
@@ -258,7 +265,15 @@ export function BotConfigPage() {
       return;
     }
     setDrawerOpen(false);
-    showToast(editingAgent ? "智能体更新成功，状态已置为禁用" : "新增智能体成功，状态已置为禁用");
+    if (editingAgent) {
+      showToast(
+        keepEnabled
+          ? "智能体更新成功，状态保持启用"
+          : "智能体更新成功，状态已置为禁用"
+      );
+    } else {
+      showToast("新增智能体成功，状态已置为禁用");
+    }
   };
 
   // 4. 【启用】按钮：勾选禁用的智能体，点击启用，更新智能体状态为启用
@@ -464,7 +479,7 @@ export function BotConfigPage() {
             <button
               type="button"
               onClick={handleOpenCreateAgent}
-              className="h-[25px] rounded-[5px] text-[12px] font-medium flex items-center justify-center gap-1 transition cursor-pointer select-none bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:border-slate-400 shadow-2xs px-2"
+              className="h-[25px] rounded-[5px] text-[12px] font-medium flex items-center justify-center gap-1 transition cursor-pointer select-none bg-[rgb(44,103,202)] text-[rgb(255,255,255)] text-white hover:opacity-90 shadow-2xs px-2"
             >
               <span>+</span>
               <span>新增agent</span>
@@ -473,7 +488,7 @@ export function BotConfigPage() {
             <button
               type="button"
               onClick={handleBatchEnable}
-              className="h-[25px] rounded-[5px] text-[12px] font-medium flex items-center justify-center gap-1 transition cursor-pointer select-none bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:border-slate-400 shadow-2xs px-2"
+              className="h-[25px] rounded-[5px] text-[12px] font-medium flex items-center justify-center gap-1 transition cursor-pointer select-none bg-[rgb(44,103,202)] text-[rgb(255,255,255)] text-white hover:opacity-90 shadow-2xs px-2"
             >
               <span>✓</span>
               <span>启用</span>
@@ -482,7 +497,7 @@ export function BotConfigPage() {
             <button
               type="button"
               onClick={handleBatchDisable}
-              className="h-[25px] rounded-[5px] text-[12px] font-medium flex items-center justify-center gap-1 transition cursor-pointer select-none bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:border-slate-400 shadow-2xs px-2"
+              className="h-[25px] rounded-[5px] text-[12px] font-medium flex items-center justify-center gap-1 transition cursor-pointer select-none bg-[rgb(44,103,202)] text-[rgb(255,255,255)] text-white hover:opacity-90 shadow-2xs px-2"
             >
               <span>⏸</span>
               <span>禁用</span>
@@ -491,7 +506,7 @@ export function BotConfigPage() {
             <button
               type="button"
               onClick={handleBatchDelete}
-              className="h-[25px] rounded-[5px] text-[12px] font-medium flex items-center justify-center gap-1 transition cursor-pointer select-none bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:border-slate-400 shadow-2xs px-2"
+              className="h-[25px] rounded-[5px] text-[12px] font-medium flex items-center justify-center gap-1 transition cursor-pointer select-none bg-[rgb(44,103,202)] text-[rgb(255,255,255)] text-white hover:opacity-90 shadow-2xs px-2"
             >
               <span>✕</span>
               <span>删除</span>
@@ -1103,8 +1118,8 @@ export function BotConfigPage() {
                             onChange={(e) => {
                               const file = e.target.files?.[0];
                               if (file) {
-                                if (file.size > 2 * 1024 * 1024) {
-                                  alert("图片附件大小不能超过 2MB");
+                                if (file.size > 3 * 1024 * 1024) {
+                                  alert("图片附件大小不能超过 3MB");
                                   return;
                                 }
                                 const reader = new FileReader();
@@ -1127,7 +1142,7 @@ export function BotConfigPage() {
                           重置默认
                         </button>
                       </div>
-                      <p className="text-[11px] text-slate-400">支持常见图片格式附件，最大 2MB</p>
+                      <p className="text-[11px] text-slate-400">支持常见图片格式附件，最大 3MB</p>
                     </div>
                   </div>
                 </div>

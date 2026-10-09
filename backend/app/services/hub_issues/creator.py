@@ -121,7 +121,27 @@ def ensure_hub_issue_for_ticket(
     # ticket 并 upsert_catalog 自动建目录，保持 ticket/hub 一致。
     eff_plc = product_line_code if product_line_code is not None else ticket.product_line_code
     eff_module = module if module is not None else ticket.module
-    if product_line_code is not None or module is not None:
+    if ticket.source_code == "feishu_ai":
+        from app.services.ingest.feishu_ai_ingester import (
+            resolve_feishu_product_and_module,
+            resolve_feishu_rd_owner,
+        )
+
+        eff_plc, eff_src_prod, eff_module = resolve_feishu_product_and_module(
+            db, eff_plc, eff_module
+        )
+        if eff_plc:
+            ticket.product_line_code = eff_plc
+            ticket.source_product_name = eff_src_prod or eff_plc
+            ticket.ksm_reporter_product_line = eff_src_prod or eff_plc
+        if eff_module:
+            ticket.module = eff_module
+            ticket.ksm_reporter_module = eff_module
+        if eff_plc and eff_module:
+            rd_owner = resolve_feishu_rd_owner(db, eff_plc, eff_module)
+            if rd_owner is not None:
+                ticket.assigned_user_id = rd_owner.id
+    elif product_line_code is not None or module is not None:
         from app.services.ingest.catalog_upsert import upsert_catalog
 
         upsert_catalog(db, product_line_code=eff_plc, module=eff_module)
@@ -147,7 +167,12 @@ def ensure_hub_issue_for_ticket(
         occurrence_count=1,
     )
     initial_draft = (ticket.source_payload or {}).get("_ai_answer_draft")
-    if isinstance(initial_draft, str) and initial_draft.strip() and ticket.status != "closed":
+    if (
+        issue_type == "Operation"
+        and isinstance(initial_draft, str)
+        and initial_draft.strip()
+        and ticket.status != "closed"
+    ):
         hub.reply_content = initial_draft
         hub.reply_is_draft = True
         hub.reply_authored_by = "agent:ai_cs:draft"
@@ -198,7 +223,11 @@ def ensure_hub_issue_for_ticket(
     dispatch_missed = False
     if issue_type == "Operation":
         hub.op_handler_user_id = ticket.handler_user_id
-    elif issue_type in ("Bug_fix", "Demand") and ticket.handler_user_id is None:
+    elif (
+        issue_type in ("Bug_fix", "Demand")
+        and ticket.handler_user_id is None
+        and ticket.source_code != "feishu_ai"
+    ):
         dispatch_missed = True
 
     db.add(
@@ -236,6 +265,7 @@ def ensure_hub_issue_for_ticket(
         dispatch_missed=dispatch_missed,
         module_owner_resolved=(
             peek_module_owner(db, hub.product_line_code, hub.module) is not None
+            or (ticket.source_code == "feishu_ai" and ticket.assigned_user_id is not None)
         ),
     )
 
@@ -247,8 +277,12 @@ def create_hub_issue_for_ticket_auto(ticket_id: int) -> HubIssueResult | None:
     from app.services.hub_issues.linear_push import push_hub_issue_to_linear
 
     db = make_session()
+    is_feishu_with_rd_owner = False
     try:
         result = ensure_hub_issue_for_ticket(ticket_id, created_by="agent:hub_issue_auto", db=db)
+        t_row = db.get(Ticket, ticket_id)
+        if t_row is not None and t_row.source_code == "feishu_ai" and t_row.assigned_user_id is not None:
+            is_feishu_with_rd_owner = True
     except HubIssueCreateError as e:
         db.rollback()
         logger.warning("hub_issue_auto_skipped", ticket_id=ticket_id, error=str(e))
@@ -261,6 +295,18 @@ def create_hub_issue_for_ticket_auto(ticket_id: int) -> HubIssueResult | None:
         db.close()
 
     if not result.created:
+        return result
+
+    if is_feishu_with_rd_owner and result.type in ("Bug_fix", "Demand"):
+        push_hub_issue_to_linear(result.hub_issue_id)
+        db2 = make_session()
+        try:
+            t2 = db2.get(Ticket, ticket_id)
+            if t2 is not None and t2.process_stage != "产研处理":
+                t2.process_stage = "产研处理"
+                db2.commit()
+        finally:
+            db2.close()
         return result
 
     settings = get_settings()

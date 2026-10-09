@@ -4,6 +4,9 @@ export interface TaskNoteItem {
   title: string;
   solution: string;
   type?: string;
+  status?: string;
+  isDevTransferred?: boolean;
+  ticketContent?: string;
 }
 
 /** 判断任务是否为需求或Bug类（研发类任务） */
@@ -19,57 +22,145 @@ export function isDemandOrBug(type?: string | null): boolean {
   );
 }
 
-/** 获取任务类型展示标签：需求 / BUG / 应用类 */
+/** 获取任务类型展示标签：需求 / bug / 应用类 */
 export function getTaskTypeLabel(type?: string | null): string {
   if (!type) return "应用类";
   const t = type.toLowerCase();
   if (t === "demand" || t.includes("需求")) return "需求";
-  if (t === "bug_fix" || t === "bug" || t.includes("bug")) return "BUG";
+  if (t === "bug_fix" || t === "bug" || t.includes("bug")) return "bug";
   return "应用类";
 }
 
-/** 拆解研发类任务解决方案中的【沟通记录】与【研发反馈】部分 */
-export function extractDevSolutionParts(solutionText: string | null | undefined): {
+/**
+ * 清理子任务标题，确保仅保留单行纯净的任务说明，
+ * 彻底剥离多行标题中可能附带的客户原始问题描述、AI 诊断提示词头或宿主上下文。
+ */
+export function sanitizeTaskTitle(
+  rawTitle?: string | null,
+  ticketContent?: string | null,
+): string {
+  if (!rawTitle) return "";
+  let text = stripHtmlToCleanText(rawTitle).trim();
+  if (!text) return "";
+
+  // 若包含 AI 提示词模板中的「标题：xxx」，优先提取标题行
+  const titleMatch = text.match(/(?:^|\n)\s*标题[：:]\s*([^\n]+)/);
+  if (titleMatch && titleMatch[1]?.trim()) {
+    text = titleMatch[1].trim();
+  } else {
+    // 否则取第一个非提示词头的有效单行，剥离第2行及之后的原始问题正文/宿主上下文
+    const lines = text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    const validLine = lines.find(
+      (l) =>
+        !/^请对下面这张工单/.test(l) &&
+        !/^你当前处于/.test(l) &&
+        !/^#+\s*工单/.test(l) &&
+        !/^客户描述[：:]?$/.test(l) &&
+        !/^原始问题描述[：:]?$/.test(l),
+    );
+    text = validLine || lines[0] || "";
+  }
+
+  // 剥离可能已带有的类型前缀（避免重复拼接）
+  text = text.replace(/^\s*问题\d+[：:]\s*【[^】]+】-[^-]+-/, "");
+  text = text.replace(/^\s*【(?:需求|BUG|bug|Bug|应用类)】-?/, "");
+  // 剥离内联（宿主上下文：...）后缀
+  text = text.replace(/\s*[（(]宿主上下文[：:][\s\S]*$/, "");
+
+  if (ticketContent && ticketContent.trim()) {
+    const rawTicket = ticketContent.trim();
+    if (text.length > rawTicket.length && text.endsWith(rawTicket)) {
+      text = text.slice(0, text.length - rawTicket.length).trim();
+    }
+  }
+
+  return text.trim();
+}
+
+/** 拆解研发类任务解决方案中的【沟通记录】与【产研反馈】/【研发反馈】部分，并过滤混入的客户原始问题 */
+export function extractDevSolutionParts(
+  solutionText: string | null | undefined,
+  ticketContent?: string | null,
+): {
   communicationNote: string;
   feedbackNote: string;
 } {
   if (!solutionText) return { communicationNote: "", feedbackNote: "" };
-  let text = solutionText.trim();
+  let text = stripHtmlToCleanText(solutionText).trim();
 
   // 递归剥离可能残留的多任务外层包装（如 问题1:【需求】...）
   text = text.replace(/^工单包含问题数[量]?[：:]?\s*\d+\s*/i, "");
   text = text.replace(/^问题\d+[：:]\s*【[^】]+】[^\n]*\n?/g, "");
 
-  // 剥离可能存在的首行标题（例如 【需求】-任务说明 或 【BUG】-任务说明）
+  // 剥离可能存在的首行标题（例如 【需求】-任务说明 或 【bug】-任务说明）及紧随其后的原始问题行
   const lines = text.split("\n");
   if (lines.length > 0 && /^\s*【(需求|BUG|bug|Bug|应用类)】-?/.test(lines[0])) {
     lines.shift();
+    while (
+      lines.length > 0 &&
+      !/^\s*【?(沟通记录|产研反馈|研发反馈|解决方案)】?/.test(lines[0]) &&
+      lines.some((l) => /^\s*【?(沟通记录|产研反馈|研发反馈)】?/.test(l))
+    ) {
+      lines.shift();
+    }
     text = lines.join("\n").trim();
   }
 
+  // 剥离可能混入的 Markdown 原始问题描述段落或客户描述段落
+  text = text.replace(/\n*###\s*📝?\s*原始问题描述[\s\S]*$/i, "").trim();
+  text = text.replace(/\n*##\s*工单[\s\S]*$/i, "").trim();
+  text = text.replace(/\n*[（(]宿主上下文[：:][\s\S]*$/i, "").trim();
+
   const commIndex = text.indexOf("【沟通记录】");
-  const fbIndex = text.indexOf("【研发反馈】");
+  let fbIndex = text.indexOf("【产研反馈】");
+  let fbTagLen = "【产研反馈】".length;
+  if (fbIndex === -1) {
+    fbIndex = text.indexOf("【研发反馈】");
+    fbTagLen = "【研发反馈】".length;
+  }
+
+  let comm = "";
+  let fb = "";
 
   if (commIndex !== -1 || fbIndex !== -1) {
-    let comm = "";
-    let fb = "";
     if (commIndex !== -1 && fbIndex !== -1) {
       if (commIndex < fbIndex) {
         comm = text.slice(commIndex + "【沟通记录】".length, fbIndex).trim();
-        fb = text.slice(fbIndex + "【研发反馈】".length).trim();
+        fb = text.slice(fbIndex + fbTagLen).trim();
       } else {
-        fb = text.slice(fbIndex + "【研发反馈】".length, commIndex).trim();
+        fb = text.slice(fbIndex + fbTagLen, commIndex).trim();
         comm = text.slice(commIndex + "【沟通记录】".length).trim();
       }
     } else if (commIndex !== -1) {
       comm = text.slice(commIndex + "【沟通记录】".length).trim();
     } else if (fbIndex !== -1) {
-      fb = text.slice(fbIndex + "【研发反馈】".length).trim();
+      fb = text.slice(fbIndex + fbTagLen).trim();
     }
-    return { communicationNote: comm, feedbackNote: fb };
+  } else {
+    comm = text;
   }
 
-  return { communicationNote: text, feedbackNote: "" };
+  comm = comm.replace(/^[：:]\s*/, "").trim();
+  fb = fb.replace(/^[：:]\s*/, "").trim();
+
+  // 若沟通记录中混入了客户原始问题内容，将其剔除
+  if (ticketContent && ticketContent.trim()) {
+    const cleanTicket = stripHtmlToCleanText(ticketContent).trim();
+    if (cleanTicket) {
+      if (comm === cleanTicket) {
+        comm = "";
+      } else if (comm.startsWith(cleanTicket + "\n")) {
+        comm = comm.slice(cleanTicket.length).trim();
+      } else if (comm.endsWith("\n" + cleanTicket)) {
+        comm = comm.slice(0, comm.length - cleanTicket.length).trim();
+      }
+    }
+  }
+
+  return { communicationNote: comm, feedbackNote: fb };
 }
 
 /** 判断字段是否为空或系统占位符（如 "---", "--", "-", "——", "—", "无", "暂无", "null", "undefined"） */
@@ -108,20 +199,11 @@ export function isPlaceholderWord(val?: string | null): boolean {
     s === "转产研上下文" ||
     s === "录入说明" ||
     s === "请录入" ||
-    s === "请填写"
+    s === "请填写" ||
+    s === "产研分析中暂无回复"
   );
 }
 
-/**
- * 判断解决方案内容是否为真实有效的值（过滤系统默认占位符与空模板）
- * 任务解决方案系统默认的内容不是值，例如：
- * - 空串、空格
- * - ---, --, -, 无, 暂无, 转产研上下文, 录入说明
- * - 【沟通记录】, 【沟通记录】---, 【沟通记录】无, 【沟通记录】转产研上下文
- * - 【研发反馈】, 【研发反馈】---, 【研发反馈】无
- * - 【沟通记录】\n【研发反馈】（两部分皆为空或占位符）
- * - 【解决方案】---, 【解决方案】
- */
 /**
  * 将富文本内容转换为纯净文本（剥离 HTML 标签及内联样式，如 <span style="..."> 等，保留正常换行与段落）
  */
@@ -200,13 +282,6 @@ export function stripHtmlToCleanText(html: string | null | undefined): string {
 
 /**
  * 判断解决方案内容是否为真实有效的值（过滤系统默认占位符与空模板）
- * 任务解决方案系统默认的内容不是值，例如：
- * - 空串、空格
- * - ---, --, -, 无, 暂无, 转产研上下文, 录入说明
- * - 【沟通记录】, 【沟通记录】---, 【沟通记录】无, 【沟通记录】转产研上下文
- * - 【研发反馈】, 【研发反馈】---, 【研发反馈】无
- * - 【沟通记录】\n【研发反馈】（两部分皆为空或占位符）
- * - 【解决方案】---, 【解决方案】
  */
 export function isValidSolution(sol?: string | null): boolean {
   if (!sol) return false;
@@ -214,8 +289,12 @@ export function isValidSolution(sol?: string | null): boolean {
   const raw = clean.trim();
   if (!raw || isPlaceholderWord(raw)) return false;
 
-  // 研发类：如果包含【沟通记录】或【研发反馈】标签，拆解剥离后检查实际文字
-  if (raw.includes("【沟通记录】") || raw.includes("【研发反馈】")) {
+  // 研发类：如果包含【沟通记录】或【产研反馈】/【研发反馈】标签，拆解剥离后检查实际文字
+  if (
+    raw.includes("【沟通记录】") ||
+    raw.includes("【产研反馈】") ||
+    raw.includes("【研发反馈】")
+  ) {
     const { communicationNote, feedbackNote } = extractDevSolutionParts(raw);
     const commValid = !isPlaceholderWord(communicationNote);
     const fbValid = !isPlaceholderWord(feedbackNote);
@@ -255,6 +334,35 @@ export function extractPureSolution(text: string | null | undefined): string {
   return cur;
 }
 
+/** 判断任务是否处于已转产研/已退回/已完成状态（需要展示【产研反馈】行） */
+function shouldShowDevFeedback(t: TaskNoteItem, feedbackNote: string): boolean {
+  if (feedbackNote && feedbackNote.trim()) return true;
+  if (t.isDevTransferred) return true;
+  const st = (t.status || "").toLowerCase();
+  return (
+    st === "processing" ||
+    st === "in_progress" ||
+    st === "dev_returned" ||
+    st === "returned" ||
+    st === "answered" ||
+    st === "released" ||
+    st === "resolved"
+  );
+}
+
+/** 判断文本是否为需求/Bug类的模板内容（含【沟通记录】【产研反馈】【研发反馈】或【需求】/【bug】头） */
+export function isDevTemplateText(text?: string | null): boolean {
+  if (!text) return false;
+  const clean = stripHtmlToCleanText(text).trim();
+  if (!clean) return false;
+  return (
+    clean.includes("【沟通记录】") ||
+    clean.includes("【产研反馈】") ||
+    clean.includes("【研发反馈】") ||
+    /^\s*【(?:需求|BUG|bug|Bug)】-?/.test(clean)
+  );
+}
+
 /** 格式化生成工单处理说明 */
 export function formatTasksReplyNote(tasks: TaskNoteItem[]): string {
   if (tasks.length === 0) return "";
@@ -264,21 +372,29 @@ export function formatTasksReplyNote(tasks: TaskNoteItem[]): string {
     const t = tasks[0];
     const isDev = isDemandOrBug(t.type);
     if (!isDev) {
-      // 应用类：处理说明展示逻辑不变，直接展示解决方案
+      // 应用类：无有效解决方案或残留了产研模板内容时，清空不显示；有有效方案则直接展示解决方案
+      if (!isValidSolution(t.solution) || isDevTemplateText(t.solution)) {
+        return "";
+      }
       const pureSol = extractPureSolution(t.solution);
       return pureSol && pureSol.trim() ? pureSol.trim() : (t.solution?.trim() || "");
     }
 
     // 需求或Bug类展示模板：
-    // 【需求】-任务说明
+    // 【bug】-任务说明（严禁附带客户原始问题）
     // 【沟通记录】沟通记录内容
-    // 【研发反馈】研发反馈内容（若有）
+    // 【产研反馈】：产研反馈内容（转产研后无回复显示“产研分析中暂无回复”）
     const typeLabel = getTaskTypeLabel(t.type);
-    const { communicationNote, feedbackNote } = extractDevSolutionParts(t.solution);
-    const lines = [`【${typeLabel}】-${t.title || "---"}`];
+    const cleanTitle = sanitizeTaskTitle(t.title, t.ticketContent) || "---";
+    const { communicationNote, feedbackNote } = extractDevSolutionParts(
+      t.solution,
+      t.ticketContent,
+    );
+    const lines = [`【${typeLabel}】-${cleanTitle}`];
     lines.push(`【沟通记录】${communicationNote || ""}`);
-    if (feedbackNote && feedbackNote.trim()) {
-      lines.push(`【研发反馈】${feedbackNote.trim()}`);
+    if (shouldShowDevFeedback(t, feedbackNote)) {
+      const fbText = feedbackNote && feedbackNote.trim() ? feedbackNote.trim() : "产研分析中暂无回复";
+      lines.push(`【产研反馈】：${fbText}`);
     }
     return lines.join("\n");
   }
@@ -287,21 +403,29 @@ export function formatTasksReplyNote(tasks: TaskNoteItem[]): string {
   const lines: string[] = [`工单包含问题数量${tasks.length}`];
   tasks.forEach((t, idx) => {
     const code = t.code || "---";
-    const title = t.title || "---";
+    const cleanTitle = sanitizeTaskTitle(t.title, t.ticketContent) || "---";
     const isDev = isDemandOrBug(t.type);
     const typeLabel = getTaskTypeLabel(t.type);
 
     if (isDev) {
-      const { communicationNote, feedbackNote } = extractDevSolutionParts(t.solution);
-      lines.push(`问题${idx + 1}:【${typeLabel}】-${code}-${title}`);
+      const { communicationNote, feedbackNote } = extractDevSolutionParts(
+        t.solution,
+        t.ticketContent,
+      );
+      lines.push(`问题${idx + 1}:【${typeLabel}】-${code}-${cleanTitle}`);
       lines.push(`【沟通记录】${communicationNote || "---"}`);
-      if (feedbackNote && feedbackNote.trim()) {
-        lines.push(`【研发反馈】${feedbackNote.trim()}`);
+      if (shouldShowDevFeedback(t, feedbackNote)) {
+        const fbText =
+          feedbackNote && feedbackNote.trim() ? feedbackNote.trim() : "产研分析中暂无回复";
+        lines.push(`【产研反馈】：${fbText}`);
       }
     } else {
-      const pureSol = extractPureSolution(t.solution);
+      const pureSol =
+        !isValidSolution(t.solution) || isDevTemplateText(t.solution)
+          ? ""
+          : extractPureSolution(t.solution);
       const sol = pureSol && pureSol.trim() ? pureSol.trim() : "---";
-      lines.push(`问题${idx + 1}:【应用类】-${code}-${title}`);
+      lines.push(`问题${idx + 1}:【应用类】-${code}-${cleanTitle}`);
       lines.push(`【解决方案】${sol}`);
     }
 
@@ -322,6 +446,9 @@ export function parseReplyNoteSolutions(
   if (!content || !content.trim() || tasks.length === 0) return result;
 
   const trimmed = content.trim();
+  const usesLegacyFeedbackTag =
+    trimmed.includes("【研发反馈】") && !trimmed.includes("【产研反馈】");
+  const fbPrefix = usesLegacyFeedbackTag ? "【研发反馈】" : "【产研反馈】：";
 
   // 单任务回写解析
   if (tasks.length === 1) {
@@ -331,7 +458,7 @@ export function parseReplyNoteSolutions(
       const cleanComm = isPlaceholderWord(communicationNote) ? "" : communicationNote;
       const cleanFb = isPlaceholderWord(feedbackNote) ? "" : feedbackNote;
       if (cleanFb) {
-        result[t.key] = `【沟通记录】${cleanComm}\n【研发反馈】${cleanFb}`;
+        result[t.key] = `【沟通记录】${cleanComm}\n${fbPrefix}${cleanFb}`;
       } else {
         result[t.key] = cleanComm;
       }
@@ -362,7 +489,7 @@ export function parseReplyNoteSolutions(
         const cleanComm = isPlaceholderWord(comm) ? "" : comm;
         const cleanFb = isPlaceholderWord(fb) ? "" : fb;
         if (cleanFb) {
-          result[taskKey] = `【沟通记录】${cleanComm}\n【研发反馈】${cleanFb}`;
+          result[taskKey] = `【沟通记录】${cleanComm}\n${fbPrefix}${cleanFb}`;
         } else if (cleanComm) {
           result[taskKey] = cleanComm;
         } else if (solLines.length > 0) {
@@ -415,7 +542,7 @@ export function parseReplyNoteSolutions(
       continue;
     }
 
-    const matchFeedback = line.match(/^\s*【?研发反馈】?[:：]?(.*)$/);
+    const matchFeedback = line.match(/^\s*【?(?:产研反馈|研发反馈)】?[:：]?(.*)$/);
     if (matchFeedback) {
       currentMode = "feedback";
       fbLines = [matchFeedback[1].trim()];
@@ -504,12 +631,12 @@ export function renderFormattedReplyNote(content: string) {
             </div>
           );
         }
-        const matchFeedback = line.match(/^(\s*【?研发反馈】?[:：]?)(.*)$/);
+        const matchFeedback = line.match(/^(\s*【?(?:产研反馈|研发反馈)】?[:：]?)(.*)$/);
         if (matchFeedback) {
           return (
             <div key={idx}>
-              <strong className="font-bold text-[#6085e7]">{matchFeedback[1]}</strong>
-              <span className="text-slate-800">{matchFeedback[2]}</span>
+              <strong className="font-bold text-slate-900">{matchFeedback[1]}</strong>
+              <span>{matchFeedback[2]}</span>
             </div>
           );
         }

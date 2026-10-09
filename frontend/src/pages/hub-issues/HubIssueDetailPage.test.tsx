@@ -120,4 +120,46 @@ describe("HubIssueDetailPage 处理说明双按钮", () => {
     });
     expect(await screen.findByText(/AI 生成的处理建议/)).toBeInTheDocument();
   });
+
+  it("展示16号加粗标题、只显示产品名称与负责人姓名、5列关联工单表格及300px高13号处理说明框", async () => {
+    renderDetail({
+      short_code: "HUB-000088",
+      title: "数电发票红冲报错",
+      product_name: "发票云标准版",
+      product_line_code: "PL-001",
+      responsible_user_name: "李四",
+      op_handler: "李四#12",
+      reply_content: "已修复该问题",
+      linked_tickets: [
+        {
+          id: 10,
+          short_code: "TKT-000010",
+          source_code: "ksm",
+          source_ticket_id: "KSM-999",
+          source_ticket_number: "NO-999",
+          title: "客户反馈红冲失败标题",
+          body: "客户在进行数电红冲操作时提示税局接口超时问题描述",
+          status: "processing",
+        },
+      ],
+    });
+
+    const heading = await screen.findByRole("heading", { name: /HUB-000088/ });
+    expect(heading).toHaveClass("text-[16px]", "font-bold", "text-[rgb(43,42,38)]");
+
+    // 规范化正文和旧提示文字已移除
+    expect(screen.queryByText("规范化正文")).not.toBeInTheDocument();
+    expect(screen.queryByText(/提交答复：发给客户并置处理完成/)).not.toBeInTheDocument();
+
+    // 关联工单 5 列表格表头
+    expect(screen.getByRole("columnheader", { name: "序号" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "工单编号" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "来源工单编号" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "标题" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "问题描述" })).toBeInTheDocument();
+
+    // 处理说明内容框高度 300px，字号 13px
+    const replyBox = screen.getByDisplayValue("已修复该问题");
+    expect(replyBox).toHaveClass("h-[300px]", "text-[13px]");
+  });
 });

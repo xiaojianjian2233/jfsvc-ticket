@@ -6,6 +6,8 @@ import {
   parseReplyNoteSolutions,
   stripHtmlToCleanText,
   extractPureSolution,
+  formatTasksReplyNote,
+  isDevTemplateText,
 } from "./replyNoteUtils";
 
 describe("replyNoteUtils 校验与解析工具函数", () => {
@@ -49,7 +51,7 @@ describe("replyNoteUtils 校验与解析工具函数", () => {
       expect(isValidSolution("")).toBe(false);
       expect(isValidSolution("   \n  ")).toBe(false);
       expect(isValidSolution("---")).toBe(false);
-      expect(isValidSolution("--")).toBe(false);
+      expect(isPlaceholderWord("--")).toBe(true);
       expect(isValidSolution("-")).toBe(false);
       expect(isValidSolution("无")).toBe(false);
       expect(isValidSolution("暂无")).toBe(false);
@@ -159,6 +161,36 @@ describe("replyNoteUtils 校验与解析工具函数", () => {
       const raw =
         '【解决方案】<span style="color: rgb(0,0,0); font-size: 14px;">经沟通已解决客户开票问题</span>';
       expect(extractPureSolution(raw)).toBe("经沟通已解决客户开票问题");
+    });
+  });
+
+  describe("应用类任务处理说明模板（清空不显示残留产研模板）", () => {
+    it("单任务修改为应用类时，无方案或残留产研模板均返回空字符串（清空不显示）", () => {
+      expect(isDevTemplateText("【bug】-任务说明\n【沟通记录】已复现\n【产研反馈】：产研分析中暂无回复")).toBe(true);
+      expect(isDevTemplateText("【需求】-任务说明\n【沟通记录】")).toBe(true);
+      expect(isDevTemplateText("普通应用类排查方案")).toBe(false);
+
+      expect(
+        formatTasksReplyNote([
+          {
+            code: "HUB-000101",
+            title: "发票开具失败",
+            type: "Operation",
+            solution: "",
+          },
+        ]),
+      ).toBe("");
+
+      expect(
+        formatTasksReplyNote([
+          {
+            code: "HUB-000101",
+            title: "发票开具失败",
+            type: "Operation",
+            solution: "【bug】-发票开具失败\n【沟通记录】已复现\n【产研反馈】：产研分析中暂无回复",
+          },
+        ]),
+      ).toBe("");
     });
   });
 });

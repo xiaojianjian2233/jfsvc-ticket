@@ -225,7 +225,7 @@ describe("Customer Client Online Support H5 / Web App", () => {
 
       // Wait for lookup
       await waitFor(() => {
-        expect(screen.getByText(/后端查询咨询手机号关联咨询企业有/)).toBeInTheDocument();
+        expect(screen.getByText(/根据咨询手机号关联咨询企业/)).toBeInTheDocument();
         expect(screen.getByText("2")).toBeInTheDocument();
         expect(screen.getByText(/下拉按钮查看并选择历史企业发起咨询/)).toBeInTheDocument();
       });
@@ -275,7 +275,7 @@ describe("Customer Client Online Support H5 / Web App", () => {
       fireEvent.change(phoneInput, { target: { value: "13912345678" } });
 
       await waitFor(() => {
-        expect(screen.getByText(/后端查询咨询手机号关联咨询企业有/)).toBeInTheDocument();
+        expect(screen.getByText(/根据咨询手机号关联咨询企业/)).toBeInTheDocument();
         expect(screen.getByText("1")).toBeInTheDocument();
         expect(screen.getByText(/下拉按钮查看并选择历史企业发起咨询/)).toBeInTheDocument();
       });
@@ -1451,6 +1451,63 @@ describe("Customer Client Online Support H5 / Web App", () => {
       const closeViewModalBtn = screen.getByRole("button", { name: "关闭" });
       fireEvent.click(closeViewModalBtn);
       expect(screen.queryByText("提单详情")).not.toBeInTheDocument();
+    });
+
+    it("only displays tickets where reporter_mobile equals consulting customer phone and filters out mismatched ones", async () => {
+      vi.spyOn(receptionApi, "clientFetchTickets").mockResolvedValue([
+        {
+          id: 301,
+          short_code: "TKT-00301",
+          ticket_number: "R20261009-0301",
+          source_code: "ksm",
+          source_name: "KSM",
+          handler_name: "苗一琳",
+          process_stage: "服务处理",
+          status: "processing",
+          client_category: "processing",
+          title: "本人手机号提单记录",
+          body: "提单人手机号等于咨询人手机号",
+          created_at: "2026-10-09 10:00",
+          hours_since_created: 2.0,
+          reporter_mobile: "13800001111",
+        },
+        {
+          id: 302,
+          short_code: "TKT-00302",
+          ticket_number: "R20261009-0302",
+          source_code: "ksm",
+          source_name: "KSM",
+          handler_name: "张工",
+          process_stage: "服务处理",
+          status: "processing",
+          client_category: "processing",
+          title: "他人手机号提单记录",
+          body: "提单人手机号不等于咨询人手机号",
+          created_at: "2026-10-09 09:00",
+          hours_since_created: 3.0,
+          reporter_mobile: "13999998888",
+        },
+      ]);
+
+      render(
+        <CustomerChatWorkbenchPage
+          profile={mockProfile}
+          initialSession={null}
+          onBackToLogin={vi.fn()}
+        />
+      );
+
+      await waitFor(() => {
+        expect(receptionApi.clientFetchTickets).toHaveBeenCalledWith("13800001111");
+      });
+
+      const ticketTab = screen.getByRole("button", { name: /工单信息/ });
+      fireEvent.click(ticketTab);
+
+      await waitFor(() => {
+        expect(screen.getByText("R20261009-0301")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("R20261009-0302")).not.toBeInTheDocument();
     });
   });
 

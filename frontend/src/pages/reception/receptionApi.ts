@@ -152,6 +152,7 @@ export interface BotAgentProfile {
   temperature: number;
   is_enabled: boolean;
   created_at: string;
+  updated_at?: string;
   created_by: string;
 }
 
@@ -614,12 +615,14 @@ export async function fetchEligibleUsers(): Promise<EligibleUser[]> {
       const uRes = await httpGet<any>("/api/admin/users");
       const list = Array.isArray(uRes) ? uRes : uRes?.items || uRes?.users || [];
       if (list.length) {
-        return list.map((u: any) => ({
-          id: u.id,
-          name: u.name,
-          email: u.email,
-          role: u.role,
-        }));
+        return list
+          .filter((u: any) => u.is_active !== false && !u.deleted_at)
+          .map((u: any) => ({
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            role: u.role,
+          }));
       }
     } catch {
       // ignore
@@ -2278,11 +2281,50 @@ export async function clientSubmitTicket(
   sessionId: string,
   payload: ClientSubmitTicketPayload
 ): Promise<{ ok: boolean; ticket_short_code: string; status: string; title: string }> {
+  const recordSubmittedTicketForPhone = (ticketCode: string, ticketId?: number) => {
+    const targetPhone = (payload.contact_phone || "").trim();
+    if (!targetPhone) return;
+    const nowDisplay = new Date().toISOString().replace("T", " ").slice(0, 16);
+    const existing = getLocalClientTickets(targetPhone);
+    if (!existing.some((t) => t.short_code === ticketCode || t.ticket_number === ticketCode)) {
+      const newTicket: ClientTicketItem = {
+        id: ticketId || Date.now(),
+        short_code: ticketCode,
+        ticket_number: ticketCode,
+        source_code: "online_reception",
+        source_name: "在线接待",
+        handler_name: "客服处理人",
+        process_stage: "服务处理",
+        status: "processing",
+        client_category: "processing",
+        title: payload.title,
+        body: payload.description,
+        created_at: nowDisplay,
+        hours_since_created: 0.1,
+        reply_content: null,
+        reply_at: null,
+        reply_by: null,
+        contact_name: payload.contact_name || targetPhone,
+        contact_phone: targetPhone,
+        reporter_name: payload.contact_name || targetPhone,
+        reporter_mobile: targetPhone,
+      };
+      saveLocalClientTickets([newTicket, ...existing], targetPhone);
+    }
+  };
+
   try {
-    return await httpPost<{ ok: boolean; ticket_short_code: string; status: string; title: string }>(
-      `/api/reception/client/sessions/${sessionId}/submit-ticket`,
-      payload
-    );
+    const res = await httpPost<{
+      ok: boolean;
+      ticket_id?: number;
+      ticket_short_code: string;
+      status: string;
+      title: string;
+    }>(`/api/reception/client/sessions/${sessionId}/submit-ticket`, payload);
+    if (res?.ticket_short_code) {
+      recordSubmittedTicketForPhone(res.ticket_short_code, res.ticket_id);
+    }
+    return res;
   } catch {
     const randomNum = Math.floor(10000 + Math.random() * 90000);
     const ticketCode = `TKT-AUTO-${randomNum}`;
@@ -2312,6 +2354,7 @@ export async function clientSubmitTicket(
     allMessages[sessionId] = list;
     setLocalStore("messages", allMessages);
 
+    recordSubmittedTicketForPhone(ticketCode);
     return { ok: true, ticket_short_code: ticketCode, status: "converted", title: payload.title };
   }
 }
@@ -2890,6 +2933,8 @@ export interface ClientTicketItem {
   category?: "processing" | "reviewing" | "closed";
   contact_name?: string;
   contact_phone?: string;
+  reporter_name?: string | null;
+  reporter_mobile?: string | null;
   description?: string;
   resolved_at?: string;
 }
@@ -2971,35 +3016,108 @@ export const SEED_CLIENT_TICKETS: ClientTicketItem[] = [
 
 const LOCAL_CLIENT_TICKETS_KEY = "ticket_hub_client_tickets_store";
 
-function getLocalClientTickets(): ClientTicketItem[] {
+function getLocalClientTickets(phone?: string): ClientTicketItem[] {
+  const targetPhone = (phone || "").trim();
+  if (!targetPhone) return [];
   try {
-    const raw = sessionStorage.getItem(LOCAL_CLIENT_TICKETS_KEY);
-    if (raw) return JSON.parse(raw);
+    const raw = sessionStorage.getItem(`${LOCAL_CLIENT_TICKETS_KEY}_${targetPhone}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((t: ClientTicketItem) => {
+          const repPhone = (t.reporter_mobile ?? t.contact_phone ?? "").trim();
+          return repPhone === targetPhone;
+        });
+      }
+    }
   } catch {
     // ignore
   }
-  return SEED_CLIENT_TICKETS;
+  return [];
 }
 
-function saveLocalClientTickets(list: ClientTicketItem[]): void {
+function saveLocalClientTickets(list: ClientTicketItem[], phone?: string): void {
+  const targetPhone = (phone || "").trim();
+  if (!targetPhone) return;
   try {
-    sessionStorage.setItem(LOCAL_CLIENT_TICKETS_KEY, JSON.stringify(list));
+    const filtered = list.filter((t) => {
+      const repPhone = (t.reporter_mobile ?? t.contact_phone ?? "").trim();
+      return repPhone === targetPhone;
+    });
+    sessionStorage.setItem(`${LOCAL_CLIENT_TICKETS_KEY}_${targetPhone}`, JSON.stringify(filtered));
   } catch {
     // ignore
   }
 }
 
 export async function clientFetchTickets(phone: string): Promise<ClientTicketItem[]> {
+  const targetPhone = (phone || "").trim();
+  if (!targetPhone) return [];
+
   try {
-    const res = await httpGet<ClientTicketItem[]>("/api/reception/client/tickets", { phone });
-    if (Array.isArray(res) && res.length > 0) {
-      saveLocalClientTickets(res);
-      return res;
+    const res = await httpGet<ClientTicketItem[]>("/api/reception/client/tickets", {
+      phone: targetPhone,
+    });
+    if (Array.isArray(res)) {
+      const verified: ClientTicketItem[] = [];
+      const needsDetailCheck: ClientTicketItem[] = [];
+
+      for (const item of res) {
+        if (item.reporter_mobile !== undefined) {
+          // 新版后端已直接返回提单人手机号 reporter_mobile，严格比对等于当前咨询人手机号
+          if ((item.reporter_mobile || "").trim() === targetPhone) {
+            verified.push(item);
+          }
+        } else if (item.contact_phone !== undefined) {
+          if ((item.contact_phone || "").trim() === targetPhone) {
+            verified.push({ ...item, reporter_mobile: targetPhone });
+          }
+        } else {
+          needsDetailCheck.push(item);
+        }
+      }
+
+      // 兼容本地连接未升级的远端后端（未返回 reporter_mobile 字段）：
+      // 通过工单详情/工单列表接口核验该工单在『工单列表』中的真实提单人手机号（reporter_mobile），
+      // 严禁展示提单人手机号不等于当前咨询人手机号的工单！
+      if (needsDetailCheck.length > 0) {
+        await Promise.all(
+          needsDetailCheck.map(async (item) => {
+            try {
+              const detail = await httpGet<{ reporter_mobile?: string | null }>(
+                `/api/tickets/${item.id}`,
+              );
+              const actualReporterMobile = (detail?.reporter_mobile || "").trim();
+              if (actualReporterMobile === targetPhone) {
+                verified.push({ ...item, reporter_mobile: actualReporterMobile });
+              }
+            } catch {
+              // 若无法核验提单人手机号等于咨询人手机号，则不予展示，杜绝误展示他人提单
+            }
+          }),
+        );
+      }
+
+      // 合并当前咨询人手机号在本地会话中刚提交的工单（提单人手机号严格等于 targetPhone）
+      const localSubmitted = getLocalClientTickets(targetPhone);
+      const seenCodes = new Set(
+        verified.map((v) => v.short_code || v.ticket_number).filter(Boolean),
+      );
+      for (const lt of localSubmitted) {
+        const key = lt.short_code || lt.ticket_number;
+        if (key && !seenCodes.has(key)) {
+          seenCodes.add(key);
+          verified.push(lt);
+        }
+      }
+
+      saveLocalClientTickets(verified, targetPhone);
+      return verified;
     }
   } catch {
     // ignore
   }
-  return getLocalClientTickets();
+  return getLocalClientTickets(targetPhone);
 }
 
 export async function clientRemindTicket(
@@ -3019,7 +3137,7 @@ export async function clientRemindTicket(
   }
 
   // 离线/开发降级模拟
-  const list = getLocalClientTickets();
+  const list = getLocalClientTickets(phone);
   const ticket = list.find((t) => t.id === ticketId);
   const hours = ticket?.hours_since_created ?? 25.0;
   const isOver24 = hours >= 24.0;
@@ -3046,7 +3164,7 @@ export async function clientConfirmTicket(
     );
     if (res && typeof res.success === "boolean") {
       // 同步更新本地缓存
-      const list = getLocalClientTickets();
+      const list = getLocalClientTickets(phone);
       const t = list.find((x) => x.id === ticketId);
       if (t) {
         if (action === "confirm") {
@@ -3058,7 +3176,7 @@ export async function clientConfirmTicket(
           t.client_category = "processing";
           t.process_stage = "服务处理";
         }
-        saveLocalClientTickets(list);
+        saveLocalClientTickets(list, phone);
       }
       return res;
     }
@@ -3067,7 +3185,7 @@ export async function clientConfirmTicket(
   }
 
   // 离线降级
-  const list = getLocalClientTickets();
+  const list = getLocalClientTickets(phone);
   const t = list.find((x) => x.id === ticketId);
   if (t) {
     if (action === "confirm") {
@@ -3079,7 +3197,7 @@ export async function clientConfirmTicket(
       t.client_category = "processing";
       t.process_stage = "服务处理";
     }
-    saveLocalClientTickets(list);
+    saveLocalClientTickets(list, phone);
   }
   return {
     success: true,

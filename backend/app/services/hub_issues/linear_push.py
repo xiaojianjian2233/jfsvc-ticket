@@ -271,7 +271,7 @@ def _sync_tickets_dev_stage(db: Session, hub: HubIssue, *, record_transfer: bool
     terminal = {"closed", "done", "resolved", "transferred_return"}
     for t in tickets:
         if t.status not in terminal:
-            t.process_stage = "研发处理"
+            t.process_stage = "产研处理" if t.source_code == "feishu_ai" else "研发处理"
 
 
 def _push_via_webhook(
@@ -387,7 +387,11 @@ def push_hub_issue_to_linear(
             return _push_via_webhook(db, hub, assignee_override_user_id=assignee_override_user_id)
 
         # ---- 直连 Linear 前置强校验：指派说明与责任人 ----
+        src_tk = _primary_source_ticket(db, hub)
         solution = (hub.reply_content or "").strip()
+        if not solution and src_tk is not None and src_tk.source_code == "feishu_ai":
+            solution = (hub.canonical_body or hub.title or "飞书工单自动转产研").strip()
+            hub.reply_content = solution
         if not solution:
             logger.warning("linear_push_missing_solution", hub_issue_id=hub.id)
             _mark_pending(db, hub, reason="指派说明为空，推送暂停请先录入指派说明")

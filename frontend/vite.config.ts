@@ -398,6 +398,7 @@ export default defineConfig({
           sessions: Record<string, any>;
           messages: Record<string, any[]>;
           cids: Record<string, string>;
+          tickets?: Record<string, any>;
         } => {
           try {
             if (fs.existsSync(devSessionsStoreFile)) {
@@ -407,17 +408,21 @@ export default defineConfig({
           } catch (e: any) {
             console.warn(`[vite] loadDevSessions error: ${e.message}`);
           }
-          return { sessions: {}, messages: {}, cids: {} };
+          return { sessions: {}, messages: {}, cids: {}, tickets: {} };
         };
 
         const initialStored = loadDevSessions();
         const devSessions: Record<string, any> = initialStored.sessions || {};
         const devMessages: Record<string, any[]> = initialStored.messages || {};
         const sessionCidMap: Record<string, string> = initialStored.cids || {};
+        const devTickets: Record<string, any> = initialStored.tickets || {};
 
-        // 数据迁移与清洗：剔除 session.agent_name 和 message.sender_name 中误存入的 base64 字符串
+        // 数据迁移与清洗：剔除 session.agent_name 和 message.sender_name 中误存入的 base64 字符串，并补齐 session_type
         for (const s of Object.values(devSessions)) {
           if (s) {
+            if (!s.session_type) {
+              s.session_type = "online";
+            }
             if (s.agent_name && s.agent_name.startsWith("data:image/")) {
               const spaceIdx = s.agent_name.indexOf(" ");
               if (spaceIdx > 0) {
@@ -454,6 +459,7 @@ export default defineConfig({
         if (!devSessions["ZXHH202609283919"]) {
           devSessions["ZXHH202609283919"] = {
             id: "ZXHH202609283919",
+            session_type: "online",
             ai_agent_cid: "71dbed67deb447309fcba9308566ee1d",
             company_name: "测试科技有限公司",
             tax_no: "91440300MA5XXXXXX1",
@@ -478,7 +484,11 @@ export default defineConfig({
           try {
             fs.writeFileSync(
               devSessionsStoreFile,
-              JSON.stringify({ sessions: devSessions, messages: devMessages, cids: sessionCidMap }, null, 2),
+              JSON.stringify(
+                { sessions: devSessions, messages: devMessages, cids: sessionCidMap, tickets: devTickets },
+                null,
+                2
+              ),
               "utf-8"
             );
           } catch (e: any) {
@@ -608,7 +618,16 @@ export default defineConfig({
           }
         };
 
-        const cleanBotAnswer = (raw: string): string => {
+        const isGreetingInput = (text: string): boolean => {
+          const clean = (text || "").replace(/「引用\s+[^:：]+[:：][^」]+」/g, "").trim();
+          return (
+            /^(?:(?:你好|您好|哈喽|hello|hi|hey)[，,\s]*)?(?:请问)?(?:在吗|在么|有人吗|有人在吗|请问有人吗|有人么|请问在吗)?[\s!！?？~～.。]*$/i.test(
+              clean
+            ) && clean.length > 0
+          );
+        };
+
+        const cleanBotAnswer = (raw: string, agentName?: string): string => {
           if (!raw) return "";
           let text = raw;
           text = text.replace(
@@ -617,6 +636,15 @@ export default defineConfig({
           );
           text = text.replace(/(?:\r?\n|\s)*(?:1\s*[.、:： ]?\s*解决|2\s*[.、:： ]?\s*未解决)[\s\S]*$/i, "");
           text = text.replace(/(?:\r?\n|\s)*以上(?:解答|回复)是否对您有帮助[？?]?[\s\S]*$/i, "");
+          if (agentName) {
+            const cleanName = agentName
+              .replace(/^data:image\/[^\s]+\s*/, "")
+              .replace(/^[\p{Extended_Pictographic}\u{1F300}-\u{1F9FF}]+\s*/u, "")
+              .trim();
+            if (cleanName) {
+              text = text.replace(/我是\s*(?:发票云)?(?:智能)?(?:客服|综合|服务|AI)?助手/g, `我是${cleanName}`);
+            }
+          }
           return text.trim();
         };
 
@@ -823,9 +851,25 @@ export default defineConfig({
           }
         };
 
-        const getDomainAnswer = (content: string, senderName: string): { answer: string; transfer_result: string } => {
+        const getDomainAnswer = (
+          content: string,
+          senderName: string,
+          agentName = "综合服务助手"
+        ): { answer: string; transfer_result: string } => {
           const pureInput = content.replace(/「引用\s+[^:：]+[:：][^」]+」/g, "").trim();
           const target = `${pureInput} ${content}`.toLowerCase();
+          const cleanAgentName =
+            agentName
+              .replace(/^data:image\/[^\s]+\s*/, "")
+              .replace(/^[\p{Extended_Pictographic}\u{1F300}-\u{1F9FF}]+\s*/u, "")
+              .trim() || "综合服务助手";
+
+          if (isGreetingInput(pureInput)) {
+            return {
+              answer: `您好！我是${cleanAgentName}，很高兴为您服务。您可以向我咨询发票云产品相关问题。`,
+              transfer_result: "NO_ACTION",
+            };
+          }
 
           if (["人工", "转人工", "真人", "坐席", "找客服", "专家", "投诉"].some((k) => target.includes(k))) {
             return {

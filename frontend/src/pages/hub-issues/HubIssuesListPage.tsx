@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, postByPath, type HubIssueSummary } from "@/api/client";
-import { OpStatusBadge, OP_STATUS_LABEL } from "@/components/OpStatusBadge";
+import { OpStatusBadge, OP_STATUS_LABEL, HUB_OP_STATUS_VALUES } from "@/components/OpStatusBadge";
 import { linearStatusToCN } from "@/api/processStage";
 import { DateTimeRangePicker } from "@/components/DateTimeRangePicker";
 import {
@@ -113,7 +113,14 @@ const DEV_TYPES = new Set(["Bug_fix", "Demand"]);
 
 function fmtDate(v: string | null | undefined): string {
   if (!v) return "—";
-  return new Date(v).toLocaleDateString("zh-CN");
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v).slice(0, 16);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
 }
 
 // 累计耗时（小时）：进行中 = now - 创建；已完成 = 关闭 - 创建
@@ -434,6 +441,7 @@ export function HubIssuesListPage() {
                     "任务处理人",
                     "责任人",
                     "任务创建时间",
+                    "任务转产研时间",
                     "任务关闭时间",
                     "任务关联工单",
                     "累计耗时(小时)",
@@ -449,7 +457,7 @@ export function HubIssuesListPage() {
               <tbody>
                 {items.length === 0 && (
                   <tr>
-                    <td colSpan={15} className="p-6 text-center text-xs text-hub-textFaint">
+                    <td colSpan={16} className="p-6 text-center text-xs text-hub-textFaint">
                       暂无任务
                     </td>
                   </tr>
@@ -460,6 +468,7 @@ export function HubIssuesListPage() {
                     LINEAR_ST[(h.linear_status ?? "").toLowerCase()] ?? LINEAR_ST.backlog;
                   const done = isDone(h);
                   const hrs = cumulativeHours(h);
+                  const solutionText = (h.reply_content || h.feedback_note || "").trim();
                   return (
                     <tr
                       key={h.id}
@@ -591,6 +600,9 @@ export function HubIssuesListPage() {
                         {fmtDate(h.first_seen_at)}
                       </td>
                       <td className="px-3 py-2.5 whitespace-nowrap text-hub-textFaint font-mono text-[11px]">
+                        {fmtDate(h.dev_transferred_at)}
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap text-hub-textFaint font-mono text-[11px]">
                         {fmtDate(h.closed_at)}
                       </td>
                       <td className="px-3 py-2.5 whitespace-nowrap">
@@ -605,14 +617,13 @@ export function HubIssuesListPage() {
                       <td className="px-3 py-2.5 whitespace-nowrap text-hub-textSecondary">
                         {hrs == null ? "—" : `${hrs}h`}
                       </td>
-                      {/* 解决方案=任务处理说明：默认最多 100 字、超出…、悬浮看全文。
-                          HubIssueSummary 暂无 reply_content 文本 → 用 feedback_note 兜底，待后端在 summary 暴露。 */}
+                      {/* 解决方案=任务处理说明：默认最多 100 字、超出…、悬浮看全文 */}
                       <td className="px-3 py-2.5 max-w-[240px]">
-                        {h.feedback_note ? (
-                          <span className="block truncate" title={h.feedback_note}>
-                            {h.feedback_note.length > 100
-                              ? `${h.feedback_note.slice(0, 100)}...`
-                              : h.feedback_note}
+                        {solutionText ? (
+                          <span className="block truncate" title={solutionText}>
+                            {solutionText.length > 100
+                              ? `${solutionText.slice(0, 100)}...`
+                              : solutionText}
                           </span>
                         ) : (
                           <span className="text-hub-textFaint">—</span>
@@ -833,21 +844,25 @@ function FilterPanel({
         ))}
       </FilterRow>
 
-      {/* 工单状态 = 运营处理状态 op_status（仅 Operation 有值，服务端筛，跨页真实计数） */}
+      {/* 工单状态 = 运营处理状态 op_status（仅展示后端实际使用的状态值） */}
       <FilterRow label="工单状态">
         <Chip
           active={!opStatusFilter}
           label={`全部(${opStatusCounts.all ?? 0})`}
           onClick={() => onOpStatus("")}
         />
-        {Object.entries(OP_STATUS_LABEL).map(([value, { label }]) => (
-          <Chip
-            key={value}
-            active={opStatusFilter === value}
-            label={`${label}(${opStatusCounts[value] ?? 0})`}
-            onClick={() => onOpStatus(opStatusFilter === value ? "" : value)}
-          />
-        ))}
+        {HUB_OP_STATUS_VALUES.map((value) => {
+          const item = OP_STATUS_LABEL[value];
+          if (!item) return null;
+          return (
+            <Chip
+              key={value}
+              active={opStatusFilter === value}
+              label={`${item.label}(${opStatusCounts[value] ?? 0})`}
+              onClick={() => onOpStatus(opStatusFilter === value ? "" : value)}
+            />
+          );
+        })}
       </FilterRow>
 
       {/* 任务类型 = hub.type 4 出口类型（服务端筛，跨页真实计数） */}

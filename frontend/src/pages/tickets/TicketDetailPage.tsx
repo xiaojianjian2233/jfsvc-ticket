@@ -227,8 +227,10 @@ import {
   type TaskNoteItem,
   isDemandOrBug,
   getTaskTypeLabel,
+  sanitizeTaskTitle,
   extractDevSolutionParts,
   extractPureSolution,
+  isDevTemplateText,
   formatTasksReplyNote,
   parseReplyNoteSolutions,
   renderFormattedReplyNote,
@@ -241,8 +243,10 @@ export {
   type TaskNoteItem,
   isDemandOrBug,
   getTaskTypeLabel,
+  sanitizeTaskTitle,
   extractDevSolutionParts,
   extractPureSolution,
+  isDevTemplateText,
   formatTasksReplyNote,
   parseReplyNoteSolutions,
   renderFormattedReplyNote,
@@ -699,7 +703,7 @@ export function TicketDetailPage() {
   const showReflectBtn = canSeeReflect && !!escalationCtx.data?.is_escalation;
   // AI 草稿：答复存 hub.reply_content（未级联到 ticket），
   // 供审核人在处理说明框查看/编辑后点答复正式发出。
-  const draftReply = hub.data?.reply_is_draft ? (hub.data.reply_content ?? "") : "";
+  const draftReply = hub.data?.reply_is_draft && !isDevType ? (hub.data.reply_content ?? "") : "";
   // 标记诊断按钮可见性：运营类 + 已毕业确认 + AI 已答复未关闭 + 答复确实是 AI 自动发的
   // （不是主管/处理人人工发的或编辑过的）；处理人本人或主管可点。
   const aiAutoReplied = hub.data?.reply_authored_by === "agent:ai_cs";
@@ -1007,6 +1011,7 @@ export function TicketDetailPage() {
                           const unpushedTasks = devTasks.filter(
                             (t) => t.status !== "processing" && t.status !== "closed",
                           );
+                          const updatedSolMap: Record<string | number, string> = {};
                           try {
                             for (const t of unpushedTasks) {
                               const targetHubId =
@@ -1015,11 +1020,19 @@ export function TicketDetailPage() {
                                   : t.key === "self"
                                   ? (hub.data?.id ?? d.hub_issue_id)
                                   : t.hub_id;
-                              if (!targetHubId) continue;
 
                               const directSol = (t.solution ?? "").trim();
                               const parsedSol = (parsedMap[t.key] ?? "").trim();
                               const solToSave = isValidSolution(directSol) ? directSol : parsedSol;
+                              const { communicationNote, feedbackNote } = extractDevSolutionParts(
+                                solToSave,
+                                d.body || d.title || "",
+                              );
+                              const fbVal = feedbackNote || "产研分析中暂无回复";
+                              const solWithFeedback = `【沟通记录】${communicationNote}\n【产研反馈】：${fbVal}`;
+                              updatedSolMap[t.key] = solWithFeedback;
+
+                              if (!targetHubId) continue;
 
                               // 1. 确保最新方案说明保存到 DB
                               await patchByPath(
@@ -1045,6 +1058,9 @@ export function TicketDetailPage() {
                                 setIsPushingLinear(false);
                                 return;
                               }
+                              if (res?.solution) {
+                                updatedSolMap[t.key] = res.solution;
+                              }
                             }
                           } catch (err: any) {
                             showTopToast(hubErrMsg(err) || "推送到 Linear 失败，请检查配置", "warning");
@@ -1054,6 +1070,29 @@ export function TicketDetailPage() {
                             setIsPushingLinear(false);
                           }
 
+                          if (Object.keys(updatedSolMap).length > 0) {
+                            setExternalTaskSolutions((prev) => ({ ...prev, ...updatedSolMap }));
+                          }
+                          const formattedAfterTransfer = formatTasksReplyNote(
+                            tasksToCheck.map((t) => {
+                              const isDev = isDemandOrBug(t.type);
+                              const directSol = (t.solution ?? "").trim();
+                              const parsedSol = (parsedMap[t.key] ?? "").trim();
+                              const baseSol = isValidSolution(directSol) ? directSol : parsedSol;
+                              return {
+                                code: t.code,
+                                title: t.title,
+                                type: t.type,
+                                solution: updatedSolMap[t.key] ?? baseSol,
+                                status: isDev ? "processing" : t.status,
+                                isDevTransferred: isDev,
+                                ticketContent: d.body || d.title || "",
+                              };
+                            }),
+                          );
+                          if (formattedAfterTransfer) {
+                            setNoteDrafts((prev) => ({ ...prev, 0: formattedAfterTransfer }));
+                          }
                           setIsDevTransferred(true);
                           setCurrentProcessStage("产研处理");
                           setNoteViewMode("preview");
@@ -1518,7 +1557,7 @@ export function TicketDetailPage() {
                           (d as any).hub_short_code ??
                           (d.hub_issue_id ? `HUB-${String(d.hub_issue_id).padStart(6, "0")}` : d.short_code),
                         hub_id: hub.data?.id ?? d.hub_issue_id ?? undefined,
-                        title: hub.data?.title ?? d.title,
+                        title: sanitizeTaskTitle(hub.data?.title ?? d.title, d.body || d.title || ""),
                         predicted_type: hub.data?.type ?? d.predicted_type,
                         product_line_code:
                           hub.data?.product_line_code || d.product_line_code || "",
@@ -1527,7 +1566,9 @@ export function TicketDetailPage() {
                         assigned_user_name: d.assigned_user_name,
                         assigned_user_id: hub.data?.assigned_user_id ?? d.assigned_user_id,
                         cached_reply_content: extractPureSolution(
-                          hub.data?.reply_content ?? d.cached_reply_content,
+                          hub.data?.reply_is_draft && isDevType
+                            ? d.cached_reply_content
+                            : (hub.data?.reply_content ?? d.cached_reply_content),
                         ),
                       }}
                     />
@@ -1582,8 +1623,17 @@ export function TicketDetailPage() {
                       const editable = !opDone && !isDevTransferred;
                       const supplyNote =
                         opStatus === "supplementing" ? (hub.data?.supply_note ?? "") : "";
-                      const val =
-                        noteDrafts[0] ?? (d.cached_reply_content || draftReply || supplyNote || "");
+                      const isEffectiveOpOnly =
+                        currentSubTasks.length > 0
+                          ? currentSubTasks.every((t) => !isDemandOrBug(t.type))
+                          : !isDevType;
+                      const rawFallbackReply =
+                        d.cached_reply_content || draftReply || supplyNote || "";
+                      const fallbackReply =
+                        isEffectiveOpOnly && isDevTemplateText(rawFallbackReply)
+                          ? ""
+                          : rawFallbackReply;
+                      const val = noteDrafts[0] ?? fallbackReply;
                       return (
                         <div className="relative w-full">
                           {noteViewMode === "preview" && (
@@ -3304,13 +3354,34 @@ function SubTicketList({
     solution: string;
   } | null>(null);
 
+  const tabs = useTabsOptional();
+  const navigate = useNavigate();
+  const handleOpenTaskDetail = (hubId?: number, code?: string) => {
+    if (!hubId) return;
+    const path = `/hub-issues/${hubId}`;
+    const label = code || `HUB-${String(hubId).padStart(6, "0")}`;
+    if (tabs) {
+      tabs.openTab(path, label, { activate: true });
+    } else {
+      navigate(path);
+    }
+  };
+
   const [selfHidden, setSelfHidden] = useState(false);
   // 过滤出除主任务(self)以外的真实独立子任务，防止主任务在列表和子任务中重复出现两次
   const childSubtasks = useMemo(
     () => subtasks.filter((s: any) => (self.hub_id ? s.id !== self.hub_id : true)),
     [subtasks, self.hub_id],
   );
-  const showSelf = childIds.length === 0 && (!selfHidden || (childSubtasks.length === 0 && drafts.length === 0));
+  const isSelfDeleted =
+    subtasksQuery.isSuccess &&
+    self.hub_id != null &&
+    !subtasks.some((s: any) => s.id === self.hub_id) &&
+    childSubtasks.length > 0;
+  const showSelf =
+    childIds.length === 0 &&
+    !isSelfDeleted &&
+    (!selfHidden || (childSubtasks.length === 0 && drafts.length === 0));
 
   const allRowKeys: (string | number)[] = useMemo(() => {
     const keys: (string | number)[] = [];
@@ -3373,8 +3444,16 @@ function SubTicketList({
         if (!isNaN(idx)) draftIndices.push(idx);
       }
     });
-    if (deleteSelf && drafts.length > 0 && draftIndices.length < drafts.length) {
-      setSelfHidden(true);
+    if (deleteSelf) {
+      if (self.hub_id) {
+        deleteSubtaskMutation.mutate(self.hub_id);
+      }
+      if (
+        childSubtasks.length > 0 ||
+        (drafts.length > 0 && draftIndices.length < drafts.length)
+      ) {
+        setSelfHidden(true);
+      }
     }
     if (draftIndices.length > 0) {
       onDeleteDrafts?.(draftIndices);
@@ -3419,6 +3498,13 @@ function SubTicketList({
         : undefined;
     const effectiveExtSol = isValidSolution(extSol) ? extSol : (isValidSolution(altExtSol) ? altExtSol : extSol);
 
+    const effectiveType =
+      cur?.type !== undefined
+        ? cur.type
+        : altCur?.type !== undefined
+        ? altCur.type
+        : initial.type;
+
     let effectiveSolution = initial.solution;
     if (isValidSolution(cur?.solution)) {
       effectiveSolution = cur!.solution!;
@@ -3434,9 +3520,13 @@ function SubTicketList({
       effectiveSolution = effectiveExtSol;
     }
 
+    if (!isDemandOrBug(effectiveType) && isDevTemplateText(effectiveSolution)) {
+      effectiveSolution = "";
+    }
+
     return {
       title: cur?.title !== undefined ? cur.title : (altCur?.title !== undefined ? altCur.title : initial.title),
-      type: cur?.type !== undefined ? cur.type : (altCur?.type !== undefined ? altCur.type : initial.type),
+      type: effectiveType,
       product_line_code:
         cur?.product_line_code !== undefined ? cur.product_line_code : (altCur?.product_line_code !== undefined ? altCur.product_line_code : initial.product_line_code),
       module: cur?.module !== undefined ? cur.module : (altCur?.module !== undefined ? altCur.module : initial.module),
@@ -3542,59 +3632,121 @@ function SubTicketList({
     [],
   );
 
-  const getAllTasks = (overridePatch?: { key: string | number; title?: string; solution: string }): TaskNoteItem[] => {
+  const getAllTasks = (overridePatch?: {
+    key: string | number;
+    title?: string;
+    solution?: string;
+    type?: string;
+  }): TaskNoteItem[] => {
     const tasks: TaskNoteItem[] = [];
     if (showSelf) {
+      const cleanSelfTitle = sanitizeTaskTitle(self.title, ticketContent) || "当前工单任务";
       const st = getRowState("self", {
-        title: self.title ?? "当前工单任务",
+        title: cleanSelfTitle,
         type: self.predicted_type ?? "",
         product_line_code: self.product_line_code ?? "",
         module: self.module ?? "",
         solution: extractPureSolution(self.cached_reply_content),
       });
-      const sol = overridePatch && overridePatch.key === "self" ? overridePatch.solution : st.solution;
-      const tit = overridePatch && overridePatch.key === "self" && overridePatch.title !== undefined ? overridePatch.title : (st.title || self.title || "当前工单任务");
+      const sol =
+        overridePatch && overridePatch.key === "self" && overridePatch.solution !== undefined
+          ? overridePatch.solution
+          : st.solution;
+      const tit =
+        overridePatch && overridePatch.key === "self" && overridePatch.title !== undefined
+          ? sanitizeTaskTitle(overridePatch.title, ticketContent)
+          : sanitizeTaskTitle(st.title || self.title, ticketContent) || "当前工单任务";
+      const taskType =
+        overridePatch && overridePatch.key === "self" && overridePatch.type !== undefined
+          ? overridePatch.type
+          : st.type || self.predicted_type || "";
+      const isDev = isDemandOrBug(taskType);
+      let effStatus = st.status ?? (st.confirmed ? "processing" : (self.status || "draft"));
+      if (isDevTransferred && isDev && effStatus !== "dev_returned") {
+        effStatus = "processing";
+      }
       tasks.push({
         code: self.short_code,
         title: tit,
-        type: st.type || self.predicted_type || "",
-        solution: sol,
+        type: taskType,
+        solution: !isDev && isDevTemplateText(sol) ? "" : sol,
+        status: effStatus,
+        isDevTransferred: isDevTransferred && isDev,
+        ticketContent: ticketContent || "",
       });
     }
     childSubtasks.forEach((stk: any) => {
       const sid = stk.id;
+      const cleanStkTitle = sanitizeTaskTitle(stk.title, ticketContent) || `子任务 #${sid}`;
       const st = getRowState(sid, {
-        title: stk.title ?? `子任务 #${sid}`,
+        title: cleanStkTitle,
         type: stk.type ?? "",
         product_line_code: stk.product_line_code ?? "",
         module: stk.module ?? "",
         solution: extractPureSolution(stk.solution),
       });
-      const sol = overridePatch && overridePatch.key === sid ? overridePatch.solution : st.solution;
-      const tit = overridePatch && overridePatch.key === sid && overridePatch.title !== undefined ? overridePatch.title : (st.title || stk.title || `子任务 #${sid}`);
+      const sol =
+        overridePatch && overridePatch.key === sid && overridePatch.solution !== undefined
+          ? overridePatch.solution
+          : st.solution;
+      const tit =
+        overridePatch && overridePatch.key === sid && overridePatch.title !== undefined
+          ? sanitizeTaskTitle(overridePatch.title, ticketContent)
+          : sanitizeTaskTitle(st.title || stk.title, ticketContent) || `子任务 #${sid}`;
+      const taskType =
+        overridePatch && overridePatch.key === sid && overridePatch.type !== undefined
+          ? overridePatch.type
+          : st.type || stk.type || "";
+      const isDev = isDemandOrBug(taskType);
+      let effStatus = st.status ?? (st.confirmed ? "processing" : (stk.status || "draft"));
+      if (isDevTransferred && isDev && effStatus !== "dev_returned") {
+        effStatus = "processing";
+      }
       tasks.push({
         code: stk.short_code ?? `#${sid}`,
         title: tit,
-        type: st.type || stk.type || "",
-        solution: sol,
+        type: taskType,
+        solution: !isDev && isDevTemplateText(sol) ? "" : sol,
+        status: effStatus,
+        isDevTransferred: isDevTransferred && isDev,
+        ticketContent: ticketContent || "",
       });
     });
     drafts.forEach((dft, i) => {
       const draftKey = `draft-${i}`;
+      const cleanDftTitle = sanitizeTaskTitle(dft.title, ticketContent) || `新建子任务 #${i + 1}`;
       const st = getRowState(draftKey, {
-        title: dft.title || `新建子任务 #${i + 1}`,
+        title: cleanDftTitle,
         type: dft.type || "",
         product_line_code: dft.product_line || "",
         module: dft.module || "",
         solution: "",
       });
-      const sol = overridePatch && overridePatch.key === draftKey ? overridePatch.solution : st.solution;
-      const tit = overridePatch && overridePatch.key === draftKey && overridePatch.title !== undefined ? overridePatch.title : (st.title || dft.title || `新建子任务 #${i + 1}`);
+      const sol =
+        overridePatch && overridePatch.key === draftKey && overridePatch.solution !== undefined
+          ? overridePatch.solution
+          : st.solution;
+      const tit =
+        overridePatch && overridePatch.key === draftKey && overridePatch.title !== undefined
+          ? sanitizeTaskTitle(overridePatch.title, ticketContent)
+          : sanitizeTaskTitle(st.title || dft.title, ticketContent) || `新建子任务 #${i + 1}`;
+      const taskType =
+        overridePatch && overridePatch.key === draftKey && overridePatch.type !== undefined
+          ? overridePatch.type
+          : st.type || dft.type || "";
+      const isDev = isDemandOrBug(taskType);
+      let effStatus = st.status ?? (st.confirmed ? "processing" : "draft");
+      if (isDevTransferred && isDev) {
+        effStatus = "processing";
+      }
       tasks.push({
         code: `${self.short_code}-${childSubtasks.length + i + 1}`,
         title: tit,
-        type: st.type || dft.type || "",
-        solution: sol,
+        type: taskType,
+        solution: !isDev && isDevTemplateText(sol) ? "" : sol,
+        status: effStatus,
+        isDevTransferred: isDevTransferred && isDev,
+        ticketContent: ticketContent || "",
       });
     });
     return tasks;
@@ -3603,15 +3755,19 @@ function SubTicketList({
   const getSummaryTasks = (overridePatch?: { key: string | number; title?: string; solution: string }): SubTaskSummaryItem[] => {
     const tasks: SubTaskSummaryItem[] = [];
     if (showSelf) {
+      const cleanSelfTitle = sanitizeTaskTitle(self.title, ticketContent) || "当前工单任务";
       const st = getRowState("self", {
-        title: self.title ?? "当前工单任务",
+        title: cleanSelfTitle,
         type: self.predicted_type ?? "",
         product_line_code: self.product_line_code ?? "",
         module: self.module ?? "",
         solution: self.cached_reply_content ?? "",
       });
       const sol = overridePatch && overridePatch.key === "self" ? overridePatch.solution : st.solution;
-      const tit = overridePatch && overridePatch.key === "self" && overridePatch.title !== undefined ? overridePatch.title : (st.title || self.title || "当前工单任务");
+      const tit =
+        overridePatch && overridePatch.key === "self" && overridePatch.title !== undefined
+          ? sanitizeTaskTitle(overridePatch.title, ticketContent)
+          : sanitizeTaskTitle(st.title || self.title, ticketContent) || "当前工单任务";
       const isDev = isDemandOrBug(st.type || self.predicted_type);
       const isOp = st.type === "Operation" || self.predicted_type === "Operation";
       let effStatus = isOpCompleted && isOp
@@ -3649,15 +3805,19 @@ function SubTicketList({
     }
     childSubtasks.forEach((stk: any) => {
       const sid = stk.id;
+      const cleanStkTitle = sanitizeTaskTitle(stk.title, ticketContent) || `子任务 #${sid}`;
       const st = getRowState(sid, {
-        title: stk.title ?? `子任务 #${sid}`,
+        title: cleanStkTitle,
         type: stk.type ?? "",
         product_line_code: stk.product_line_code ?? "",
         module: stk.module ?? "",
         solution: stk.solution ?? "",
       });
       const sol = overridePatch && overridePatch.key === sid ? overridePatch.solution : st.solution;
-      const tit = overridePatch && overridePatch.key === sid && overridePatch.title !== undefined ? overridePatch.title : (st.title || stk.title || `子任务 #${sid}`);
+      const tit =
+        overridePatch && overridePatch.key === sid && overridePatch.title !== undefined
+          ? sanitizeTaskTitle(overridePatch.title, ticketContent)
+          : sanitizeTaskTitle(st.title || stk.title, ticketContent) || `子任务 #${sid}`;
       const isDev = isDemandOrBug(st.type || stk.type);
       const isOp = st.type === "Operation" || stk.type === "Operation";
       let effStatus = isOpCompleted && isOp
@@ -3695,15 +3855,19 @@ function SubTicketList({
     });
     drafts.forEach((dft, i) => {
       const draftKey = `draft-${i}`;
+      const cleanDftTitle = sanitizeTaskTitle(dft.title, ticketContent) || `新建子任务 #${i + 1}`;
       const st = getRowState(draftKey, {
-        title: dft.title || `新建子任务 #${i + 1}`,
+        title: cleanDftTitle,
         type: dft.type || "",
         product_line_code: dft.product_line || "",
         module: dft.module || "",
         solution: "",
       });
       const sol = overridePatch && overridePatch.key === draftKey ? overridePatch.solution : st.solution;
-      const tit = overridePatch && overridePatch.key === draftKey && overridePatch.title !== undefined ? overridePatch.title : (st.title || dft.title || `新建子任务 #${i + 1}`);
+      const tit =
+        overridePatch && overridePatch.key === draftKey && overridePatch.title !== undefined
+          ? sanitizeTaskTitle(overridePatch.title, ticketContent)
+          : sanitizeTaskTitle(st.title || dft.title, ticketContent) || `新建子任务 #${i + 1}`;
       const isDev = isDemandOrBug(st.type || dft.type);
       const isOp = st.type === "Operation" || dft.type === "Operation";
       let effStatus = isOpCompleted && isOp
@@ -3731,31 +3895,106 @@ function SubTicketList({
     return tasks;
   };
 
-  const lastSyncedRef = useRef<string>("");
+  const lastSyncedRef = useRef<string | null>(null);
+
+  const handleChangeRowType = (
+    rowKey: string | number,
+    newType: string,
+    hubId?: number,
+  ) => {
+    const isSwitchingToOp = !isDemandOrBug(newType);
+    const curSt = rowStates[rowKey];
+    const prevType =
+      curSt?.type ??
+      (rowKey === "self"
+        ? (self.predicted_type ?? "")
+        : typeof rowKey === "number"
+        ? (childSubtasks.find((s: any) => s.id === rowKey)?.type ?? "")
+        : typeof rowKey === "string" && rowKey.startsWith("draft-")
+        ? (drafts[parseInt(rowKey.replace("draft-", ""), 10)]?.type ?? "")
+        : "");
+    const shouldClearSol =
+      isSwitchingToOp || isDemandOrBug(prevType) !== isDemandOrBug(newType);
+
+    if (shouldClearSol) {
+      updateRow(rowKey, { type: newType, solution: "", confirmed: false });
+      setAiStatusMap((prev) => ({ ...prev, [rowKey]: "idle" as const }));
+      onTaskSolutionChange?.(rowKey, "");
+      if (rowKey === "self" && self.hub_id) {
+        onTaskSolutionChange?.(self.hub_id, "");
+      } else if (typeof rowKey === "number" && rowKey === self.hub_id) {
+        onTaskSolutionChange?.("self", "");
+      }
+    } else {
+      updateRow(rowKey, { type: newType });
+    }
+
+    if (hubId) {
+      updateSubtaskMutation.mutate({
+        hubId,
+        body: shouldClearSol ? { type: newType, solution: "" } : { type: newType },
+      });
+    }
+
+    const nextTasks = getAllTasks({
+      key: rowKey,
+      type: newType,
+      ...(shouldClearSol ? { solution: "" } : {}),
+    });
+    const nextFormatted = formatTasksReplyNote(nextTasks);
+    lastSyncedRef.current = nextFormatted;
+    onSyncAllTasksNote?.(nextFormatted);
+  };
 
   useEffect(() => {
     const summary = getSummaryTasks();
     onTasksChange?.(summary);
 
-    // 任务解决方案有值后自动同步至处理说明
+    // 任务解决方案有值或已转产研/存在子任务/修改了任务类型后自动同步至处理说明
     const tasks = getAllTasks();
     const hasAnySolution = tasks.some((t) => isValidSolution(t.solution));
-    if (hasAnySolution || childSubtasks.length > 0 || drafts.length > 0) {
+    const hasDevTransferredOrReturned = tasks.some(
+      (t) =>
+        isDemandOrBug(t.type) &&
+        (t.isDevTransferred ||
+          t.status === "processing" ||
+          t.status === "dev_returned" ||
+          t.status === "returned" ||
+          t.status === "answered" ||
+          t.status === "released"),
+    );
+    const hasTypeModified = Object.values(rowStates).some((r) => r.type !== undefined);
+    const hasPreviouslySynced =
+      lastSyncedRef.current !== null && lastSyncedRef.current !== "";
+    if (
+      hasAnySolution ||
+      hasDevTransferredOrReturned ||
+      hasTypeModified ||
+      hasPreviouslySynced ||
+      childSubtasks.length > 0 ||
+      drafts.length > 0
+    ) {
       if (tasks.length > 0) {
         const formatted = formatTasksReplyNote(tasks);
-        if (formatted && formatted !== lastSyncedRef.current) {
+        if (
+          formatted !== lastSyncedRef.current &&
+          (Boolean(formatted) || hasTypeModified || hasPreviouslySynced)
+        ) {
           lastSyncedRef.current = formatted;
           onSyncAllTasksNote?.(formatted);
         }
       }
     }
   }, [
+    showSelf,
     childSubtasks.length,
     drafts.length,
-    childSubtasks.map((s: any) => `${s.short_code}:${s.solution}`).join(","),
+    childSubtasks.map((s: any) => `${s.short_code}:${s.status}:${s.solution}`).join(","),
     self.short_code,
+    self.status,
     self.cached_reply_content,
     isOpCompleted,
+    isDevTransferred,
     Object.entries(rowStates).map(([k, v]) => `${k}:${v.solution}:${v.status}:${v.confirmed}:${v.type}`).join(","),
     externalSolutions ? Object.entries(externalSolutions).map(([k, v]) => `${k}:${v}`).join(",") : "",
   ]);
@@ -4092,7 +4331,7 @@ function SubTicketList({
                 productLineOptions.find((p) => p.code === st.product_line_code)?.name ||
                 st.product_line_code ||
                 "";
-              const cleanSol = stripHtmlToCleanText(st.solution);
+              const cleanSol = stripHtmlToCleanText(st.solution).replace(/^【沟通记录】[：:]?\s*/, "");
               const truncSolution = cleanSol
                 ? cleanSol.length > 10
                   ? `${cleanSol.slice(0, 10)}...`
@@ -4119,7 +4358,18 @@ function SubTicketList({
                     className="px-2.5 py-1.5 whitespace-nowrap bg-white group-hover:bg-slate-50"
                     style={{ position: "sticky", left: 40, zIndex: 2 }}
                   >
-                    <span className="font-mono text-[#6085e7]">{self.short_code}</span>
+                    {self.hub_id ? (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenTaskDetail(self.hub_id, self.short_code)}
+                        className="font-mono text-[#6085e7] hover:underline cursor-pointer"
+                        title="点击打开任务详情页面"
+                      >
+                        {self.short_code}
+                      </button>
+                    ) : (
+                      <span className="font-mono text-[#6085e7]">{self.short_code}</span>
+                    )}
                   </td>
                   <td
                     className="px-2.5 py-1.5 max-w-[180px] truncate bg-white group-hover:bg-slate-50 cursor-pointer hover:text-[#6085e7]"
@@ -4134,11 +4384,7 @@ function SubTicketList({
                       disabled={!canEdit || isRowLocked}
                       value={st.type}
                       onChange={(e) => {
-                        const val = e.target.value;
-                        updateRow(rowKey, { type: val });
-                        if (self.hub_id) {
-                          updateSubtaskMutation.mutate({ hubId: self.hub_id, body: { type: val } });
-                        }
+                        handleChangeRowType(rowKey, e.target.value, self.hub_id);
                       }}
                       className={`text-[11.5px] border border-hub-border rounded-[6px] px-1.5 py-1 bg-white outline-none focus:border-hub-teal h-[28px] ${
                         !canEdit || isRowLocked ? "opacity-60 cursor-not-allowed bg-slate-50" : "cursor-pointer"
@@ -4447,7 +4693,7 @@ function SubTicketList({
                 productLineOptions.find((p) => p.code === st.product_line_code)?.name ||
                 st.product_line_code ||
                 "";
-              const cleanSol = stripHtmlToCleanText(st.solution);
+              const cleanSol = stripHtmlToCleanText(st.solution).replace(/^【沟通记录】[：:]?\s*/, "");
               const truncSolution = cleanSol
                 ? cleanSol.length > 10
                   ? `${cleanSol.slice(0, 10)}...`
@@ -4474,9 +4720,14 @@ function SubTicketList({
                     className="px-2.5 py-1.5 whitespace-nowrap bg-white group-hover:bg-slate-50"
                     style={{ position: "sticky", left: 40, zIndex: 2 }}
                   >
-                    <span className="font-mono text-[#6085e7]">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenTaskDetail(stk.id, stk.short_code ?? `#${stk.id}`)}
+                      className="font-mono text-[#6085e7] hover:underline cursor-pointer"
+                      title="点击打开任务详情页面"
+                    >
                       {stk.short_code ?? `#${stk.id}`}
-                    </span>
+                    </button>
                   </td>
                   <td
                     className="px-2.5 py-1.5 max-w-[180px] truncate bg-white group-hover:bg-slate-50 cursor-pointer hover:text-[#6085e7]"
@@ -4491,9 +4742,7 @@ function SubTicketList({
                       disabled={!canEditThisRow || isRowLocked}
                       value={st.type}
                       onChange={(e) => {
-                        const val = e.target.value;
-                        updateRow(rowKey, { type: val });
-                        updateSubtaskMutation.mutate({ hubId: stk.id, body: { type: val } });
+                        handleChangeRowType(rowKey, e.target.value, stk.id);
                       }}
                       className={`text-[11.5px] border border-hub-border rounded-[6px] px-1.5 py-1 bg-white outline-none focus:border-hub-teal h-[28px] ${
                         !canEditThisRow || isRowLocked ? "opacity-60 cursor-not-allowed bg-slate-50" : "cursor-pointer"
@@ -4844,7 +5093,7 @@ function SubTicketList({
                     <select
                       disabled={!canEdit || isRowLocked}
                       value={st.type}
-                      onChange={(e) => updateRow(draftKey, { type: e.target.value })}
+                      onChange={(e) => handleChangeRowType(draftKey, e.target.value)}
                       className={`text-[11.5px] border border-hub-border rounded-[6px] px-1.5 py-1 bg-white outline-none focus:border-hub-teal h-[28px] ${
                         !canEdit || isRowLocked ? "opacity-60 cursor-not-allowed bg-slate-50" : "cursor-pointer"
                       }`}
@@ -5318,7 +5567,6 @@ function SubTicketList({
               }
             }
 
-            onSyncNote?.(newTitle, newSolution);
             const nextTasks = getAllTasks({
               key: targetKey,
               title: newTitle,

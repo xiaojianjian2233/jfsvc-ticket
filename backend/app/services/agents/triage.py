@@ -184,6 +184,18 @@ def run_ticket_triage(ticket_id: int, db: Session | None = None) -> TriageResult
         if t is None or t.deleted_at is not None:
             logger.warning("triage_ticket_not_found", ticket_id=ticket_id)
             return None
+        if t.source_code == "feishu_ai" and t.predicted_type in _VALID_TYPES:
+            conf_val = float(t.predicted_confidence) if t.predicted_confidence is not None else 1.0
+            return TriageResult(
+                type=t.predicted_type,
+                confidence=conf_val,
+                reason="飞书工单传值指定工单类型",
+                is_mixed=False,
+                sub_problems=(),
+                cost_usd=0.0,
+                model="feishu_source",
+                raw={},
+            )
         try:
             result = triage_payload(
                 title=t.title,

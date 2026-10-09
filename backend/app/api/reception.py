@@ -17,7 +17,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import String, desc, func, or_
+from sqlalchemy import String, and_, desc, func, or_
 from sqlalchemy.orm import Session
 
 from app.api.deps.auth import AuthedUser, require_user
@@ -124,6 +124,7 @@ class BotAgentProfile(BaseModel):
     is_enabled: bool = True
     created_at: str = ""
     created_by: str = "系统管理员"
+    updated_at: str = ""
 
 
 class BotRoutingCondition(BaseModel):
@@ -498,8 +499,32 @@ def check_human_capacity(db: Session) -> tuple[bool, bool, int, int, str]:
     return in_working_hours, has_capacity, online_count, idle_capacity, reason
 
 
+_GREETING_PATTERNS = [
+    r"^(?:(?:你好|您好|哈喽|hello|hi|hey)[，,\s]*)?(?:请问)?(?:在吗|在么|有人吗|有人在吗|请问有人吗|有人么|请问在吗)[\s!！?？~～.。]*$",
+    r"^(?:你好|您好|在吗|在么|有人吗|有人在吗|请问有人吗|hello|hi|hey|哈喽)[\s!！?？~～.。]*$",
+    r"^(?:请问|咨询一下|请教一下)[\s!！?？~～.。]*$",
+]
+
+
+def _clean_agent_display_name(raw_name: str | None) -> str:
+    if not raw_name:
+        return "智能客服助手"
+    name = raw_name.strip()
+    if name.startswith("data:image/"):
+        space_idx = name.find(" ")
+        if space_idx > 0:
+            name = name[space_idx + 1 :].strip()
+    name = re.sub(r"^[^\w\u4e00-\u9fa5]+", "", name).strip()
+    return name or "智能客服助手"
+
+
 def generate_bot_answer(agent: BotAgentProfile, question: str) -> str:
-    q_lower = (question or "").lower()
+    q_clean = re.sub(r"「引用\s+[^:：]+[:：][^」]+」\n?", "", (question or "")).strip()
+    q_lower = q_clean.lower()
+    clean_name = _clean_agent_display_name(agent.name if agent else None)
+
+    if any(re.match(p, q_clean, re.IGNORECASE) for p in _GREETING_PATTERNS):
+        return f"您好！我是{clean_name}，很高兴为您服务。您可以向我咨询发票云产品相关问题。"
 
     if any(k in q_lower for k in ["红字", "冲红", "红冲"]):
         return (
@@ -553,11 +578,6 @@ def generate_bot_answer(agent: BotAgentProfile, question: str) -> str:
 # 会话内容清洗与工单真实生成函数 (对齐泳道 5 规则)
 # -----------------------------------------------------------------------------
 
-_GREETING_PATTERNS = [
-    r"^(?:(?:你好|您好|哈喽|hello|hi|hey)[，,\s]*)?(?:请问)?(?:在吗|在么|有人吗|有人在吗|请问有人吗|有人么|请问在吗)[\s!！?？~～.。]*$",
-    r"^(?:你好|您好|在吗|在么|有人吗|有人在吗|请问有人吗|hello|hi|hey|哈喽)[\s!！?？~～.。]*$",
-    r"^(?:请问|咨询一下|请教一下)[\s!！?？~～.。]*$",
-]
 
 _STATUS_PATTERNS = [
     r"^(?:[12](?:[.\s、]*(?:解决|未解决))?|已解决|未解决|没解决|没有解决|问题已解决|问题未解决|好了|行了|满意|不满意)[\s!！?？~～.。]*$",
@@ -702,6 +722,7 @@ def create_ticket_from_reception_session(
     # 4. 构造 Ticket ORM 记录
     reporter_data = {
         "name": session.contact_name or "客户",
+        "mobile": session.contact_phone or "",
         "phone": session.contact_phone or "",
         "email": None,
     }
@@ -950,9 +971,16 @@ def get_eligible_users(
     db: Session = Depends(get_session),
     _user: AuthedUser = Depends(require_user),
 ) -> list[EligibleUserOut]:
-    """获取系统基础配置中处于启用状态的人员（已配置在坐席中的可标记或全量可选）。"""
+    """获取系统基础配置中处于启用状态且未在当前坐席列表中的人员。"""
+    existing_rows = db.query(ReceptionAgent.user_id, ReceptionAgent.user_name).all()
+    existing_ids = {r[0] for r in existing_rows if r[0] is not None}
+    existing_names = {r[1] for r in existing_rows if r[1]}
     users = db.query(User).filter(User.is_active == True, User.deleted_at.is_(None)).all()  # noqa: E712
-    return [EligibleUserOut.model_validate(u) for u in users]
+    return [
+        EligibleUserOut.model_validate(u)
+        for u in users
+        if u.id not in existing_ids and u.name not in existing_names
+    ]
 
 
 @router.get("/agents", response_model=AgentListResponse)
@@ -2638,6 +2666,14 @@ def client_send_message(
             if not bot_answer:
                 bot_answer = generate_bot_answer(matched_agent, body.content)
 
+            clean_agent_name = _clean_agent_display_name(matched_agent.name if matched_agent else session.agent_name)
+            if bot_answer and clean_agent_name:
+                bot_answer = re.sub(
+                    r"我是\s*(?:发票云)?(?:智能)?(?:客服|综合|服务|AI)?助手",
+                    f"我是{clean_agent_name}",
+                    bot_answer,
+                )
+
             agent_display_name = (
                 f"{matched_agent.avatar} {matched_agent.name}"
                 if matched_agent.avatar and not matched_agent.name.startswith(matched_agent.avatar)
@@ -3403,6 +3439,30 @@ class ClientTicketOut(BaseModel):
     reply_content: str | None = None
     reply_at: str | None = None
     reply_by: str | None = None
+    reporter_name: str | None = None
+    reporter_mobile: str | None = None
+
+
+def _extract_ticket_reporter_mobile(t: Ticket) -> str | None:
+    """提取工单列表『提单人手机号』（与 tickets.py _to_summary 的 reporter_mobile 口径严格一致）。"""
+    rep = t.reporter if isinstance(t.reporter, dict) else {}
+    mobile = rep.get("mobile") or rep.get("phone")
+    if not mobile and t.source_code == "feishu_ai":
+        mobile = t.ksm_contact_mobile
+    return str(mobile).strip() if mobile else None
+
+
+def _extract_ticket_reporter_name(t: Ticket) -> str | None:
+    """提取工单列表『提单人姓名』（与 tickets.py _to_summary 的 reporter_name 口径一致）。"""
+    if isinstance(t.reporter, dict):
+        name = t.reporter.get("name") or t.reporter.get("contact_name")
+        if name:
+            return str(name).strip()
+    elif isinstance(t.reporter, str) and t.reporter.strip():
+        return t.reporter.strip()
+    if t.source_code == "feishu_ai" and t.ksm_linkman:
+        return str(t.ksm_linkman).strip()
+    return None
 
 
 class ClientTicketRemindRequest(BaseModel):
@@ -3430,32 +3490,34 @@ class ClientTicketConfirmResponse(BaseModel):
 
 @router.get("/client/tickets", response_model=list[ClientTicketOut])
 def client_get_tickets(
-    phone: str = Query(..., min_length=5, description="客户联系人手机号"),
+    phone: str = Query(..., min_length=5, description="咨询人手机号（严格匹配工单提单人手机号）"),
     db: Session = Depends(get_session),
 ) -> list[ClientTicketOut]:
-    """根据客户手机号查询工单列表（支持处理中/待确认/已关闭）"""
+    """根据咨询人手机号匹配工单列表提单人手机号，仅返回提单人手机号严格等于咨询人手机号的工单记录"""
     phone = phone.strip()
     if not phone:
         return []
 
-    # 关联 customer_identities 查 id
-    identity_ids = [
-        cid
-        for (cid,) in db.query(CustomerIdentity.id)
-        .filter(CustomerIdentity.mobile == phone)
-        .all()
-    ]
-
-    query = db.query(Ticket).filter(
-        or_(
-            Ticket.ksm_contact_mobile == phone,
-            Ticket.customer_identity_id.in_(identity_ids) if identity_ids else False,
-            func.cast(Ticket.reporter, String).like(f"%{phone}%"),
-            func.cast(Ticket.source_payload, String).like(f"%{phone}%"),
+    # 仅初筛 reporter 字段包含该手机号（或飞书工单 ksm_contact_mobile == phone）的有效工单，
+    # 排除软删工单与拆单父容器（与工单列表口径一致），再在 Python 层精确校验提单人手机号 == 咨询人手机号。
+    candidate_tickets = (
+        db.query(Ticket)
+        .filter(
+            Ticket.deleted_at.is_(None),
+            Ticket.type != "Parent",
+            or_(
+                func.cast(Ticket.reporter, String).like(f"%{phone}%"),
+                and_(Ticket.source_code == "feishu_ai", Ticket.ksm_contact_mobile == phone),
+            ),
         )
-    ).order_by(desc(Ticket.received_at), desc(Ticket.id))
+        .order_by(desc(Ticket.received_at), desc(Ticket.id))
+        .limit(200)
+        .all()
+    )
 
-    tickets = query.limit(50).all()
+    tickets = [
+        t for t in candidate_tickets if _extract_ticket_reporter_mobile(t) == phone
+    ][:50]
 
     # 预加载用户姓名
     user_ids = set()
@@ -3472,6 +3534,9 @@ def client_get_tickets(
     now = datetime.now(UTC)
     results: list[ClientTicketOut] = []
     for t in tickets:
+        rep_mobile = _extract_ticket_reporter_mobile(t)
+        rep_name = _extract_ticket_reporter_name(t)
+
         # 分类
         if t.status == "closed" or t.process_stage == "完成":
             cat = "closed"
@@ -3482,9 +3547,14 @@ def client_get_tickets(
 
         # 处理人（服务处理环节展示服务处理人，研发处理环节展示产研责任人）
         if t.process_stage in ("研发处理", "产研处理"):
-            handler = user_map.get(t.handler_user_id) or user_map.get(t.assigned_user_id) or "研发责任人"
+            handler = user_map.get(t.assigned_user_id) or user_map.get(t.handler_user_id) or "研发责任人"
         else:
-            handler = user_map.get(t.handler_user_id) or user_map.get(t.assigned_user_id) or "客服处理人"
+            handler = (
+                user_map.get(t.handler_user_id)
+                or (rep_name if t.source_code == "feishu_ai" else None)
+                or user_map.get(t.assigned_user_id)
+                or "客服处理人"
+            )
 
         rec = t.received_at or t.created_at or now
         if rec.tzinfo is None:
@@ -3528,6 +3598,8 @@ def client_get_tickets(
                 reply_content=reply_content,
                 reply_at=reply_time_str,
                 reply_by=handler,
+                reporter_name=rep_name,
+                reporter_mobile=rep_mobile,
             )
         )
     return results

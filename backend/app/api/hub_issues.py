@@ -83,6 +83,9 @@ class HubIssueSummary(BaseModel):
     op_handler: str | None = None
     reject_count: int = 0
     op_status_changed_at: datetime | None = None
+    # 任务处理说明（解决方案列展示）与任务转产研时间
+    reply_content: str | None = None
+    dev_transferred_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -92,6 +95,12 @@ class LinkedTicket(BaseModel):
     short_code: str
     source_code: str | None
     source_ticket_id: str | None
+    source_ticket_number: str | None = None
+    title: str | None = None
+    body: str | None = None
+    process_stage: str | None = None
+    handler_user_id: int | None = None
+    assigned_user_id: int | None = None
     status: str
 
     model_config = {"from_attributes": True}
@@ -148,6 +157,9 @@ class HubIssueDetail(HubIssueSummary):
     # AI 转人工时已尝试的问答（仅 op_status=processing 且最新 auto_reply 判 transfer 回填）；
     # 只读展示用，不进 reply_content/处理说明草稿——避免被误当正式答复发出。
     last_transfer_attempt: TransferAttempt | None = None
+    # 详情页直接展示用的已解析字段（不显示系统编号/产品线编码）
+    product_name: str | None = None
+    responsible_user_name: str | None = None
 
 
 class HubIssueListResponse(BaseModel):
@@ -169,6 +181,37 @@ def _day_bounds(from_d: date | None, to_d: date | None) -> tuple[datetime | None
         else None
     )
     return from_dt, to_dt
+
+
+def _populate_dev_transferred_at(
+    db: Session, hubs: list[HubIssue], summaries: list[HubIssueSummary]
+) -> None:
+    """回填任务转产研时间（优先取 StatusHistory 中 dev_transferred 记录，回落 linear_status_synced_at）。"""
+    if not hubs:
+        return
+    from app.models import StatusHistory
+
+    hub_ids = [h.id for h in hubs]
+    rows = (
+        db.query(StatusHistory.entity_id, StatusHistory.changed_at)
+        .filter(
+            StatusHistory.entity_type == "hub_issue",
+            StatusHistory.entity_id.in_(hub_ids),
+            StatusHistory.to_status == "dev_transferred",
+        )
+        .order_by(StatusHistory.changed_at.asc(), StatusHistory.id.asc())
+        .all()
+    )
+    transfer_map: dict[int, datetime] = {}
+    for eid, changed_at in rows:
+        if changed_at is not None:
+            transfer_map[eid] = changed_at
+
+    for h, s in zip(hubs, summaries, strict=False):
+        if h.id in transfer_map:
+            s.dev_transferred_at = transfer_map[h.id]
+        elif h.type in ("Bug_fix", "Demand") and (h.linear_uuid or h.linear_identifier):
+            s.dev_transferred_at = h.linear_status_synced_at or h.status_changed_at
 
 
 @router.get("", response_model=HubIssueListResponse)
@@ -208,8 +251,10 @@ def list_hub_issues(
         page=page,
         page_size=page_size,
     )
+    summaries = [HubIssueSummary.model_validate(h) for h in p.items]
+    _populate_dev_transferred_at(db, p.items, summaries)
     return HubIssueListResponse(
-        items=[HubIssueSummary.model_validate(h) for h in p.items],
+        items=summaries,
         total=p.total,
         page=p.page,
         page_size=p.page_size,
@@ -352,6 +397,72 @@ def get_catalog_module_owner(
     )
 
 
+def _clean_person_name(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    import re
+
+    s = raw.strip()
+    if s.startswith("user:"):
+        s = s[5:].strip()
+    s = re.sub(r"\buser#\d+\b", "", s, flags=re.IGNORECASE).strip()
+    s = re.sub(r"用户\s*#\d+", "", s).strip()
+    s = re.sub(r"^#\d+$", "", s).strip()
+    return s or None
+
+
+def _resolve_responsible_user_name(
+    db: Session, hub: HubIssue, linked: list[Ticket]
+) -> str | None:
+    primary_tk = linked[0] if linked else None
+    stage = (primary_tk.process_stage if primary_tk else "") or "服务处理"
+    is_dev_stage = stage in ("研发处理", "产研处理", "查验处理")
+
+    def _user_name(uid: int | None) -> str | None:
+        if uid is None:
+            return None
+        u = db.get(User, uid)
+        return _clean_person_name(u.name) if u else None
+
+    if is_dev_stage:
+        if hub.product_line_code and hub.module:
+            mod_owner = peek_module_owner(db, hub.product_line_code, hub.module)
+            if mod_owner and mod_owner.name:
+                cleaned = _clean_person_name(mod_owner.name)
+                if cleaned:
+                    return cleaned
+        for uid in (
+            hub.owner_user_id,
+            hub.assigned_user_id,
+            primary_tk.assigned_user_id if primary_tk else None,
+        ):
+            name = _user_name(uid)
+            if name:
+                return name
+        return None
+
+    for uid in (
+        primary_tk.handler_user_id if primary_tk else None,
+        hub.op_handler_user_id,
+    ):
+        name = _user_name(uid)
+        if name:
+            return name
+    if hub.op_handler and hub.op_handler != "agent":
+        cleaned = _clean_person_name(hub.op_handler)
+        if cleaned:
+            return cleaned
+    for uid in (
+        hub.assigned_user_id,
+        primary_tk.assigned_user_id if primary_tk else None,
+        hub.owner_user_id,
+    ):
+        name = _user_name(uid)
+        if name:
+            return name
+    return None
+
+
 @router.get("/{hub_issue_id}", response_model=HubIssueDetail)
 def get_hub_issue(
     hub_issue_id: int,
@@ -362,9 +473,24 @@ def get_hub_issue(
     if hub is None:
         raise HTTPException(status_code=404, detail="hub_issue not found")
     linked = TicketRepository(db).list_for_hub_issue(hub_issue_id)
+    if hub.ticket_id is not None and all(t.id != hub.ticket_id for t in linked):
+        parent_tk = db.get(Ticket, hub.ticket_id)
+        if parent_tk is not None and parent_tk.deleted_at is None:
+            linked.append(parent_tk)
     detail = HubIssueDetail.model_validate(hub)
+    _populate_dev_transferred_at(db, [hub], [detail])
     detail.linked_tickets = [LinkedTicket.model_validate(t) for t in linked]
-    from app.models import HubIssueLinearIssue
+
+    from app.models import HubIssueLinearIssue, ProductLine
+
+    if hub.product and hub.product.strip():
+        detail.product_name = hub.product.strip()
+    elif hub.product_line_code:
+        pl = db.query(ProductLine).filter(ProductLine.code == hub.product_line_code).first()
+        if pl and pl.name:
+            detail.product_name = pl.name
+
+    detail.responsible_user_name = _resolve_responsible_user_name(db, hub, linked)
 
     subs = (
         db.query(HubIssueLinearIssue)
@@ -819,6 +945,51 @@ def update_hub_attributes(
     if body.product_line_code or body.module:
         upsert_catalog(db, product_line_code=hub.product_line_code, module=hub.module)
 
+    # 8) & 9) 产品分类、问题模块补充完整后，匹配补充产研责任田责任人；
+    # 若为飞书工单且研发责任田责任人不为空，自动转产研推送给 Linear 处理并更新处理环节为「产研处理」
+    from app.services.ingest.feishu_ai_ingester import (
+        auto_transfer_feishu_ticket_to_linear,
+        resolve_feishu_product_and_module,
+        resolve_feishu_rd_owner,
+    )
+
+    if hub.product_line_code and hub.module:
+        rd_owner = resolve_feishu_rd_owner(db, hub.product_line_code, hub.module)
+        if rd_owner is not None:
+            hub.assigned_user_id = rd_owner.id
+            hub.owner_user_id = rd_owner.id
+
+    linked_tks = (
+        db.query(Ticket)
+        .filter(
+            (Ticket.hub_issue_id == hub.id) | (Ticket.id == hub.ticket_id),
+            Ticket.deleted_at.is_(None),
+        )
+        .all()
+    )
+    for tk in linked_tks:
+        if body.product_line_code is not None or body.module is not None:
+            if tk.source_code == "feishu_ai":
+                eff_plc, eff_prod_name, eff_mod = resolve_feishu_product_and_module(
+                    db, hub.product_line_code, hub.module
+                )
+                hub.product_line_code = eff_plc
+                tk.product_line_code = eff_plc
+                if eff_prod_name:
+                    tk.source_product_name = eff_prod_name
+                    tk.ksm_reporter_product_line = eff_prod_name
+                tk.module = eff_mod
+                tk.ksm_reporter_module = eff_mod
+            else:
+                if body.product_line_code is not None:
+                    tk.product_line_code = hub.product_line_code
+                if body.module is not None:
+                    tk.module = hub.module
+        if hub.assigned_user_id is not None:
+            tk.assigned_user_id = hub.assigned_user_id
+        if tk.source_code == "feishu_ai" and tk.assigned_user_id is not None:
+            auto_transfer_feishu_ticket_to_linear(db, tk)
+
     if changes:
         StatusHistoryRepository(db).record(
             entity_type="hub_issue",
@@ -1133,6 +1304,7 @@ class UpdateSubTaskBody(BaseModel):
     product_line_code: str | None = None
     module: str | None = None
     solution: str | None = None
+    assigned_user_id: int | None = None
 
 
 class ConfirmSubTaskBody(BaseModel):
@@ -1158,6 +1330,12 @@ def update_subtask_endpoint(
     db: Session = Depends(get_session),
 ) -> ConfirmSubTaskResponse:
     """行内更新子任务的标题、类型、产品线、模块或解决方案。"""
+    from app.services.ingest.feishu_ai_ingester import (
+        auto_transfer_feishu_ticket_to_linear,
+        resolve_feishu_product_and_module,
+        resolve_feishu_rd_owner,
+    )
+
     _authorize_hub_handler(db, hub_issue_id, user)
     hub = db.get(HubIssue, hub_issue_id)
     if hub is None or hub.deleted_at is not None:
@@ -1183,6 +1361,9 @@ def update_subtask_endpoint(
             hub.op_handler_user_id = None
             hub.status = "draft"
         elif body.type == "Operation" and old_type != "Operation":
+            hub.reply_content = None
+            hub.reply_authored_by = None
+            hub.reply_updated_at = None
             hub.status = "draft"
             apply_op_status(
                 db,
@@ -1196,14 +1377,18 @@ def update_subtask_endpoint(
     if body.module is not None:
         hub.module = body.module
     if body.solution is not None:
-        hub.reply_content = body.solution
+        hub.reply_content = body.solution or None
+    if body.assigned_user_id is not None:
+        hub.assigned_user_id = body.assigned_user_id
 
     if body.product_line_code or body.module:
         upsert_catalog(db, product_line_code=hub.product_line_code, module=hub.module)
 
     # 自动根据产品线与问题模块匹配责任人（支持所有任务类型）
     if body.product_line_code is not None or body.module is not None or body.type is not None:
-        owner = peek_module_owner(db, hub.product_line_code, hub.module)
+        owner = peek_module_owner(db, hub.product_line_code, hub.module) or resolve_feishu_rd_owner(
+            db, hub.product_line_code, hub.module
+        )
         if owner is not None:
             hub.assigned_user_id = owner.id
 
@@ -1218,12 +1403,32 @@ def update_subtask_endpoint(
             ticket.hub_issue_id == hub.id or ticket.predicted_type is None
         ):
             ticket.predicted_type = body.type
-        if body.product_line_code is not None:
-            ticket.product_line_code = body.product_line_code
-        if body.module is not None:
-            ticket.module = body.module
-        if ticket.hub_issue_id == hub.id and hub.assigned_user_id is not None:
+            if body.type == "Operation" and not body.solution:
+                ticket.cached_reply_content = None
+        if body.solution == "" and ticket.hub_issue_id == hub.id:
+            ticket.cached_reply_content = None
+        if body.product_line_code is not None or body.module is not None:
+            if ticket.source_code == "feishu_ai":
+                eff_plc, eff_prod_name, eff_mod = resolve_feishu_product_and_module(
+                    db, hub.product_line_code, hub.module
+                )
+                hub.product_line_code = eff_plc
+                ticket.product_line_code = eff_plc
+                if eff_prod_name:
+                    ticket.source_product_name = eff_prod_name
+                    ticket.ksm_reporter_product_line = eff_prod_name
+                ticket.module = eff_mod
+                ticket.ksm_reporter_module = eff_mod
+            else:
+                if body.product_line_code is not None:
+                    ticket.product_line_code = body.product_line_code
+                if body.module is not None:
+                    ticket.module = body.module
+        if (ticket.hub_issue_id == hub.id or hub.ticket_id == ticket.id) and hub.assigned_user_id is not None:
             ticket.assigned_user_id = hub.assigned_user_id
+        # 8) & 9) 飞书工单补充完整产品分类、问题模块且匹配到研发责任田责任人后，自动转产研并更新处理环节为「产研处理」
+        if ticket.source_code == "feishu_ai" and ticket.assigned_user_id is not None:
+            auto_transfer_feishu_ticket_to_linear(db, ticket)
 
     db.commit()
     db.refresh(hub)
@@ -1258,6 +1463,23 @@ def delete_subtask_endpoint(
         raise HTTPException(status_code=400, detail="已推送到 Linear 的子任务不可直接删除")
 
     hub.deleted_at = datetime.now(UTC)
+    linked_tickets = (
+        db.query(Ticket)
+        .filter(Ticket.hub_issue_id == hub.id, Ticket.deleted_at.is_(None))
+        .all()
+    )
+    for t in linked_tickets:
+        next_sub = (
+            db.query(HubIssue)
+            .filter(
+                HubIssue.ticket_id == t.id,
+                HubIssue.id != hub.id,
+                HubIssue.deleted_at.is_(None),
+            )
+            .order_by(HubIssue.id.asc())
+            .first()
+        )
+        t.hub_issue_id = next_sub.id if next_sub else None
     db.commit()
     return {"ok": True, "hub_issue_id": hub_issue_id}
 
@@ -1359,7 +1581,11 @@ def confirm_subtask_endpoint(
             )
 
         # 执行推送到 Linear
-        from app.services.hub_issues.linear_push import push_hub_issue_to_linear
+        from app.services.hub_issues.linear_push import (
+            _sync_tickets_dev_stage,
+            push_hub_issue_to_linear,
+        )
+        from app.services.hub_issues.linear_status_sync import _extract_comm_and_feedback
 
         prev_hub_status = hub.status
         push_res = push_hub_issue_to_linear(hub.id, db, assignee_override_user_id=assignee_id)
@@ -1385,8 +1611,17 @@ def confirm_subtask_endpoint(
             )
             raise HTTPException(status_code=502, detail=err_detail)
 
+        if not (hub.linear_uuid or hub.linear_identifier):
+            _sync_tickets_dev_stage(db, hub)
+
+        comm, fb = _extract_comm_and_feedback(hub.reply_content)
+        fb_val = fb or "产研分析中暂无回复"
+        hub.reply_content = f"【沟通记录】{comm}\n【产研反馈】：{fb_val}"
+        hub.reply_is_draft = False
         hub.status = "processing"
         hub.assigned_user_id = assignee_id
+        if hub.owner_user_id is None:
+            hub.owner_user_id = assignee_id
         db.commit()
         db.refresh(hub)
 

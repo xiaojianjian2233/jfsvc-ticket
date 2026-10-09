@@ -117,6 +117,9 @@ def _resolve_module(ticket_id: int) -> None:
         ticket = db.get(Ticket, ticket_id)
         if ticket is None:
             return
+        # 飞书来源工单：产品分类=提单产品，问题模块=提单模块，不由 AI 归类覆盖
+        if ticket.source_code == "feishu_ai":
+            return
         resolve_module(db, ticket)
         db.commit()
     except Exception:
@@ -194,10 +197,36 @@ def run_post_ingest_agents(ticket_id: int) -> None:
     单一 BG task；各步失败自吞不阻塞。
     """
     from app.services.agents.answer_draft import generate_initial_ticket_answer
+    from app.services.ingest.feishu_ai_ingester import (
+        auto_transfer_feishu_ticket_to_linear,
+        resolve_feishu_rd_owner,
+    )
 
     settings = get_settings()
     if settings.vision_enabled:
         extract_ticket_attachments(ticket_id)
+
+    # 飞书工单（feishu_ai）专项流转：
+    # 若产品分类、问题模块已完整并匹配到产研责任田责任人，直接自动转产研推送给 Linear 处理，
+    # 处理环节更新为「产研处理」，不走普通 AI 归类覆盖。
+    db = make_session()
+    try:
+        tk = db.get(Ticket, ticket_id)
+        if tk is not None and tk.source_code == "feishu_ai":
+            if tk.assigned_user_id is None and tk.product_line_code and tk.module:
+                rd_owner = resolve_feishu_rd_owner(db, tk.product_line_code, tk.module)
+                if rd_owner is not None:
+                    tk.assigned_user_id = rd_owner.id
+                    db.commit()
+            if tk.assigned_user_id is not None:
+                auto_transfer_feishu_ticket_to_linear(db, tk)
+                db.commit()
+                return
+    except Exception:
+        db.rollback()
+        logger.exception("feishu_post_ingest_auto_transfer_failed", ticket_id=ticket_id)
+    finally:
+        db.close()
 
     tri = run_ticket_triage(ticket_id)
     # 先写入规范产品线/模块，再生成首次答复。否则 KSM 未传 productLineCode 时，

@@ -275,6 +275,15 @@ def _extract_contact_info(t: Ticket) -> tuple[str | None, str | None, str | None
     if not email:
         email = p.get("contact_email") or p.get("user_emails") or p.get("email")
 
+    if t.source_code == "feishu_ai" and isinstance(t.reporter, dict):
+        rep = t.reporter
+        if not name:
+            name = rep.get("contact_name") or rep.get("name")
+        if not mobile:
+            mobile = rep.get("contact_mobile") or rep.get("mobile")
+        if not email:
+            email = rep.get("contact_email") or rep.get("email")
+
     return (
         str(name).strip() if name else None,
         str(mobile).strip() if mobile else None,
@@ -507,7 +516,8 @@ def list_tickets(
         s = TicketSummary.model_validate(t)
         # 历史数据可能在入库时直接把来源产品/模块写进 ticket 生效字段。未经过
         # 系统归类且尚未毕业的工单不展示这些旧来源值；归类完成后再展示系统结果。
-        if t.hub_issue_id is None and t.module_classified_at is None:
+        # 飞书来源工单（feishu_ai）例外：产品分类=提单产品，问题模块=提单模块。
+        if t.hub_issue_id is None and t.module_classified_at is None and t.source_code != "feishu_ai":
             s.product_line_code = None
             s.module = None
         if t.assigned_user_id is not None:
@@ -540,9 +550,9 @@ def list_tickets(
         # 关联任务数：拆分子单数（Parent 持有 children_ticket_ids）；单问题工单=1
         s.children_count = len(t.children_ticket_ids or []) or 1
         # 提单人信息从 reporter JSON 解析（入库写的是 name/mobile/email）
-        rep = t.reporter or {}
-        s.reporter_name = rep.get("name") or None
-        s.reporter_mobile = rep.get("mobile") or None
+        rep = t.reporter if isinstance(t.reporter, dict) else {}
+        s.reporter_name = rep.get("name") or (t.reporter if isinstance(t.reporter, str) else None) or None
+        s.reporter_mobile = rep.get("mobile") or rep.get("phone") or None
         s.reporter_email = rep.get("email") or None
         # 来源工单编号（展示用，回落 source_ticket_id）
         s.source_ticket_number = _source_ticket_number(t)
@@ -554,6 +564,37 @@ def list_tickets(
         s.contact_name = c_name
         s.contact_mobile = c_mobile
         s.contact_email = c_email
+        if t.source_code == "feishu_ai":
+            # 1) 飞书工单：产品分类=提单产品，问题模块=提单模块
+            orig_cat = (t.source_payload or {}).get("_original_catalog") or {}
+            if not s.product_name:
+                s.product_name = (
+                    s.product_line_name
+                    or orig_cat.get("product_line_code")
+                    or s.product_line_code
+                )
+            if not s.product_line_name and s.product_name:
+                s.product_line_name = s.product_name
+            if not s.module and orig_cat.get("module"):
+                s.module = orig_cat.get("module")
+            if s.module and not s.ksm_reporter_module:
+                s.ksm_reporter_module = s.module
+            # 2) 飞书工单：处理人=提单人
+            if not s.handler_user_name and s.reporter_name:
+                s.handler_user_name = s.reporter_name
+            # 4) 5) 6) 提单人=联系人，提单人手机=联系人手机，提单人邮箱=联系邮箱
+            if not s.contact_name and s.reporter_name:
+                s.contact_name = s.reporter_name
+            if not s.contact_mobile and s.reporter_mobile:
+                s.contact_mobile = s.reporter_mobile
+            if not s.contact_email and s.reporter_email:
+                s.contact_email = s.reporter_email
+            if not s.ksm_linkman:
+                s.ksm_linkman = s.contact_name
+            if not s.ksm_contact_mobile:
+                s.ksm_contact_mobile = s.contact_mobile
+            if not s.ksm_contact_email:
+                s.ksm_contact_email = s.contact_email
         if t.source_code == "ksm":
             if not s.ksm_linkman:
                 s.ksm_linkman = c_name
@@ -650,6 +691,11 @@ def build_ticket_detail(db: Session, ticket: Ticket) -> TicketDetail:
             # ticket.predicted_type 从未被回写，只读 predicted_type 会让已毕业
             # 工单在详情页误判成「未分类」（前端 isOperation/isDevType 据此判断）。
             detail.predicted_type = hub.type
+    if detail.product_line_code:
+        pl_row = db.execute(
+            select(ProductLine.name).where(ProductLine.code == detail.product_line_code)
+        ).scalar()
+        detail.product_line_name = pl_row
     # 与 TicketSummary.product_name 保持同一语义：只表示来源工单的「提单产品」。
     # 跨来源统一字段；历史 KSM 行兼容旧专用列。产品分类中文名应使用
     # product_line_name/目录查询，不能复用 product_name。
@@ -671,13 +717,41 @@ def build_ticket_detail(db: Session, ticket: Ticket) -> TicketDetail:
         # 与列表接口 _to_summary 口径一致；feedback_user/linkman 作旧数据兜底。
         rep = ticket.reporter
         detail.reporter_name = rep.get("name") or rep.get("feedback_user") or rep.get("linkman")
-        detail.reporter_mobile = rep.get("mobile")
+        detail.reporter_mobile = rep.get("mobile") or rep.get("phone")
         detail.reporter_email = rep.get("email")
     # 客户联系人信息多级解析回落（姓名、手机、邮箱）
     c_name, c_mobile, c_email = _extract_contact_info(ticket)
     detail.contact_name = c_name
     detail.contact_mobile = c_mobile
     detail.contact_email = c_email
+    if ticket.source_code == "feishu_ai":
+        orig_cat = (ticket.source_payload or {}).get("_original_catalog") or {}
+        if not detail.product_name:
+            detail.product_name = (
+                detail.product_line_name
+                or orig_cat.get("product_line_code")
+                or detail.product_line_code
+            )
+        if not detail.product_line_name and detail.product_name:
+            detail.product_line_name = detail.product_name
+        if not detail.module and orig_cat.get("module"):
+            detail.module = orig_cat.get("module")
+        if detail.module and not detail.ksm_reporter_module:
+            detail.ksm_reporter_module = detail.module
+        if not detail.handler_user_name and detail.reporter_name:
+            detail.handler_user_name = detail.reporter_name
+        if not detail.contact_name and detail.reporter_name:
+            detail.contact_name = detail.reporter_name
+        if not detail.contact_mobile and detail.reporter_mobile:
+            detail.contact_mobile = detail.reporter_mobile
+        if not detail.contact_email and detail.reporter_email:
+            detail.contact_email = detail.reporter_email
+        if not detail.ksm_linkman:
+            detail.ksm_linkman = detail.contact_name
+        if not detail.ksm_contact_mobile:
+            detail.ksm_contact_mobile = detail.contact_mobile
+        if not detail.ksm_contact_email:
+            detail.ksm_contact_email = detail.contact_email
     if ticket.source_code == "ksm":
         if not detail.ksm_linkman:
             detail.ksm_linkman = c_name
@@ -1256,6 +1330,13 @@ def list_ticket_subtasks(
 
     out: list[SubTaskOut] = []
     for s in subs:
+        sol = s.reply_content
+        if (
+            s.type in ("Bug_fix", "Demand")
+            and s.reply_is_draft
+            and s.reply_authored_by == "agent:ai_cs:draft"
+        ):
+            sol = None
         st = SubTaskOut(
             id=s.id,
             short_code=s.short_code,
@@ -1268,7 +1349,7 @@ def list_ticket_subtasks(
             linear_status=s.linear_status,
             assigned_user_id=s.assigned_user_id,
             assigned_user_name=u_map.get(s.assigned_user_id) if s.assigned_user_id else None,
-            solution=s.reply_content,
+            solution=sol,
             attachments=att_map.get(s.id, []),
         )
         out.append(st)

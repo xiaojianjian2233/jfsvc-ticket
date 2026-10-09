@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   type AgentItem,
   type EligibleUser,
@@ -38,14 +38,28 @@ export function AgentsPage() {
   const [editingAgent, setEditingAgent] = useState<AgentItem | null>(null);
   const [eligibleUsers, setEligibleUsers] = useState<EligibleUser[]>([]);
   const [userSearchText, setUserSearchText] = useState("");
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const userDropdownRef = useRef<HTMLDivElement>(null);
 
   // 表单状态
   const [formUserId, setFormUserId] = useState<number | null>(null);
   const [formNickname, setFormNickname] = useState("");
   const [formMaxConcurrent, setFormMaxConcurrent] = useState<number>(5);
+  const [formMaxConcurrentInput, setFormMaxConcurrentInput] = useState<string>("5");
   const [formStatus, setFormStatus] = useState<"online" | "busy" | "offline">("offline");
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+
+  useEffect(() => {
+    if (!userDropdownOpen) return;
+    const handleDocClick = (e: MouseEvent) => {
+      if (userDropdownRef.current && !userDropdownRef.current.contains(e.target as Node)) {
+        setUserDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleDocClick);
+    return () => document.removeEventListener("mousedown", handleDocClick);
+  }, [userDropdownOpen]);
 
   const loadData = async () => {
     setLoading(true);
@@ -117,17 +131,23 @@ export function AgentsPage() {
     setFormUserId(null);
     setFormNickname("");
     setFormMaxConcurrent(5);
+    setFormMaxConcurrentInput("5");
     setFormStatus("offline");
     setErrorMsg("");
     setUserSearchText("");
+    setUserDropdownOpen(false);
     setDrawerOpen(true);
 
     try {
-      const users = await fetchEligibleUsers();
-      setEligibleUsers(users);
-      if (users.length > 0) {
-        setFormUserId(users[0].id);
-      }
+      const [users, allAgentsRes] = await Promise.all([
+        fetchEligibleUsers(),
+        fetchAgents(),
+      ]);
+      const existingAgents = allAgentsRes.items.length > 0 ? allAgentsRes.items : agents;
+      const available = users.filter(
+        (u) => !existingAgents.some((a) => a.user_id === u.id || a.user_name === u.name)
+      );
+      setEligibleUsers(available);
     } catch {
       // ignore
     }
@@ -138,8 +158,10 @@ export function AgentsPage() {
     setFormUserId(agent.user_id);
     setFormNickname(agent.nickname);
     setFormMaxConcurrent(agent.max_concurrent);
+    setFormMaxConcurrentInput(String(agent.max_concurrent));
     setFormStatus(agent.status);
     setErrorMsg("");
+    setUserDropdownOpen(false);
     setDrawerOpen(true);
   };
 
@@ -193,13 +215,19 @@ export function AgentsPage() {
     }
   };
 
-  const filteredEligibleUsers = useMemo(() => {
-    if (!userSearchText.trim()) return eligibleUsers;
-    const q = userSearchText.trim().toLowerCase();
+  const availableEligibleUsers = useMemo(() => {
     return eligibleUsers.filter(
+      (u) => !agents.some((a) => a.user_id === u.id || a.user_name === u.name)
+    );
+  }, [eligibleUsers, agents]);
+
+  const filteredEligibleUsers = useMemo(() => {
+    if (!userSearchText.trim()) return availableEligibleUsers;
+    const q = userSearchText.trim().toLowerCase();
+    return availableEligibleUsers.filter(
       (u) => u.name.toLowerCase().includes(q) || (u.email && u.email.toLowerCase().includes(q))
     );
-  }, [eligibleUsers, userSearchText]);
+  }, [availableEligibleUsers, userSearchText]);
 
   const allSelected = agents.length > 0 && selectedIds.length === agents.length;
 
@@ -726,27 +754,61 @@ export function AgentsPage() {
                     className="w-full h-[25px] px-2 py-0 bg-slate-100 border border-slate-200 rounded text-slate-500 text-[14px] leading-none cursor-not-allowed"
                   />
                 ) : (
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5 relative" ref={userDropdownRef}>
                     <input
                       type="text"
                       value={userSearchText}
-                      onChange={(e) => setUserSearchText(e.target.value)}
-                      placeholder="输入姓名或邮箱快速搜索人员..."
-                      className="w-full h-[25px] px-2 py-0 border border-slate-200 rounded text-[14px] leading-none focus:outline-none focus:border-teal-600"
+                      onClick={() => setUserDropdownOpen(true)}
+                      onFocus={() => setUserDropdownOpen(true)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setUserSearchText(val);
+                        setUserDropdownOpen(true);
+                        const matched = availableEligibleUsers.find(
+                          (u) => u.name === val.trim()
+                        );
+                        setFormUserId(matched ? matched.id : null);
+                      }}
+                      placeholder="点击选择或输入关键信息快速定位人员..."
+                      className="w-full h-[25px] px-2 py-0 border border-slate-200 rounded text-[14px] leading-none focus:outline-none focus:border-teal-600 bg-white"
                     />
-                    <select
-                      value={formUserId || ""}
-                      onChange={(e) => setFormUserId(Number(e.target.value))}
-                      className="w-full h-[25px] px-2 py-0 border border-slate-200 rounded text-slate-800 text-[14px] leading-none focus:outline-none focus:border-teal-600 bg-white"
-                    >
-                      {filteredEligibleUsers.map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.name} ({u.role}) {u.email ? `- ${u.email}` : ""}
-                        </option>
-                      ))}
-                    </select>
+                    {userDropdownOpen && (
+                      <div
+                        data-testid="eligible-users-dropdown"
+                        className="absolute top-[27px] left-0 right-0 z-30 bg-white border border-slate-200 rounded shadow-lg max-h-[180px] overflow-y-auto divide-y divide-slate-50"
+                      >
+                        {filteredEligibleUsers.length === 0 ? (
+                          <div className="px-2.5 py-2 text-[12px] text-slate-400 text-center">
+                            暂无可添加的启用人员
+                          </div>
+                        ) : (
+                          filteredEligibleUsers.map((u) => (
+                            <button
+                              key={u.id}
+                              type="button"
+                              onClick={() => {
+                                setFormUserId(u.id);
+                                setUserSearchText(u.name);
+                                setUserDropdownOpen(false);
+                              }}
+                              className={`w-full px-2.5 py-1.5 text-left text-[13px] hover:bg-slate-50 flex items-center justify-between cursor-pointer ${
+                                formUserId === u.id
+                                  ? "bg-blue-50/70 text-[rgb(35,94,212)] font-medium"
+                                  : "text-slate-700"
+                              }`}
+                            >
+                              <span>{u.name}</span>
+                              <span className="text-[11px] text-slate-400">
+                                {u.role}
+                                {u.email ? ` - ${u.email}` : ""}
+                              </span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
                     <p className="text-[12px] text-slate-400 mt-0.5 leading-normal">
-                      数据来源系统基础配置启用状态人员，编辑模式不可修改
+                      数据来源系统基础配置启用状态且未在当前坐席列表中的人员，编辑模式不可修改
                     </p>
                   </div>
                 )}
@@ -776,11 +838,16 @@ export function AgentsPage() {
                   在线接待上限 <span className="text-rose-500">*</span>
                 </label>
                 <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={formMaxConcurrent}
-                  onChange={(e) => setFormMaxConcurrent(Number(e.target.value))}
+                  type="text"
+                  inputMode="numeric"
+                  value={formMaxConcurrentInput}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/[^\d]/g, "");
+                    const cleaned = raw.replace(/^0+(?=\d)/, "");
+                    setFormMaxConcurrentInput(cleaned);
+                    setFormMaxConcurrent(cleaned === "" ? 0 : Number(cleaned));
+                  }}
+                  placeholder="请输入在线接待上限数量"
                   className="w-full h-[25px] px-2 py-0 border border-slate-200 rounded text-slate-800 text-[14px] leading-none focus:outline-none focus:border-teal-600 font-mono"
                 />
                 <p className="text-[12px] text-slate-400 mt-1 leading-normal">

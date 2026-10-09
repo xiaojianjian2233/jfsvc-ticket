@@ -162,7 +162,7 @@ export function AgentAvatarView({
 
 export const ONGOING_SESSION_IDS_KEY = "reception_client_ongoing_session_ids";
 
-export const cleanBotAnswerText = (raw: string): string => {
+export const cleanBotAnswerText = (raw: string, agentName?: string): string => {
   if (!raw) return "";
   let text = raw;
   text = text.replace(
@@ -171,21 +171,27 @@ export const cleanBotAnswerText = (raw: string): string => {
   );
   text = text.replace(/(?:\r?\n|\s)*(?:1\s*[.、:： ]?\s*解决|2\s*[.、:： ]?\s*未解决)[\s\S]*$/i, "");
   text = text.replace(/(?:\r?\n|\s)*以上(?:解答|回复)是否对您有帮助[？?]?[\s\S]*$/i, "");
+  if (agentName && agentName.trim()) {
+    const cleanName = agentName.trim();
+    text = text.replace(/我是\s*(?:发票云)?(?:智能)?(?:客服|综合|服务|AI)?助手/g, `我是${cleanName}`);
+  }
   return text.trim();
 };
 
 /**
- * 判定 Agent 回复是否属于「信息收集 / 问题确认 / 询问类」回复：
- * 规则：此类反问、澄清、引导补充信息的回复严禁展示「解决 / 未解决」快捷胶囊，
+ * 判定 Agent 回复是否属于「信息收集 / 问题确认 / 询问类 / 欢迎问候类」回复：
+ * 规则：此类欢迎语、反问、澄清、引导补充信息的回复严禁展示「解决 / 未解决」快捷胶囊，
  * 只有真正提供具体方案、指引或排查结果的「结果答复类」才展示。
  */
 export const isClarificationOrInquiryResponse = (rawContent: string): boolean => {
   if (!rawContent) return false;
   const text = rawContent.trim();
 
-  // 1. 用户给出的典型反问/信息收集示例快速匹配
+  // 1. 用户给出的典型反问/信息收集/欢迎语示例快速匹配
   if (
-    /(?:请问您遇到的是什么问题|使用的是哪款产品|请描述一下具体情况|我来帮您解答)/.test(text) &&
+    /(?:请问您遇到的是什么问题|使用的是哪款产品|请描述一下具体情况|我来帮您解答|请告诉我您在|遇到什么问题|为了更好的定位问题|请准确的告知我|您可以向我咨询)/.test(
+      text
+    ) &&
     !/(?:解决方案|操作步骤|处理方法)/.test(text)
   ) {
     return true;
@@ -208,20 +214,22 @@ export const isClarificationOrInquiryResponse = (rawContent: string): boolean =>
     return true;
   }
 
-  // 4. 典型信息收集、反问追问或确认特征
+  // 4. 典型信息收集、反问追问、欢迎引导或确认特征
   const inquiryPatterns = [
-    // 询问问题类型、产品、模块、版本
-    /(?:请问|请告知|请提供|方便提供|能否提供)[\s\S]*?(?:什么问题|哪款产品|哪一个产品|哪个版本|哪个模块|具体情况|报错信息|错误提示|报错截图|发票代码|发票号码|税号|纳税人识别号)/i,
+    // 询问问题类型、产品、模块、版本、试用报错
+    /(?:请问|请告诉我|请告知|请准确(?:的)?告知|请提供|方便提供|能否提供)[\s\S]*?(?:什么问题|哪款产品|哪一个产品|当前使用的产品|哪个版本|哪个模块|具体情况|报错信息|错误提示|报错截图|报错的操作流程|报错的内容|发票代码|发票号码|税号|纳税人识别号)/i,
     // 请问您是在... / 请问您遇到的是... / 请问您使用的是...
     /请问您?(?:遇到的是|使用的是|需要的是|是在|指的是|是指|具体在)/i,
     // 引导客户描述、补充信息以便排查
-    /请(?:详细|具体)?(?:描述|补充|说明|提供)[\s\S]*?(?:以便(?:为您|我们)?(?:分析|定位|排查|解答|处理|核实)|我来帮您)/i,
+    /请(?:详细|具体|准确的?)?(?:描述|补充|说明|提供|告知)[\s\S]*?(?:以便(?:为您|我们)?(?:分析|定位|排查|解答|处理|核实)|为了更好(?:的|地)定位问题|我来帮您)/i,
     // 确认类反问：您指的是...吗 / 是不是... / 请确认是否...
     /(?:您指的是|您的意思是|请确认是否|请确认一下|请核对是否)[\s\S]*?[？?吗]/i,
     // 二选一确认："是...还是..."
     /是[\s\S]{2,20}还是[\s\S]{2,20}[？?]/,
     // 结尾引导反问："以便为您排查/解答"
     /(?:以便为您|我来帮您)(?:排查|定位|解答|处理)[。！!？?]?$/i,
+    // 欢迎问候引导："很高兴为您服务。您可以向我咨询..."
+    /很高兴为您服务[\s\S]*?您可以向我咨询/i,
   ];
 
   return inquiryPatterns.some((pattern) => pattern.test(text));
@@ -552,7 +560,7 @@ export function CustomerChatWorkbenchPage({
       const newMsgs = await clientFetchMessages(currentSession.id);
       setMessages(newMsgs);
       setTimeout(scrollToBottom, 50);
-      await refreshSessions();
+      await Promise.all([refreshSessions(), loadTickets()]);
     } catch (err) {
       console.error("提交工单失败:", err);
       alert("提交售后工单失败，请重试");
@@ -645,12 +653,22 @@ export function CustomerChatWorkbenchPage({
     };
   }, [currentSession?.id, currentSession?.status, profile.contact_phone]);
 
+  // 仅保留提单人手机号等于当前咨询人手机号的工单记录
+  const filterByReporterMobile = (list: ClientTicketItem[]): ClientTicketItem[] => {
+    const targetPhone = (profile.contact_phone || "").trim();
+    if (!targetPhone) return [];
+    return (list || []).filter((t) => {
+      const repPhone = (t.reporter_mobile ?? t.contact_phone ?? "").trim();
+      return !repPhone || repPhone === targetPhone;
+    });
+  };
+
   const loadTickets = async () => {
     if (!profile.contact_phone) return;
     setLoadingTickets(true);
     try {
       const list = await clientFetchTickets(profile.contact_phone);
-      setTickets(list);
+      setTickets(filterByReporterMobile(list));
     } catch (err) {
       console.error("加载工单列表失败:", err);
     } finally {
@@ -729,7 +747,7 @@ export function CustomerChatWorkbenchPage({
         if (!isMounted) return;
         setSessionsGroup(sessionsRes);
         if (ticketsRes) {
-          setTickets(ticketsRes);
+          setTickets(filterByReporterMobile(ticketsRes));
         }
 
         const validNotices = noticesRes || [];
@@ -1158,7 +1176,11 @@ export function CustomerChatWorkbenchPage({
   }
 
   // 智能解析回复中的交互选项（解决/未解决，转人工/转工单，或多选编号方案）
-  const parseOptionCapsules = (content: string, senderType?: string): ParsedOptionCapsules | null => {
+  const parseOptionCapsules = (
+    content: string,
+    senderType?: string,
+    isInitialBotWelcome?: boolean
+  ): ParsedOptionCapsules | null => {
     if (!content) return null;
 
     // 1. 识别转人工/工单引导提示 (优先匹配未解决后或包含转人工提示的消息)
@@ -1191,17 +1213,26 @@ export function CustomerChatWorkbenchPage({
       };
     }
 
-    // 3. 排除欢迎语
+    // 3. 排除欢迎语及问候引导语（机器人的欢迎语下绝不展示 解决/未解决 快捷点击）
     const isWelcomeMessage =
-      content.includes("欢迎使用发票云售后在线支持") ||
+      Boolean(isInitialBotWelcome) ||
+      content.includes("欢迎使用") ||
       content.includes("请问有什么可以帮您") ||
+      content.includes("有什么可以帮助您") ||
       content.includes("我是数电发票智能专家") ||
       content.includes("我是税务申报智能助手") ||
-      content.includes("我是发票云智能综合助手");
+      content.includes("我是发票云智能综合助手") ||
+      content.includes("很高兴为您服务") ||
+      content.includes("您可以向我咨询") ||
+      content.includes("请告诉我您在") ||
+      content.includes("遇到什么问题") ||
+      content.includes("为了更好的定位问题") ||
+      content.includes("请准确的告知我") ||
+      content.includes("请准确地告知我");
 
     // 4. 普通 Bot 业务问答解答：
     // 需求2优化：只有真正给出方案、指导或排查结论的【结果答复类】消息才显示「解决 / 未解决」；
-    // 如果是信息收集、问题确认、反问询问类的回复（如“请问您遇到的是什么问题，使用的是哪款产品呢？请描述一下具体情况”），坚决不展示！
+    // 如果是欢迎语、信息收集、问题确认、反问询问类的回复，坚决不展示！
     if (!isWelcomeMessage && (senderType === "bot" || content.length > 20)) {
       if (isClarificationOrInquiryResponse(content)) {
         return null;
@@ -1220,12 +1251,14 @@ export function CustomerChatWorkbenchPage({
   };
 
   // 解析并渲染消息内容（支持引用、图片/文件/文本，字体加2个号）
-  const renderMessageContent = (content: string, isCustomer: boolean) => {
+  const renderMessageContent = (content: string, isCustomer: boolean, agentName?: string) => {
     // 检查是否包含引用：格式为 「引用 发送人: 引用内容」\n回复正文
     const quoteMatch = content.match(/^「引用\s+([^:：]+)[:：]\s*([\s\S]*?)」\n([\s\S]*)$/);
 
     const renderBody = (rawBody: string) => {
-      const body = !isCustomer ? cleanBotAnswerText(rawBody) : rawBody;
+      const body = !isCustomer
+        ? cleanBotAnswerText(rawBody, agentName || currentSession?.agent_name)
+        : rawBody;
       const imageMatch = body.match(/^\[图片:\s*([^\]]+)\]\n(data:image\/[^\s]+)/s);
       if (imageMatch) {
         const imgName = imageMatch[1];
@@ -1847,10 +1880,26 @@ export function CustomerChatWorkbenchPage({
             ) : messages.length === 0 ? (
               <div className="text-center py-16 text-slate-400 text-[14px]">暂无对话记录</div>
             ) : (
-              messages.map((msg) => {
+              messages.map((msg, msgIdx) => {
                 const isCustomer = msg.sender_type === "customer";
                 const isSystem = msg.sender_type === "system";
                 const isBot = msg.sender_type === "bot";
+                const hasPriorCustomerMsg = messages
+                  .slice(0, msgIdx)
+                  .some((m) => m.sender_type === "customer");
+                const hasExplicitSolutionSteps =
+                  /(?:排查步骤|解决方案|操作步骤|处理方案|处理建议|原因分析|开具解答|操作说明|以上回复是否|请点击下方)/.test(
+                    msg.content
+                  );
+                const isInitialBotWelcome = isBot && !hasPriorCustomerMsg && !hasExplicitSolutionSteps;
+                const botAgentInfo = isBot
+                  ? parseAgentInfo(
+                      msg.sender_name,
+                      (msg as any).sender_avatar,
+                      currentSession?.agent_avatar,
+                      currentSession?.agent_name
+                    )
+                  : null;
 
                 if (isSystem) {
                   // 转人工询问交互卡片
@@ -1931,24 +1980,14 @@ export function CustomerChatWorkbenchPage({
                           <span className="text-slate-400 font-normal">{msg.created_at.slice(11, 16)}</span>
                           <span className="text-slate-600 font-medium">我</span>
                         </>
-                      ) : isBot ? (
-                        (() => {
-                          const agent = parseAgentInfo(
-                            msg.sender_name,
-                            (msg as any).sender_avatar,
-                            currentSession?.agent_avatar,
-                            currentSession?.agent_name
-                          );
-                          return (
-                            <div className="flex items-center gap-1.5">
-                              <AgentAvatarView avatar={agent.avatar} name={agent.name} />
-                              <span className="text-slate-700 font-semibold text-[13px]">{agent.name}</span>
-                              <span className="text-slate-400 font-normal text-[12px] ml-1">
-                                {msg.created_at.slice(11, 16)}
-                              </span>
-                            </div>
-                          );
-                        })()
+                      ) : isBot && botAgentInfo ? (
+                        <div className="flex items-center gap-1.5">
+                          <AgentAvatarView avatar={botAgentInfo.avatar} name={botAgentInfo.name} />
+                          <span className="text-slate-700 font-semibold text-[13px]">{botAgentInfo.name}</span>
+                          <span className="text-slate-400 font-normal text-[12px] ml-1">
+                            {msg.created_at.slice(11, 16)}
+                          </span>
+                        </div>
                       ) : (
                         <div className="flex items-center gap-1.5 text-slate-500">
                           <span className="font-medium text-slate-700">客服 · {msg.sender_name}</span>
@@ -1979,11 +2018,17 @@ export function CustomerChatWorkbenchPage({
                       }`}
                       title={!isCustomer && !isClosed ? "点击可引用回复此消息" : undefined}
                     >
-                      <div className="select-text cursor-text">{renderMessageContent(msg.content, isCustomer)}</div>
+                      <div className="select-text cursor-text">
+                        {renderMessageContent(msg.content, isCustomer, botAgentInfo?.name)}
+                      </div>
 
                       {/* 智能选项与闭环快捷胶囊按钮 (Quick Action Option Capsules) */}
                       {isBot && !isClosed && (() => {
-                        const capsuleData = parseOptionCapsules(msg.content, msg.sender_type);
+                        const capsuleData = parseOptionCapsules(
+                          msg.content,
+                          msg.sender_type,
+                          isInitialBotWelcome
+                        );
                         if (!capsuleData) return null;
 
                         return (
@@ -2299,7 +2344,7 @@ export function CustomerChatWorkbenchPage({
                   }}
                   placeholder={
                     isBotAnalyzing
-                      ? "🤖 智能客服大模型正在深入分析并生成答复，请耐心等待..."
+                      ? "后端客服正在处理中，请耐心等待...."
                       : "请输入您遇到的问题，按 Enter 快捷发送，Shift+Enter 换行；支持拖拽或 Ctrl+V 粘贴截图与文件..."
                   }
                   className="w-full h-[95px] min-h-[95px] resize-none border border-slate-200 rounded-md p-3 text-[14px] text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[rgb(35,94,212)] focus:ring-1 focus:ring-[rgb(35,94,212)]/30"

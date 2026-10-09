@@ -329,73 +329,93 @@ export function CustomerInfoCollectionPage({ onSuccess }: CustomerInfoCollection
         {historyEnterprises.length > 0 && (
           <div className="flex items-start justify-center gap-3 w-full">
             <div className="w-[120px] flex-none" />
-            <div className="w-[500px] flex-none p-3.5 bg-blue-50/70 border border-blue-200/80 rounded-lg space-y-2.5">
-              <div className="text-xs text-[#666666] leading-relaxed">
-                <span className="text-[rgb(35,94,212)] font-semibold">💡 提示：</span>
-                后端查询咨询手机号关联咨询企业有{" "}
-                <strong className="text-[rgb(35,94,212)] font-bold text-sm">
-                  {historyEnterprises.length}
-                </strong>{" "}
-                个，下拉按钮查看并选择历史企业发起咨询，如需要给新企业咨询，请手动录入企业名称和税号
-              </div>
-
-              {/* 下拉按钮查看并选择历史企业 */}
-              <div className="flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => setHistoryDropdownOpen((v) => !v)}
-                  className="flex items-center gap-1.5 px-3 py-1 bg-white border border-[rgb(35,94,212)]/40 text-[rgb(35,94,212)] rounded text-xs font-medium hover:bg-blue-50 cursor-pointer transition shadow-2xs"
+            <div className="w-[500px] flex-none">
+              <div className="min-w-[500px] w-max p-3.5 bg-blue-50/70 border border-blue-200/80 rounded-lg space-y-2">
+                <div
+                  className="text-[12px] text-[#666666] whitespace-nowrap"
+                  style={{ fontSize: "12px" }}
                 >
-                  <span>查看并选择历史企业（{historyEnterprises.length}）</span>
-                  <span>{historyDropdownOpen ? "▲" : "▼"}</span>
-                </button>
+                  <span className="text-[rgb(35,94,212)] font-semibold">提示：</span>
+                  根据咨询手机号关联咨询企业
+                  <strong className="text-[rgb(35,94,212)] font-bold text-[12px]">
+                    {historyEnterprises.length}
+                  </strong>
+                  个，下拉按钮查看并选择历史企业发起咨询，如需要给新企业咨询，请手动录入企业名称和税号。
+                </div>
 
-                {selectedHistoryEnterprise && (
-                  <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-medium">
-                    ✓ 已选用历史企业
-                  </span>
+                {/* 下拉按钮查看并选择历史企业（换行展示） */}
+                <div className="flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => setHistoryDropdownOpen((v) => !v)}
+                    className="flex items-center gap-1.5 px-3 py-1 bg-white border border-[rgb(35,94,212)]/40 text-[rgb(35,94,212)] rounded text-[12px] font-medium hover:bg-blue-50 cursor-pointer transition shadow-2xs"
+                    style={{ fontSize: "12px" }}
+                  >
+                    <span>查看并选择历史企业（{historyEnterprises.length}）</span>
+                    <span>{historyDropdownOpen ? "▲" : "▼"}</span>
+                  </button>
+
+                  {selectedHistoryEnterprise && (
+                    <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-medium">
+                      ✓ 已选用历史企业
+                    </span>
+                  )}
+                </div>
+
+                {/* 历史企业下拉卡片列表：字号12号，多倍行距1.4 */}
+                {historyDropdownOpen && (
+                  <div
+                    className="mt-2 space-y-2 pt-2 border-t border-blue-100 max-h-56 overflow-y-auto text-[12px] leading-[1.4]"
+                    style={{ fontSize: "12px", lineHeight: 1.4 }}
+                  >
+                    {historyEnterprises.map((ent, idx) => {
+                      const isSelected =
+                        selectedHistoryEnterprise?.company_name === ent.company_name &&
+                        selectedHistoryEnterprise?.tax_no === ent.tax_no;
+                      return (
+                        <div
+                          key={`${ent.company_name}_${idx}`}
+                          onClick={() => handleSelectHistoryEnterprise(ent)}
+                          className={`p-2.5 rounded-lg border text-[12px] leading-[1.4] cursor-pointer transition flex items-center justify-between ${
+                            isSelected
+                              ? "bg-blue-100/70 border-[rgb(35,94,212)] text-[rgb(35,94,212)] font-medium"
+                              : "bg-white border-slate-200 hover:border-blue-300 text-slate-800"
+                          }`}
+                          style={{ fontSize: "12px", lineHeight: 1.4 }}
+                        >
+                          <div
+                            className="max-w-[80%] text-[12px] leading-[1.4]"
+                            style={{ fontSize: "12px", lineHeight: 1.4 }}
+                          >
+                            <div className="font-semibold truncate text-[12px] leading-[1.4]">
+                              {ent.company_name}
+                            </div>
+                            <div className="text-[12px] leading-[1.4] text-[#666666] font-mono">
+                              税号: {ent.tax_no || "—"}
+                            </div>
+                            {ent.tenant_name && (
+                              <div className="text-[12px] leading-[1.4] text-[#666666]">
+                                租户: {ent.tenant_name}
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            className={`px-2.5 py-1 rounded text-[12px] leading-[1.4] font-medium transition cursor-pointer ${
+                              isSelected
+                                ? "bg-[rgb(35,94,212)] text-white"
+                                : "bg-slate-100 text-slate-600 hover:bg-[rgb(35,94,212)] hover:text-white"
+                            }`}
+                            style={{ fontSize: "12px", lineHeight: 1.4 }}
+                          >
+                            {isSelected ? "已选" : "选择"}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
-
-              {/* 历史企业下拉卡片列表 */}
-              {historyDropdownOpen && (
-                <div className="mt-2 space-y-2 pt-2 border-t border-blue-100 max-h-56 overflow-y-auto">
-                  {historyEnterprises.map((ent, idx) => {
-                    const isSelected =
-                      selectedHistoryEnterprise?.company_name === ent.company_name &&
-                      selectedHistoryEnterprise?.tax_no === ent.tax_no;
-                    return (
-                      <div
-                        key={`${ent.company_name}_${idx}`}
-                        onClick={() => handleSelectHistoryEnterprise(ent)}
-                        className={`p-2.5 rounded-lg border text-xs cursor-pointer transition flex items-center justify-between ${
-                          isSelected
-                            ? "bg-blue-100/70 border-[rgb(35,94,212)] text-[rgb(35,94,212)] font-medium"
-                            : "bg-white border-slate-200 hover:border-blue-300 text-slate-800"
-                        }`}
-                      >
-                        <div className="space-y-0.5 max-w-[80%]">
-                          <div className="font-semibold truncate">{ent.company_name}</div>
-                          <div className="text-[11px] text-[#666666] font-mono">税号: {ent.tax_no || "—"}</div>
-                          {ent.tenant_name && (
-                            <div className="text-[10.5px] text-[#666666]">租户: {ent.tenant_name}</div>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          className={`px-2.5 py-1 rounded text-[11px] font-medium transition cursor-pointer ${
-                            isSelected
-                              ? "bg-[rgb(35,94,212)] text-white"
-                              : "bg-slate-100 text-slate-600 hover:bg-[rgb(35,94,212)] hover:text-white"
-                          }`}
-                        >
-                          {isSelected ? "已选" : "选择"}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </div>
             <div className="w-[120px] flex-none" />
           </div>

@@ -62,6 +62,12 @@ query IssueStates($ids: [ID!]!) {
       id
       identifier
       state { name type }
+      comments(first: 20) {
+        nodes {
+          body
+          createdAt
+        }
+      }
     }
   }
 }
@@ -160,12 +166,24 @@ class LinearClient:
             data = self._graphql(_ISSUE_STATES_QUERY, {"ids": chunk})
             for n in (data.get("issues") or {}).get("nodes") or []:
                 state = n.get("state") or {}
+                raw_comments = ((n.get("comments") or {}).get("nodes") or [])
+                sorted_comments = sorted(
+                    raw_comments,
+                    key=lambda c: str((c or {}).get("createdAt") or ""),
+                )
+                comments = [
+                    str((c or {}).get("body") or "").strip()
+                    for c in sorted_comments
+                    if str((c or {}).get("body") or "").strip()
+                    and not str((c or {}).get("body") or "").strip().startswith("⏰")
+                ]
                 out.append(
                     IssueState(
                         id=str(n["id"]),
                         identifier=str(n.get("identifier") or ""),
                         state_name=str(state.get("name") or ""),
                         state_type=str(state.get("type") or ""),
+                        comments=comments,
                     )
                 )
         return out

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { postByPath } from "@/api/client";
 import { API_BASE } from "@/api/base";
-import { extractDevSolutionParts } from "./replyNoteUtils";
+import { extractDevSolutionParts, sanitizeTaskTitle } from "./replyNoteUtils";
 
 export interface TaskAttachment {
   id: string;
@@ -70,7 +70,7 @@ export function DevContextDrawer({
   onConfirm,
   canEdit = true,
 }: DevContextDrawerProps) {
-  const [title, setTitle] = useState(initialTitle || "");
+  const [title, setTitle] = useState(sanitizeTaskTitle(initialTitle, ticketContent));
   const [communicationRecord, setCommunicationRecord] = useState("");
   const [feedbackRecord, setFeedbackRecord] = useState("");
   const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
@@ -79,14 +79,17 @@ export function DevContextDrawer({
 
   useEffect(() => {
     if (open) {
-      setTitle(initialTitle || "");
-      const { communicationNote, feedbackNote } = extractDevSolutionParts(initialSolution);
+      setTitle(sanitizeTaskTitle(initialTitle, ticketContent));
+      const { communicationNote, feedbackNote } = extractDevSolutionParts(
+        initialSolution,
+        ticketContent,
+      );
       setCommunicationRecord(communicationNote);
       setFeedbackRecord(feedbackNote);
       setAttachments(initialAttachments ? [...initialAttachments] : []);
       setError(null);
     }
-  }, [open, initialTitle, initialSolution, initialAttachments]);
+  }, [open, initialTitle, initialSolution, initialAttachments, ticketContent]);
 
   if (!open) return null;
 
@@ -184,7 +187,7 @@ export function DevContextDrawer({
   };
 
   const handleConfirm = () => {
-    const trimmedTitle = title.trim();
+    const trimmedTitle = sanitizeTaskTitle(title, ticketContent);
     if (!trimmedTitle) {
       setError("任务说明不能为空");
       return;
@@ -193,7 +196,7 @@ export function DevContextDrawer({
     const trimmedComm = communicationRecord.trim();
     let finalSolution = "";
     if (feedbackRecord && feedbackRecord.trim()) {
-      finalSolution = `【沟通记录】${trimmedComm}\n【研发反馈】${feedbackRecord.trim()}`;
+      finalSolution = `【沟通记录】${trimmedComm}\n【产研反馈】：${feedbackRecord.trim()}`;
     } else {
       finalSolution = trimmedComm;
     }

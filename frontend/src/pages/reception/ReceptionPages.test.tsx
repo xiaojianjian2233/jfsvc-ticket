@@ -30,18 +30,47 @@ describe("Reception Management Pages", () => {
       expect(screen.getByText("张工")).toBeInTheDocument();
     });
 
-    it("opens drawer to add agent", async () => {
+    it("opens drawer to add agent, shows eligible users dropdown excluding existing agents on click, and handles max_concurrent input without leading zero", async () => {
       render(
         <MemoryRouter>
           <AgentsPage />
         </MemoryRouter>
       );
 
+      // 等待已有坐席加载完成（包含 杨慧莉、张工、管理员）
+      expect(await screen.findByText("杨慧莉")).toBeInTheDocument();
+
       const addBtn = screen.getByText("添加坐席");
       fireEvent.click(addBtn);
 
       expect(await screen.findByText("维护在线接待坐席")).toBeInTheDocument();
       expect(screen.getByPlaceholderText("请输入在线接待客户可以看到的称呼")).toBeInTheDocument();
+
+      // 1. 姓名输入框：点击前不显示下拉列表，点击后显示下拉框，且排除已在当前坐席列表中的人员（杨慧莉、张工、管理员）
+      const nameInput = screen.getByPlaceholderText("点击选择或输入关键信息快速定位人员...");
+      expect(screen.queryByTestId("eligible-users-dropdown")).not.toBeInTheDocument();
+
+      fireEvent.click(nameInput);
+      const dropdown = await screen.findByTestId("eligible-users-dropdown");
+      expect(dropdown).toBeInTheDocument();
+      expect(await screen.findByText("王工")).toBeInTheDocument();
+      expect(screen.getByText("刘运营")).toBeInTheDocument();
+      expect(dropdown).not.toHaveTextContent("杨慧莉");
+      expect(dropdown).not.toHaveTextContent("张工");
+
+      // 输入关键字快速定位，点击后将姓名显示在姓名录入框
+      fireEvent.change(nameInput, { target: { value: "王" } });
+      fireEvent.click(screen.getByText("王工"));
+      expect(nameInput).toHaveValue("王工");
+      expect(screen.queryByTestId("eligible-users-dropdown")).not.toBeInTheDocument();
+
+      // 2. 在线接待上限：清空后再输入 10，显示 10 而不是 010
+      const maxInput = screen.getByPlaceholderText("请输入在线接待上限数量");
+      expect(maxInput).toHaveValue("5");
+      fireEvent.change(maxInput, { target: { value: "" } });
+      expect(maxInput).toHaveValue("");
+      fireEvent.change(maxInput, { target: { value: "010" } });
+      expect(maxInput).toHaveValue("10");
     });
 
     it("renders schedule settings card and allows edit/save", async () => {
@@ -130,58 +159,64 @@ describe("Reception Management Pages", () => {
       expect(screen.getByText("会话内容明细")).toBeInTheDocument();
     });
 
-    it("applies new styling: 16px title with 40px fixed bar, queue status option, 300x25px inputs, 100x25px query button, sticky column, and 500px summary modal", async () => {
+    it("applies new styling: 16px title with 10px subtitle, 12px filter & buttons & table, 大模型CID at last column, and 500px summary modal", async () => {
       render(
         <MemoryRouter>
           <SessionListPage />
         </MemoryRouter>
       );
 
-      // 1. 标题 16 号与说明 12 号
+      // 1. 标题 16 号与说明 10 号
       const title = screen.getByText("会话记录列表");
       expect(title).toHaveClass("text-[16px]");
       const desc = screen.getByText(/记录所有在线与热线会话的历史详情/);
-      expect(desc).toHaveClass("text-[12px]");
+      expect(desc).toHaveClass("text-[10px]");
 
       // 2. 状态选项中包含【排队中】
       const statusBtn = screen.getByLabelText("会话状态选择");
       fireEvent.click(statusBtn);
       expect(screen.getByText("排队中")).toBeInTheDocument();
 
-      // 3. 输入框尺寸 300px * 25px，字体 13 号
+      // 3. 输入框尺寸 300px * 25px，字体 12 号
       const companyInput = screen.getByPlaceholderText("录入企业名称查找");
       expect(companyInput).toHaveClass("w-[300px]");
       expect(companyInput).toHaveClass("h-[25px]");
-      expect(companyInput).toHaveClass("text-[13px]");
+      expect(companyInput).toHaveClass("text-[12px]");
 
-      // 4. 查询按钮样式与 13 号字体
+      // 4. 查询按钮样式与 12 号字体
       const queryBtn = screen.getByRole("button", { name: "查询" });
       expect(queryBtn).toHaveClass("w-[100px]");
       expect(queryBtn).toHaveClass("h-[25px]");
       expect(queryBtn).toHaveClass("rounded-[5px]");
       expect(queryBtn).toHaveClass("bg-[rgb(102,139,221)]");
-      expect(queryBtn).toHaveClass("text-[13px]");
+      expect(queryBtn).toHaveClass("text-[12px]");
 
-      // 5. 导出操作按钮与 13 号字体，填充颜色为 rgb(35, 94, 212)
+      // 5. 导出操作按钮与 12 号字体，填充颜色为 rgb(35, 94, 212)
       const exportBtn = screen.getByRole("button", { name: /导出/ });
       expect(exportBtn).toHaveClass("w-[100px]");
       expect(exportBtn).toHaveClass("h-[25px]");
       expect(exportBtn).toHaveClass("bg-[rgb(35,94,212)]");
-      expect(exportBtn).toHaveClass("text-[13px]");
+      expect(exportBtn).toHaveClass("text-[12px]");
 
-      // 6. 会话ID前面多选框与固定列样式
+      // 6. 会话ID前面多选框与固定列样式，以及 大模型CID 位于 客户问题总结 后面（最后一列）
       const selectAllCheckbox = screen.getByLabelText("全选本页会话");
       expect(selectAllCheckbox).toBeInTheDocument();
       fireEvent.click(selectAllCheckbox);
+
+      const headers = screen.getAllByRole("columnheader");
+      expect(headers[headers.length - 2]).toHaveTextContent("客户问题总结");
+      expect(headers[headers.length - 1]).toHaveTextContent("大模型CID");
 
       const sessionTh = screen.getByRole("columnheader", { name: "会话ID" });
       expect(sessionTh).toHaveClass("sticky");
       expect(sessionTh).toHaveClass("left-[44px]");
       expect(sessionTh).toHaveClass("top-0");
       expect(sessionTh).toHaveClass("z-30");
+      expect(sessionTh).toHaveClass("text-[12px]");
 
       const sessionIdBtn = await screen.findByText("ZXHH202609180001");
       expect(sessionIdBtn).toHaveClass("text-[rgb(102,139,221)]");
+      expect(sessionIdBtn).toHaveClass("text-[12px]");
 
       // 7. 客户问题总结点击后弹出 500px 顶层浮窗
       const summaryCell = await screen.findByText(/数电发票开具额度不足/);
