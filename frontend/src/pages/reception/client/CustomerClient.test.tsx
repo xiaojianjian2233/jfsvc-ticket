@@ -234,15 +234,29 @@ describe("Customer Client Online Support H5 / Web App", () => {
       expect((companyInput as HTMLInputElement).value).toBe("");
       expect((taxInput as HTMLInputElement).value).toBe("");
 
-      // Open dropdown and click select on the first company
+      // Button is placed right in the company name row (after the company name input)
       const viewDropdownBtn = screen.getByRole("button", { name: /查看并选择历史企业/ });
+      const companyRow = companyInput.closest(".flex.items-start.justify-center");
+      expect(companyRow).toContainElement(viewDropdownBtn);
+
+      // Open dropdown under company name input
       fireEvent.click(viewDropdownBtn);
 
+      const historyDropdown = screen.getByTestId("history-enterprise-dropdown");
+      expect(companyInput.parentElement).toContainElement(historyDropdown);
       expect(screen.getByText("北京航天信息云创有限公司")).toBeInTheDocument();
       expect(screen.getByText("广州天河税务科技发展有限公司")).toBeInTheDocument();
+      expect(screen.getByText(/统一社会信用代码:\s*91110108MA00XYZ991/)).toBeInTheDocument();
 
-      const selectBtns = screen.getAllByRole("button", { name: "选择" });
-      fireEvent.click(selectBtns[0]);
+      // Clicking close button closes dropdown without selecting
+      const closeBtn = screen.getByRole("button", { name: "关闭历史企业列表" });
+      fireEvent.click(closeBtn);
+      expect(screen.queryByTestId("history-enterprise-dropdown")).not.toBeInTheDocument();
+      expect((companyInput as HTMLInputElement).value).toBe("");
+
+      // Re-open dropdown and click the first company item directly to select
+      fireEvent.click(viewDropdownBtn);
+      fireEvent.click(screen.getByText("北京航天信息云创有限公司"));
 
       // Now it should be filled with selected enterprise
       expect((companyInput as HTMLInputElement).value).toBe("北京航天信息云创有限公司");

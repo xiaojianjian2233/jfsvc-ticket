@@ -135,6 +135,7 @@ export function CustomerInfoCollectionPage({ onSuccess }: CustomerInfoCollection
   const handleCompanyNameChange = (value: string) => {
     setCompanyName(value);
     setSelectedHistoryEnterprise(null); // 用户手动输入则视为可能的新企业
+    setHistoryDropdownOpen(false);
 
     if (searchDebounceRef.current) {
       clearTimeout(searchDebounceRef.current);
@@ -263,6 +264,10 @@ export function CustomerInfoCollectionPage({ onSuccess }: CustomerInfoCollection
     }
   };
 
+  const isCompanyDropdownOpen =
+    (historyDropdownOpen && historyEnterprises.length > 0) ||
+    (suggestionDropdownOpen && enterpriseSuggestions.length > 0);
+
   return (
     <div className="min-h-screen w-full bg-white flex flex-col items-center pt-[20px] px-4 overflow-x-auto">
       {/* 页面标题：发票云售后在线支持（放大到16号字体加粗，向上移动距离页面顶端 20px，水平居中） */}
@@ -325,12 +330,12 @@ export function CustomerInfoCollectionPage({ onSuccess }: CustomerInfoCollection
           <div className="w-[120px] flex-none" />
         </div>
 
-        {/* 历史企业提示面板（≥1 条记录时展示提示文字与下拉查看按钮，绝不自动填充） */}
+        {/* 历史企业提示面板（≥1 条记录时展示一行提示文字，绝不自动填充） */}
         {historyEnterprises.length > 0 && (
           <div className="flex items-start justify-center gap-3 w-full">
             <div className="w-[120px] flex-none" />
             <div className="w-[500px] flex-none">
-              <div className="min-w-[500px] w-max p-3.5 bg-blue-50/70 border border-blue-200/80 rounded-lg space-y-2">
+              <div className="min-w-[500px] w-max p-3 bg-blue-50/70 border border-blue-200/80 rounded-lg">
                 <div
                   className="text-[12px] text-[#666666] whitespace-nowrap"
                   style={{ fontSize: "12px" }}
@@ -342,86 +347,13 @@ export function CustomerInfoCollectionPage({ onSuccess }: CustomerInfoCollection
                   </strong>
                   个，下拉按钮查看并选择历史企业发起咨询，如需要给新企业咨询，请手动录入企业名称和税号。
                 </div>
-
-                {/* 下拉按钮查看并选择历史企业（换行展示） */}
-                <div className="flex items-center justify-between">
-                  <button
-                    type="button"
-                    onClick={() => setHistoryDropdownOpen((v) => !v)}
-                    className="flex items-center gap-1.5 px-3 py-1 bg-white border border-[rgb(35,94,212)]/40 text-[rgb(35,94,212)] rounded text-[12px] font-medium hover:bg-blue-50 cursor-pointer transition shadow-2xs"
-                    style={{ fontSize: "12px" }}
-                  >
-                    <span>查看并选择历史企业（{historyEnterprises.length}）</span>
-                    <span>{historyDropdownOpen ? "▲" : "▼"}</span>
-                  </button>
-
-                  {selectedHistoryEnterprise && (
-                    <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-medium">
-                      ✓ 已选用历史企业
-                    </span>
-                  )}
-                </div>
-
-                {/* 历史企业下拉卡片列表：字号12号，多倍行距1.4 */}
-                {historyDropdownOpen && (
-                  <div
-                    className="mt-2 space-y-2 pt-2 border-t border-blue-100 max-h-56 overflow-y-auto text-[12px] leading-[1.4]"
-                    style={{ fontSize: "12px", lineHeight: 1.4 }}
-                  >
-                    {historyEnterprises.map((ent, idx) => {
-                      const isSelected =
-                        selectedHistoryEnterprise?.company_name === ent.company_name &&
-                        selectedHistoryEnterprise?.tax_no === ent.tax_no;
-                      return (
-                        <div
-                          key={`${ent.company_name}_${idx}`}
-                          onClick={() => handleSelectHistoryEnterprise(ent)}
-                          className={`p-2.5 rounded-lg border text-[12px] leading-[1.4] cursor-pointer transition flex items-center justify-between ${
-                            isSelected
-                              ? "bg-blue-100/70 border-[rgb(35,94,212)] text-[rgb(35,94,212)] font-medium"
-                              : "bg-white border-slate-200 hover:border-blue-300 text-slate-800"
-                          }`}
-                          style={{ fontSize: "12px", lineHeight: 1.4 }}
-                        >
-                          <div
-                            className="max-w-[80%] text-[12px] leading-[1.4]"
-                            style={{ fontSize: "12px", lineHeight: 1.4 }}
-                          >
-                            <div className="font-semibold truncate text-[12px] leading-[1.4]">
-                              {ent.company_name}
-                            </div>
-                            <div className="text-[12px] leading-[1.4] text-[#666666] font-mono">
-                              税号: {ent.tax_no || "—"}
-                            </div>
-                            {ent.tenant_name && (
-                              <div className="text-[12px] leading-[1.4] text-[#666666]">
-                                租户: {ent.tenant_name}
-                              </div>
-                            )}
-                          </div>
-                          <button
-                            type="button"
-                            className={`px-2.5 py-1 rounded text-[12px] leading-[1.4] font-medium transition cursor-pointer ${
-                              isSelected
-                                ? "bg-[rgb(35,94,212)] text-white"
-                                : "bg-slate-100 text-slate-600 hover:bg-[rgb(35,94,212)] hover:text-white"
-                            }`}
-                            style={{ fontSize: "12px", lineHeight: 1.4 }}
-                          >
-                            {isSelected ? "已选" : "选择"}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
             </div>
             <div className="w-[120px] flex-none" />
           </div>
         )}
 
-        {/* 企业名称（左右结构：Key 在左，Value 在右，宽 500px 高 30px） */}
+        {/* 企业名称（左右结构：Key 在左，Value 在右，宽 500px 高 30px；查看并选择历史企业按钮放在企业名称录入框后面） */}
         <div className="flex items-start justify-center gap-3 w-full">
           <label className="w-[120px] text-right text-[13px] font-medium text-slate-700 flex-none pt-1">
             企业名称 <span className="text-rose-500">*</span>
@@ -435,16 +367,70 @@ export function CustomerInfoCollectionPage({ onSuccess }: CustomerInfoCollection
                 onKeyDown={handleCompanyNameKeyDown}
                 onFocus={() => {
                   if (enterpriseSuggestions.length > 0 && !selectedHistoryEnterprise) {
+                    setHistoryDropdownOpen(false);
                     setSuggestionDropdownOpen(true);
                   }
                 }}
                 placeholder="请输入本次咨询的企业全称"
                 className={`w-[500px] h-[30px] px-3 border border-slate-200 text-slate-800 text-[13px] placeholder:text-slate-400 focus:outline-none focus:border-[rgb(35,94,212)] focus:ring-1 focus:ring-[rgb(35,94,212)]/20 transition ${
-                  suggestionDropdownOpen && enterpriseSuggestions.length > 0
+                  isCompanyDropdownOpen
                     ? "rounded-t-[4px] rounded-b-none border-b-transparent focus:border-b-transparent"
                     : "rounded-[4px]"
                 }`}
               />
+
+              {/* 历史企业下拉面板（点击企业名称后的查看并选择历史企业按钮后，在企业名称录入框下展示，结构与企业查询推荐一致，支持点击关闭） */}
+              {historyDropdownOpen && historyEnterprises.length > 0 && (
+                <div
+                  data-testid="history-enterprise-dropdown"
+                  className="absolute left-0 w-[500px] top-[30px] bg-white border border-[rgb(35,94,212)] border-t-0 rounded-b-lg shadow-[0_12px_28px_rgba(0,0,0,0.18)] z-30 overflow-hidden"
+                >
+                  <div className="h-[30px] px-3 bg-blue-50/90 border-b border-blue-100 text-[11.5px] font-medium text-[#666666] flex items-center justify-between">
+                    <div className="flex items-center gap-1">
+                      <span>根据咨询手机号关联历史企业信息</span>
+                      <span className="text-slate-400 font-normal">
+                        （共 {historyEnterprises.length} 条，点击直接录入）
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="关闭历史企业列表"
+                      onClick={() => setHistoryDropdownOpen(false)}
+                      className="text-[#666666] hover:text-slate-900 cursor-pointer text-xs"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="max-h-[280px] overflow-y-auto divide-y divide-slate-100">
+                    {historyEnterprises.map((ent, idx) => {
+                      const isSelected =
+                        selectedHistoryEnterprise?.company_name === ent.company_name &&
+                        selectedHistoryEnterprise?.tax_no === ent.tax_no;
+                      return (
+                        <div
+                          key={`${ent.company_name}_${idx}`}
+                          onClick={() => handleSelectHistoryEnterprise(ent)}
+                          className={`h-[56px] px-3 flex flex-col justify-center hover:bg-blue-50/70 cursor-pointer transition border-l-2 ${
+                            isSelected
+                              ? "bg-blue-50/60 border-l-[rgb(35,94,212)]"
+                              : "border-l-transparent hover:border-l-[rgb(35,94,212)]"
+                          }`}
+                        >
+                          <div className="font-semibold text-slate-800 text-[14px] leading-tight truncate">
+                            {ent.company_name}
+                          </div>
+                          <div className="text-[13px] text-[#666666] font-mono flex items-center justify-between mt-0.5">
+                            <span>统一社会信用代码: {ent.tax_no || "—"}</span>
+                            <span className="text-teal-700 bg-teal-50 px-1.5 py-0.5 rounded text-[11px] font-medium font-sans">
+                              {isSelected ? "已选" : "存续"}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* 企业查询推荐下拉面板（默认展示5条数据高度，顶部与录入框无缝紧贴，0间隙对齐） */}
               {suggestionDropdownOpen && enterpriseSuggestions.length > 0 && (
@@ -489,17 +475,22 @@ export function CustomerInfoCollectionPage({ onSuccess }: CustomerInfoCollection
 
             <div className="flex items-center justify-between text-[11px]">
               {selectedHistoryEnterprise ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedHistoryEnterprise(null);
-                    setCompanyName("");
-                    setTaxNo("");
-                  }}
-                  className="text-xs text-[rgb(35,94,212)] hover:underline cursor-pointer"
-                >
-                  清空换新企业
-                </button>
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-medium">
+                    ✓ 已选用历史企业
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedHistoryEnterprise(null);
+                      setCompanyName("");
+                      setTaxNo("");
+                    }}
+                    className="text-xs text-[rgb(35,94,212)] hover:underline cursor-pointer"
+                  >
+                    清空换新企业
+                  </button>
+                </div>
               ) : searchLoading ? (
                 <span className="text-[11px] text-[rgb(35,94,212)] animate-pulse">正在查询企业信息...</span>
               ) : (
@@ -507,7 +498,22 @@ export function CustomerInfoCollectionPage({ onSuccess }: CustomerInfoCollection
               )}
             </div>
           </div>
-          <div className="w-[120px] flex-none" />
+          <div className="w-[120px] flex-none flex items-center min-h-[30px]">
+            {historyEnterprises.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSuggestionDropdownOpen(false);
+                  setHistoryDropdownOpen((v) => !v);
+                }}
+                className="h-[30px] flex items-center gap-1.5 px-3 bg-white border border-[rgb(35,94,212)]/40 text-[rgb(35,94,212)] rounded-[4px] text-[12px] font-medium hover:bg-blue-50 cursor-pointer transition shadow-2xs whitespace-nowrap"
+                style={{ fontSize: "12px" }}
+              >
+                <span>查看并选择历史企业（{historyEnterprises.length}）</span>
+                <span>{historyDropdownOpen ? "▲" : "▼"}</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* 企业税号（左右结构：Key 在左，Value 在右，宽 500px 高 30px） */}
