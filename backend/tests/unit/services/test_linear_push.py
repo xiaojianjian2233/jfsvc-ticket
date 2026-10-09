@@ -13,6 +13,8 @@ from adapters.linear import CreatedIssue, LinearNetworkError
 from app.config import get_settings
 from app.models import (
     Attachment,
+    Customer,
+    CustomerIdentity,
     HubIssue,
     Module,
     ProductLine,
@@ -205,6 +207,48 @@ def test_push_description_includes_source_tickets(world: Session) -> None:
     assert "13800000000" in desc
     assert "TKT-LP-1 (ksm)" in desc
     assert hub.short_code in desc
+
+
+def test_push_customer_name_prioritizes_reporter_company_over_display_name(world: Session) -> None:
+    """企业名称优先于个人 display_name，确保客户名称显示企业而非联系人姓名。"""
+    cust = Customer(display_name="林佳旭", company=None)
+    world.add(cust)
+    world.commit()
+    ident = CustomerIdentity(customer_id=cust.id, source_code="ksm", source_user_id="u-1", raw_name="林佳旭")
+    world.add(ident)
+    world.commit()
+
+    t = Ticket(
+        short_code="TKT-LP-CUST-1",
+        source_code="ksm",
+        source_ticket_id="lp-cust-1",
+        source_ticket_number="R20260813-1791",
+        customer_identity_id=ident.id,
+        reporter_company="上海浦东资本投资运营有限公司",
+        reporter={"name": "林佳旭", "mobile": "18565663670", "email": "jiaxu_lin@kingdee.com"},
+        type="Raw",
+        status="received",
+        title="税局先开票",
+    )
+    world.add(t)
+    world.commit()
+
+    hub = _make_hub(
+        world,
+        99,
+        title="税局先开票",
+        canonical_body="问题描述",
+        reply_content="排查结论",
+        ticket_id=t.id,
+    )
+    t.hub_issue_id = hub.id
+    world.commit()
+
+    fake = _FakeLinearClient()
+    push_hub_issue_to_linear(hub.id, world, client=fake)  # type: ignore[arg-type]
+    desc = fake.requests[0].description  # type: ignore[attr-defined]
+    assert "- **客户名称**: 上海浦东资本投资运营有限公司" in desc
+    assert "- **提单联系人**: 林佳旭 / 18565663670 / jiaxu_lin@kingdee.com" in desc
 
 
 def test_push_uses_assignee_linear_id(world: Session) -> None:

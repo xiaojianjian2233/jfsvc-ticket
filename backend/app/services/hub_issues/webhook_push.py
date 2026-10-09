@@ -115,15 +115,25 @@ def _primary_source_ticket(db: Session, hub: HubIssue) -> Ticket | None:
 
 
 def _customer_name(db: Session, ticket: Ticket | None) -> str:
-    if ticket is None or ticket.customer_identity_id is None:
+    """获取工单的客户/企业名称。
+
+    优先取工单记录的提单企业名称（ticket.reporter_company，如 KSM customerInfo.customerName、
+    智齿 company），确保推送产研时显示真实企业客户而非提单人个人姓名。若无提单企业名，再从客户
+    身份图谱中回落（customer.display_name / customer.company / identity.raw_name）。
+    """
+    if ticket is None:
+        return ""
+    if ticket.reporter_company and ticket.reporter_company.strip():
+        return ticket.reporter_company.strip()
+    if ticket.customer_identity_id is None:
         return ""
     identity = db.get(CustomerIdentity, ticket.customer_identity_id)
     if identity is None:
         return ""
     customer = db.get(Customer, identity.customer_id)
     if customer is None:
-        return identity.raw_name or ""
-    return customer.display_name or customer.company or identity.raw_name or ""
+        return (identity.raw_name or "").strip()
+    return (customer.display_name or customer.company or identity.raw_name or "").strip()
 
 
 def _product_line_name(db: Session, code: str | None) -> str:

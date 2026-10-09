@@ -185,7 +185,7 @@ def _build_description(db: Session, hub: HubIssue, src: Ticket | None = None) ->
         meta_lines.append(f"- **工单来源**: {source_name} ({ticket_no})")
 
         # 客户信息
-        cust_name = _customer_name(db, src) or (src.reporter_company or "")
+        cust_name = _customer_name(db, src)
         if cust_name:
             meta_lines.append(f"- **客户名称**: {cust_name}")
 
