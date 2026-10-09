@@ -60,7 +60,7 @@ const SOURCE_LABEL: Record<string, string> = {
   ksm: "KSM",
   zhichi: "智齿",
   zammad: "外部提单",
-  ai_cs: "内部提单",
+  ai_cs: "外部提单",
   feishu_ai: "内部提单",
 };
 function sourceLabel(code: string | null | undefined): string {
@@ -78,9 +78,20 @@ const TYPE_OPTIONS: { value: string; label: string }[] = [
 const SOURCE_OPTIONS: { value: string; label: string }[] = [
   { value: "ksm", label: "KSM" },
   { value: "zhichi", label: "智齿" },
-  { value: "ai_cs", label: "内部提单" },
-  { value: "zammad", label: "外部提单" },
+  { value: "internal", label: "内部提单" },
+  { value: "external", label: "外部提单" },
 ];
+
+const SOURCE_FILTER_CODES: Record<string, string[]> = {
+  ksm: ["ksm"],
+  zhichi: ["zhichi"],
+  internal: ["feishu_ai"],
+  external: ["ai_cs", "zammad"],
+};
+
+function expandSourceFilterCodes(values: string[]): string[] {
+  return [...new Set(values.flatMap((value) => SOURCE_FILTER_CODES[value] ?? [value]))];
+}
 
 const OP_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "processing", label: "处理中" },
@@ -640,6 +651,7 @@ export function TicketsListPage() {
   const sourceCodes = rawSourceCodes.length > 0
     ? rawSourceCodes
     : legacySourceCode ? [legacySourceCode] : [];
+  const expandedSourceCodes = expandSourceFilterCodes(sourceCodes);
 
   const status = params.get("status") ?? ""; // 工单原始状态：UI 已隐藏,仍支持外部链接带入
 
@@ -758,7 +770,7 @@ export function TicketsListPage() {
     queryKey: [
       "tickets",
       {
-        sourceCodes,
+        sourceCodes: expandedSourceCodes,
         status,
         opStatuses,
         unassigned,
@@ -785,8 +797,8 @@ export function TicketsListPage() {
     ],
     queryFn: () =>
       api.get("/api/tickets", {
-        source_code: sourceCodes.length === 1 ? sourceCodes[0] : undefined,
-        source_codes: sourceCodes.length > 0 ? sourceCodes : undefined,
+        source_code: expandedSourceCodes.length === 1 ? expandedSourceCodes[0] : undefined,
+        source_codes: expandedSourceCodes.length > 0 ? expandedSourceCodes : undefined,
         status: status || undefined,
         op_status: opStatuses.length === 1 ? opStatuses[0] : undefined,
         op_statuses: opStatuses.length > 0 ? opStatuses : undefined,

@@ -92,15 +92,50 @@ def resolve_feishu_product_and_module(
     eff_prod_name: str | None = None
 
     if prod:
-        pl_row = (
+        # 同一个中文产品名可能对应多条历史产品线。结合问题模块选择责任田时，
+        # 只把「产品线启用 + 模块启用」的记录视为有效候选：
+        # - 全部禁用：沿用无责任人的行为；
+        # - 仅一条启用：使用该条；
+        # - 多条启用：按模块 id 稳定取第一条。
+        pl_rows = list(
             db.execute(
-                select(ProductLine).where(
-                    (ProductLine.code == prod) | (ProductLine.name == prod)
-                )
-            )
-            .scalars()
-            .first()
+                select(ProductLine)
+                .where((ProductLine.code == prod) | (ProductLine.name == prod))
+                .order_by(ProductLine.id.asc())
+            ).scalars()
         )
+        pl_by_code = {row.code: row for row in pl_rows}
+        enabled_pl_rows = [row for row in pl_rows if row.is_active]
+
+        selected_module: Module | None = None
+        if mod and pl_rows:
+            module_rows = list(
+                db.execute(
+                    select(Module)
+                    .where(
+                        Module.product_line_code.in_([row.code for row in pl_rows]),
+                        Module.name == mod,
+                    )
+                    .order_by(Module.id.asc())
+                ).scalars()
+            )
+            enabled_modules = [
+                row
+                for row in module_rows
+                if row.status == "enabled"
+                and row.is_active
+                and pl_by_code[row.product_line_code].is_active
+            ]
+            if enabled_modules:
+                selected_module = enabled_modules[0]
+
+        if selected_module is not None:
+            pl_row = pl_by_code[selected_module.product_line_code]
+        elif enabled_pl_rows:
+            pl_row = enabled_pl_rows[0]
+        else:
+            pl_row = pl_rows[0] if pl_rows else None
+
         if pl_row is not None:
             eff_plc = pl_row.code
             eff_prod_name = pl_row.name or prod
@@ -214,28 +249,43 @@ def resolve_feishu_rd_owner(
     if not plc or not mod:
         return None
 
-    pl_row = (
+    pl_rows = list(
         db.execute(
-            select(ProductLine).where((ProductLine.code == plc) | (ProductLine.name == plc))
-        )
-        .scalars()
-        .first()
+            select(ProductLine)
+            .where((ProductLine.code == plc) | (ProductLine.name == plc))
+            .order_by(ProductLine.id.asc())
+        ).scalars()
     )
-    candidate_codes: list[str] = []
-    if pl_row is not None:
-        candidate_codes.append(pl_row.code)
-        if pl_row.name and pl_row.name not in candidate_codes:
-            candidate_codes.append(pl_row.name)
-    if plc not in candidate_codes:
-        candidate_codes.append(plc)
+    enabled_pl_rows = [row for row in pl_rows if row.is_active]
+    if pl_rows and not enabled_pl_rows:
+        return None
 
-    for code in candidate_codes:
-        owner = peek_module_owner(db, code, mod)
+    candidate_codes = [row.code for row in enabled_pl_rows]
+    if not pl_rows:
+        candidate_codes = [plc]
+
+    module_rows = list(
+        db.execute(
+            select(Module)
+            .where(
+                Module.product_line_code.in_(candidate_codes),
+                Module.name == mod,
+            )
+            .order_by(Module.id.asc())
+        ).scalars()
+    )
+    if module_rows:
+        enabled_modules = [row for row in module_rows if row.status == "enabled" and row.is_active]
+        if not enabled_modules:
+            return None
+
+        # 多条启用记录时按 id 取第一条，保证每次匹配结果稳定。
+        first_enabled = enabled_modules[0]
+        owner = peek_module_owner(db, first_enabled.product_line_code, mod)
         if owner is not None:
             return owner
-        owners = list_module_owners(db, code, mod)
-        if owners:
-            return owners[0]
+        owners = list_module_owners(db, first_enabled.product_line_code, mod)
+        return owners[0] if owners else None
 
     scope_user = (
         db.execute(
@@ -275,11 +325,7 @@ def auto_transfer_feishu_ticket_to_linear(db: Session, ticket: Ticket) -> HubIss
     from app.services.hub_issues.creator import _next_hub_short_code
     from app.services.hub_issues.linear_push import push_hub_issue_to_linear
 
-    hub_type = (
-        ticket.predicted_type
-        if ticket.predicted_type in ("Bug_fix", "Demand")
-        else "Demand"
-    )
+    hub_type = ticket.predicted_type if ticket.predicted_type in ("Bug_fix", "Demand") else "Demand"
     if ticket.predicted_type is None:
         ticket.predicted_type = hub_type
         ticket.predicted_confidence = Decimal("1.00")
@@ -446,11 +492,7 @@ class FeishuAiIngester:
             ).strip()
             or None
         )
-        c_erp_uid = (
-            cust_dict.get("erp_uid")
-            or payload.get("erp_uid")
-            or p.customer.get("erp_uid")
-        )
+        c_erp_uid = cust_dict.get("erp_uid") or payload.get("erp_uid") or p.customer.get("erp_uid")
         c_source_user_id = (
             cust_dict.get("source_user_id")
             or payload.get("source_user_id")

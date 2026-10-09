@@ -56,6 +56,36 @@ const sample = {
 afterEach(() => localStorage.clear());
 
 describe("TicketsListPage", () => {
+  it("内部提单筛选只查询飞书来源，在线接待转单归入外部提单", async () => {
+    const requests: URL[] = [];
+    server.use(
+      http.get("*/api/tickets", ({ request }) => {
+        requests.push(new URL(request.url));
+        return HttpResponse.json(sample);
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByText("TKT-1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /全部来源系统/ }));
+    fireEvent.click(screen.getByLabelText("内部提单"));
+
+    await waitFor(() => {
+      const latest = requests.at(-1);
+      expect(latest?.searchParams.getAll("source_codes")).toEqual(["feishu_ai"]);
+      expect(latest?.searchParams.get("source_code")).toBe("feishu_ai");
+    });
+
+    fireEvent.click(screen.getByLabelText("内部提单"));
+    fireEvent.click(screen.getByLabelText("外部提单"));
+
+    await waitFor(() => {
+      const latest = requests.at(-1);
+      expect(latest?.searchParams.getAll("source_codes")).toEqual(["ai_cs", "zammad"]);
+      expect(latest?.searchParams.has("source_code")).toBe(false);
+    });
+  });
+
   it("renders all column headers, not just pinned ones", async () => {
     server.use(http.get("*/api/tickets", () => HttpResponse.json(sample)));
     renderPage();

@@ -69,7 +69,7 @@ const SOURCE_LABEL: Record<string, string> = {
   ksm: "KSM",
   zhichi: "智齿",
   zammad: "外部提单",
-  ai_cs: "内部提单",
+  ai_cs: "外部提单",
   feishu_ai: "内部提单",
 };
 function sourceLabel(code: string | null | undefined): string {

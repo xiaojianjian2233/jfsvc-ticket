@@ -44,6 +44,7 @@ def _payload(**ov) -> dict:  # type: ignore[type-arg, no-untyped-def]
 def test_ingest_creates_feishu_ai_ticket_with_product_module_and_contacts(world: Session) -> None:
     # 预置提单人用户，验证：处理人 = 提单人
     reporter_user = User(
+        feishu_uid="feishu-reporter-zhangsan",
         name="张三",
         mobile="13800000000",
         email="zhangsan@example.com",
@@ -77,7 +78,7 @@ def test_ingest_creates_feishu_ai_ticket_with_product_module_and_contacts(world:
     # 2）处理人=提单人
     assert t.handler_user_id == reporter_user.id
     # 4）提单人=联系人：取飞书工单的 customer-name
-    assert t.reporter == "张三"
+    assert t.reporter["name"] == "张三"
     assert t.ksm_linkman == "张三"
     # 5）提单人手机=联系人手机：取飞书工单 customer-mobile
     assert t.ksm_contact_mobile == "13800000000"
@@ -117,6 +118,7 @@ def test_rd_owner_matching_and_auto_transfer_to_linear(
     # 8）产品分类、问题模块补充完整后，匹配补充产研责任田责任人
     # 9）当研发责任田责任人不为空后，系统自动转产研，将工单转产研传给 linear 处理，将工单的处理环节更新为产研处理
     rd_user = User(
+        feishu_uid="feishu-rd-li",
         name="李研发",
         email="lird@example.com",
         role="assignee",
@@ -127,10 +129,9 @@ def test_rd_owner_matching_and_auto_transfer_to_linear(
     world.flush()
     world.add(
         Module(
-            code="数电开票",
             name="数电开票",
             product_line_code="cloud-fapiao",
-            dev_owners=[{"id": str(rd_user.id), "name": "李研发"}],
+            dev_owners="李研发",
             is_active=True,
         )
     )
@@ -138,16 +139,12 @@ def test_rd_owner_matching_and_auto_transfer_to_linear(
 
     pushed_hub_ids: list[int] = []
 
-    def _fake_push(hub_issue_id: int) -> None:
+    def _fake_push(hub_issue_id: int, **_kwargs: object) -> None:
         pushed_hub_ids.append(hub_issue_id)
 
-    monkeypatch.setattr(
-        "app.services.hub_issues.linear_push.push_hub_issue_to_linear", _fake_push
-    )
+    monkeypatch.setattr("app.services.hub_issues.linear_push.push_hub_issue_to_linear", _fake_push)
 
-    res = FeishuAiIngester(world).ingest(
-        _payload(session_id="fa-auto-rd-1", predicted_type="bug")
-    )
+    res = FeishuAiIngester(world).ingest(_payload(session_id="fa-auto-rd-1", predicted_type="bug"))
     world.commit()
 
     t = world.get(Ticket, res.ticket_id)
@@ -164,10 +161,12 @@ def test_rd_owner_matching_and_auto_transfer_to_linear(
     assert hub.assigned_user_id == rd_user.id
 
     # 10）验证产研逆向驳回和正常发版按现有逻辑处理
-    apply_hub_status(world, hub, to_status="dev_returned", changed_by="linear:webhook", reason="驳回")
+    apply_hub_status(
+        world, hub, to_status="dev_returned", changed_by="linear:webhook", reason="驳回"
+    )
     world.commit()
     world.refresh(t)
-    assert t.status == "dev_returned"
+    assert t.status == "processing"
     assert t.process_stage == "服务处理"
 
     apply_hub_status(world, hub, to_status="released", changed_by="linear:sync", reason="正常发版")
@@ -180,16 +179,21 @@ def test_rd_owner_matching_and_auto_transfer_to_linear(
 def test_supplement_product_and_module_matches_rd_owner_and_transfers(
     world: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    rd_user = User(name="王产研", email="wang@example.com", role="assignee", is_active=True)
+    rd_user = User(
+        feishu_uid="feishu-rd-wang",
+        name="王产研",
+        email="wang@example.com",
+        role="assignee",
+        is_active=True,
+    )
     world.add(rd_user)
     world.add(ProductLine(code="cloud-fapiao", name="云票系统", is_active=True))
     world.flush()
     world.add(
         Module(
-            code="红字发票",
             name="红字发票",
             product_line_code="cloud-fapiao",
-            dev_owners=[{"id": str(rd_user.id), "name": "王产研"}],
+            dev_owners="王产研",
             is_active=True,
         )
     )
@@ -198,12 +202,17 @@ def test_supplement_product_and_module_matches_rd_owner_and_transfers(
     pushed_hub_ids: list[int] = []
     monkeypatch.setattr(
         "app.services.hub_issues.linear_push.push_hub_issue_to_linear",
-        lambda hid: pushed_hub_ids.append(hid),
+        lambda hid, **_kwargs: pushed_hub_ids.append(hid),
     )
 
     # 入库时未传模块，暂未匹配研发责任人
     res = FeishuAiIngester(world).ingest(
-        _payload(session_id="fa-supp-1", product_line_code="cloud-fapiao", module="", predicted_type="需求")
+        _payload(
+            session_id="fa-supp-1",
+            product_line_code="cloud-fapiao",
+            module="",
+            predicted_type="需求",
+        )
     )
     world.commit()
     t = world.get(Ticket, res.ticket_id)
@@ -228,6 +237,78 @@ def test_supplement_product_and_module_matches_rd_owner_and_transfers(
     assert hub.type == "Demand"
     assert pushed_hub_ids == [hub.id]
     assert t.process_stage == "产研处理"
+
+
+@pytest.mark.parametrize(
+    ("module_statuses", "expected_owner_index"),
+    [
+        (("disabled", "disabled"), None),
+        (("disabled", "enabled"), 1),
+        (("enabled", "enabled"), 0),
+    ],
+    ids=["all-disabled", "one-enabled", "multiple-enabled-first-wins"],
+)
+def test_rd_owner_prefers_first_enabled_duplicate_catalog_record(
+    world: Session,
+    module_statuses: tuple[str, str],
+    expected_owner_index: int | None,
+) -> None:
+    """同名产品线+模块重复时，只从启用责任田中按稳定顺序取第一条。"""
+    users = [
+        User(
+            feishu_uid="feishu-owner-a",
+            name="责任人甲",
+            email="owner-a@example.com",
+            role="assignee",
+            is_active=True,
+        ),
+        User(
+            feishu_uid="feishu-owner-b",
+            name="责任人乙",
+            email="owner-b@example.com",
+            role="assignee",
+            is_active=True,
+        ),
+    ]
+    world.add_all(users)
+    world.add_all(
+        [
+            ProductLine(code="duplicate-pl-a", name="重复产品", is_active=True),
+            ProductLine(code="duplicate-pl-b", name="重复产品", is_active=True),
+        ]
+    )
+    world.flush()
+    world.add_all(
+        [
+            Module(
+                name="重复模块",
+                product_line_code="duplicate-pl-a",
+                status=module_statuses[0],
+                is_active=module_statuses[0] == "enabled",
+                dev_owners="责任人甲",
+            ),
+            Module(
+                name="重复模块",
+                product_line_code="duplicate-pl-b",
+                status=module_statuses[1],
+                is_active=module_statuses[1] == "enabled",
+                dev_owners="责任人乙",
+            ),
+        ]
+    )
+    world.commit()
+
+    plc, product_name, module = resolve_feishu_product_and_module(world, "重复产品", "重复模块")
+    owner = resolve_feishu_rd_owner(world, plc, module)
+
+    assert product_name == "重复产品"
+    assert module == "重复模块"
+    if expected_owner_index is None:
+        assert owner is None
+    else:
+        assert plc == f"duplicate-pl-{'a' if expected_owner_index == 0 else 'b'}"
+        assert owner is not None
+        assert owner.id == users[expected_owner_index].id
 
 
 def test_triple_archived_in_source_payload(world: Session) -> None:
@@ -265,4 +346,3 @@ def test_long_question_truncated_to_title(world: Session) -> None:
     assert t is not None
     assert len(t.title) <= 120
     assert len(t.body) == 200  # body 保留全文
-

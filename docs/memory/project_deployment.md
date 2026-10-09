@@ -13,7 +13,8 @@ metadata:
 - SSH: `rnd@rnd`（Rocky Linux 9.3，IP: 106.55.57.40）
 - 项目目录: `/data/hub-issue/`，代码在 `app/backend/`
 - 端口: 9094（backend）
-- 访问: `http://dl.piaozone.com:18025/hub-issue/`
+- 管理端: `http://dl.piaozone.com:18025/ticket-hub-uat/`
+- 客户端: `http://dl.piaozone.com:18025/ticket-hub-uat/client/`
 - docker 命令需要 `sudo`，用旧版独立 `docker-compose`
 - 部署手册: `DEPLOY-UAT.md`
 
