@@ -3428,9 +3428,14 @@ function SubTicketList({
     self.hub_id != null &&
     !subtasks.some((s: any) => s.id === self.hub_id) &&
     childSubtasks.length > 0;
+  // 没有真实 Hub 关联时，self 只是为了空列表展示而临时拼出的主工单行。
+  // 一旦已经存在真实子任务，就不再展示该占位行，避免用户误把主工单当成
+  // 可删除的子任务；若 self 自身已有 hub_id，则它是一个真实任务，仍应展示。
+  const hasSyntheticSelfWithRealSubtasks = self.hub_id == null && childSubtasks.length > 0;
   const showSelf =
     childIds.length === 0 &&
     !isSelfDeleted &&
+    !hasSyntheticSelfWithRealSubtasks &&
     (!selfHidden || (childSubtasks.length === 0 && drafts.length === 0));
 
   const allRowKeys: (string | number)[] = useMemo(() => {

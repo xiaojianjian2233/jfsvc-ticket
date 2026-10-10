@@ -580,7 +580,7 @@ describe("TicketDetailPage 出站回写失败横幅", () => {
     expect(await screen.findByText("模块指定责任人")).toBeInTheDocument();
   });
 
-  it("子任务列表点击添加后仅新增一行，系统自动生成的第一行保持保留不被覆盖", async () => {
+  it("新增真实子任务后隐藏系统临时生成的主工单行", async () => {
     renderTicket({
       id: 888,
       short_code: "TKT-000888",
@@ -607,13 +607,13 @@ describe("TicketDetailPage 出站回写失败横幅", () => {
     const dialogConfirm = screen.getAllByRole("button", { name: "确认" });
     fireEvent.click(dialogConfirm[dialogConfirm.length - 1]);
 
-    // 添加后：系统自动生成的一行依然存在，同时出现新增子任务一行（恰好生成 1 行，共 2 行）
+    // 添加后：真实子任务已入库，临时主工单行隐藏，仅展示真实子任务。
     expect(await screen.findByText("新增子任务一")).toBeInTheDocument();
     expect(screen.getAllByText("新增子任务一")).toHaveLength(1);
-    expect(screen.getAllByText("TKT-000888")).toHaveLength(2);
-    expect(screen.getAllByText("系统原始主任务")).toHaveLength(2);
+    expect(screen.getAllByText("TKT-000888")).toHaveLength(1);
+    expect(screen.getAllByText("系统原始主任务")).toHaveLength(1);
     expect(screen.getByText("TKT-000888-1")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "AI作答" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "AI作答" })).toHaveLength(1);
 
     // 再次点击添加子任务
     fireEvent.click(addBtn);
@@ -622,14 +622,14 @@ describe("TicketDetailPage 出站回写失败横幅", () => {
     const dialogConfirm2 = screen.getAllByRole("button", { name: "确认" });
     fireEvent.click(dialogConfirm2[dialogConfirm2.length - 1]);
 
-    // 再次添加后：共有 3 行（系统原始行 + 新增子任务一 + 新增子任务二），各只生成 1 行
+    // 再次添加后：仅展示 2 条真实子任务，不恢复临时主工单行。
     expect(await screen.findByText("新增子任务二")).toBeInTheDocument();
     expect(screen.getAllByText("新增子任务二")).toHaveLength(1);
     expect(screen.getAllByText("新增子任务一")).toHaveLength(1);
-    expect(screen.getAllByText("TKT-000888")).toHaveLength(2);
-    expect(screen.getAllByText("系统原始主任务")).toHaveLength(2);
+    expect(screen.getAllByText("TKT-000888")).toHaveLength(1);
+    expect(screen.getAllByText("系统原始主任务")).toHaveLength(1);
     expect(screen.getByText("TKT-000888-2")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "AI作答" })).toHaveLength(3);
+    expect(screen.getAllByRole("button", { name: "AI作答" })).toHaveLength(2);
   });
 
   it("子任务列表中的产品分类与问题模块下拉框在顶层展示（Portal 至 document.body 且 z-index 9999）", async () => {
