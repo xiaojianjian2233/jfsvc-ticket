@@ -306,9 +306,11 @@ def ticket_quick_stats(
     user: AuthedUser = Depends(require_user),
     db: Session = Depends(get_session),
 ) -> TicketQuickStatsResponse:
-    """Counts for top quick filters, scoped only by the caller's row visibility."""
+    """Counts for top quick filters."""
     stats = TicketRepository(db).quick_stats(
-        visible_to_user_id=None if user.role in ("admin", "supervisor") else user.user_id
+        user_role=user.role,
+        user_id=user.user_id,
+        visible_to_user_id=None if user.role in ("admin", "supervisor") else user.user_id,
     )
     return TicketQuickStatsResponse(
         green_vip=stats.green_vip,
@@ -406,6 +408,8 @@ def list_tickets(
         assigned_user_ids=assigned_user_ids,
         handler_user_ids=handler_user_ids,
         visible_to_user_id=None if is_privileged else user.user_id,
+        user_role=user.role,
+        user_id=user.user_id,
         predicted_types=predicted_types,
         unassigned_only=unassigned_only,
         customer_identity_id=customer_identity_id,

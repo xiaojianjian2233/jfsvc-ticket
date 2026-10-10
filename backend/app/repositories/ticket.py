@@ -41,6 +41,12 @@ _CLOSED_TICKET_STATUSES = {
     "rejected",
     "superseded",
     "transferred_return",
+    "completed",
+}
+_PROCESSING_TICKET_STATUSES = {
+    "processing",
+    "in_progress",
+    "reviewing",
 }
 
 
@@ -103,39 +109,77 @@ class TicketRepository:
                 return candidate
             candidate_number += 1
 
-    def quick_stats(self, *, visible_to_user_id: int | None = None) -> TicketQuickStats:
-        """Return global quick-filter counts for the current user's visible tickets.
+    def quick_stats(
+        self,
+        *,
+        user_role: str | None = None,
+        user_id: int | None = None,
+        visible_to_user_id: int | None = None,
+    ) -> TicketQuickStats:
+        """Return global quick-filter counts.
 
-        SLA expiry depends on either a ticket-level override or its product line,
-        so it is deliberately evaluated in Python after one joined read.  This
-        keeps the rule identical on PostgreSQL and SQLite and avoids a fragile
-        database-specific interval expression.
+        - green_vip:
+          * admin: 统计全系统所有没有关闭的绿色战略客户数量；
+          * 非 admin: 统计分配给当前处理人且未处理完成（状态为处理中）的绿色战略客户数量。
+        - today: 统计系统当天创建（按北京时区当天 00:00:00 ~ 23:59:59）的全量工单数量。
+        - overdue: 仍受调用方可见范围(visible_to_user_id)限制。
         """
-        # PostgreSQL can evaluate all three aggregates in-database.  The
+        is_admin = user_role == "admin"
+        effective_user_id = user_id or visible_to_user_id
+
+        # PostgreSQL can evaluate all three aggregates in-database. The
         # SQLite fallback keeps unit tests and local development on the exact
         # existing Python rule.
         if self._db.bind is not None and self._db.bind.dialect.name == "postgresql":
-            base = select(Ticket.id).where(Ticket.deleted_at.is_(None))
-            if visible_to_user_id is not None:
-                base = base.where(Ticket.handler_user_id == visible_to_user_id)
             now = datetime.now(UTC)
             start = now.astimezone(_BEIJING).replace(hour=0, minute=0, second=0, microsecond=0)
             start_utc = start.astimezone(UTC)
             end_utc = start_utc + timedelta(days=1)
-            green = self._db.execute(
-                select(func.count(Ticket.id)).where(
-                    Ticket.id.in_(base), self._green_vip_condition()
-                )
-            ).scalar_one()
+
+            # 1. 绿色战略客户
+            if is_admin:
+                green = self._db.execute(
+                    select(func.count(Ticket.id)).where(
+                        Ticket.deleted_at.is_(None),
+                        self._green_vip_condition(),
+                        Ticket.status.not_in(_CLOSED_TICKET_STATUSES),
+                    )
+                ).scalar_one()
+            elif effective_user_id is not None:
+                green = self._db.execute(
+                    select(func.count(Ticket.id)).where(
+                        Ticket.deleted_at.is_(None),
+                        self._green_vip_condition(),
+                        Ticket.status.in_(_PROCESSING_TICKET_STATUSES),
+                        Ticket.handler_user_id == effective_user_id,
+                    )
+                ).scalar_one()
+            else:
+                green = self._db.execute(
+                    select(func.count(Ticket.id)).where(
+                        Ticket.deleted_at.is_(None),
+                        self._green_vip_condition(),
+                        Ticket.status.in_(_PROCESSING_TICKET_STATUSES),
+                    )
+                ).scalar_one()
+
+            # 2. 今日新增工单：统计创建日期是系统当天日期的工单数量（全系统，不限处理人）
             today = self._db.execute(
                 select(func.count(Ticket.id)).where(
-                    Ticket.id.in_(base), Ticket.created_at >= start_utc, Ticket.created_at < end_utc
+                    Ticket.deleted_at.is_(None),
+                    Ticket.created_at >= start_utc,
+                    Ticket.created_at < end_utc,
                 )
             ).scalar_one()
+
+            # 3. 超时工单：受调用方可见范围限制
+            overdue_base = select(Ticket.id).where(Ticket.deleted_at.is_(None))
+            if visible_to_user_id is not None:
+                overdue_base = overdue_base.where(Ticket.handler_user_id == visible_to_user_id)
             overdue = self._db.execute(
                 select(func.count(Ticket.id))
                 .outerjoin(ProductLine, ProductLine.code == Ticket.product_line_code)
-                .where(Ticket.id.in_(base), self._postgres_overdue_condition())
+                .where(Ticket.id.in_(overdue_base), self._postgres_overdue_condition())
             ).scalar_one()
             return TicketQuickStats(green_vip=green, today=today, overdue=overdue)
 
@@ -144,22 +188,36 @@ class TicketRepository:
             .outerjoin(ProductLine, ProductLine.code == Ticket.product_line_code)
             .where(Ticket.deleted_at.is_(None))
         )
-        if visible_to_user_id is not None:
-            stmt = stmt.where(Ticket.handler_user_id == visible_to_user_id)
         rows = self._db.execute(stmt).all()
         now = datetime.now(UTC)
         today_date = now.astimezone(_BEIJING).date()
         green_vip = today_count = overdue = 0
         for ticket, product_sla_hours in rows:
+            # 1. 绿色战略客户
             if self._is_green_vip(ticket.service_level):
-                green_vip += 1
+                if is_admin:
+                    if ticket.status not in _CLOSED_TICKET_STATUSES:
+                        green_vip += 1
+                elif effective_user_id is not None:
+                    if (
+                        ticket.handler_user_id == effective_user_id
+                        and ticket.status in _PROCESSING_TICKET_STATUSES
+                    ):
+                        green_vip += 1
+                elif ticket.status in _PROCESSING_TICKET_STATUSES:
+                    green_vip += 1
+
+            # 2. 今日新增工单：全系统当天创建工单数量
             if (
                 ticket.created_at is not None
                 and self._as_utc(ticket.created_at).astimezone(_BEIJING).date() == today_date
             ):
                 today_count += 1
-            if self._is_overdue(ticket, product_sla_hours, now):
-                overdue += 1
+
+            # 3. 超时工单：受 visible_to_user_id 约束
+            if visible_to_user_id is None or ticket.handler_user_id == visible_to_user_id:
+                if self._is_overdue(ticket, product_sla_hours, now):
+                    overdue += 1
         return TicketQuickStats(green_vip=green_vip, today=today_count, overdue=overdue)
 
     def _overdue_ticket_ids(self) -> list[int]:
@@ -281,6 +339,8 @@ class TicketRepository:
         assigned_user_ids: list[int] | None = None,
         handler_user_ids: list[int] | None = None,
         visible_to_user_id: int | None = None,
+        user_role: str | None = None,
+        user_id: int | None = None,
         predicted_types: list[str] | None = None,
         unassigned_only: bool = False,
         customer_identity_id: int | None = None,
@@ -372,7 +432,19 @@ class TicketRepository:
             base = base.where(Ticket.assigned_user_id.is_(None))
             count_base = count_base.where(Ticket.assigned_user_id.is_(None))
         if quick_filter == "green_vip":
-            cond = self._green_vip_condition()
+            green_cond = self._green_vip_condition()
+            is_admin = user_role == "admin"
+            effective_user_id = user_id or visible_to_user_id
+            if is_admin:
+                cond = and_(green_cond, Ticket.status.not_in(_CLOSED_TICKET_STATUSES))
+            elif effective_user_id is not None:
+                cond = and_(
+                    green_cond,
+                    Ticket.status.in_(_PROCESSING_TICKET_STATUSES),
+                    Ticket.handler_user_id == effective_user_id,
+                )
+            else:
+                cond = and_(green_cond, Ticket.status.in_(_PROCESSING_TICKET_STATUSES))
             base = base.where(cond)
             count_base = count_base.where(cond)
         elif quick_filter == "today":

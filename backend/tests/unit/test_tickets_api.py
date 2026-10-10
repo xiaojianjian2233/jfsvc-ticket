@@ -242,6 +242,90 @@ def test_quick_stats_and_overdue_filter_use_full_visible_set(
     assert [item["short_code"] for item in listed["items"]] == ["TKT-QUICK-GREEN"]
 
 
+def test_quick_stats_green_vip_and_today_role_isolation(
+    app_client: TestClient, world: Session
+) -> None:
+    now = datetime.now(UTC)
+    world.add_all(
+        [
+            # 1. 绿色战略客户，处理中，分配给用户2
+            Ticket(
+                short_code="TKT-GV-U2-PROC",
+                source_code="ksm",
+                source_ticket_id="gv-u2-proc",
+                type="Raw",
+                status="processing",
+                title="green u2 proc",
+                service_level="绿色战略客户",
+                handler_user_id=2,
+                created_at=now,
+            ),
+            # 2. 绿色战略客户，已关闭，分配给用户2
+            Ticket(
+                short_code="TKT-GV-U2-CLOSED",
+                source_code="ksm",
+                source_ticket_id="gv-u2-closed",
+                type="Raw",
+                status="closed",
+                title="green u2 closed",
+                service_level="绿色战略客户",
+                handler_user_id=2,
+                created_at=now,
+            ),
+            # 3. 绿色战略客户，处理中，未分配
+            Ticket(
+                short_code="TKT-GV-UNASSIGNED",
+                source_code="ksm",
+                source_ticket_id="gv-unassigned",
+                type="Raw",
+                status="processing",
+                title="green unassigned",
+                service_level="战略客户",
+                handler_user_id=None,
+                created_at=now,
+            ),
+            # 4. 普通客户，处理中，分配给用户2
+            Ticket(
+                short_code="TKT-NON-GV-U2",
+                source_code="ksm",
+                source_ticket_id="non-gv-u2",
+                type="Raw",
+                status="processing",
+                title="normal u2",
+                service_level="标准服务",
+                handler_user_id=2,
+                created_at=now,
+            ),
+        ]
+    )
+    world.commit()
+
+    # 管理员统计全系统未关闭的绿色战略客户；非管理员只统计分配给自己的处理中绿色战略客户
+    admin_stats = app_client.get("/api/tickets/quick-stats", headers=_bearer(1, role="admin")).json()
+    u2_stats = app_client.get("/api/tickets/quick-stats", headers=_bearer(2, role="assignee")).json()
+    u3_stats = app_client.get("/api/tickets/quick-stats", headers=_bearer(3, role="supervisor")).json()
+
+    assert u2_stats["green_vip"] == 1
+    assert u3_stats["green_vip"] == 0
+    assert admin_stats["green_vip"] >= 2
+
+    # 今日新增工单统计系统当天日期的全量工单数量（不限登录角色、不限处理人）
+    assert admin_stats["today"] == u2_stats["today"]
+    assert admin_stats["today"] == u3_stats["today"]
+    assert admin_stats["today"] >= 4
+
+    # 快捷筛选列表 green_vip 与徽标口径严格保持一致
+    admin_list = app_client.get("/api/tickets?quick_filter=green_vip", headers=_bearer(1, role="admin")).json()
+    admin_codes = [it["short_code"] for it in admin_list["items"]]
+    assert "TKT-GV-U2-PROC" in admin_codes
+    assert "TKT-GV-UNASSIGNED" in admin_codes
+    assert "TKT-GV-U2-CLOSED" not in admin_codes
+
+    u2_list = app_client.get("/api/tickets?quick_filter=green_vip", headers=_bearer(2, role="assignee")).json()
+    u2_codes = [it["short_code"] for it in u2_list["items"]]
+    assert u2_codes == ["TKT-GV-U2-PROC"]
+
+
 def test_list_tickets_default(app_client: TestClient, world: Session) -> None:
     resp = app_client.get("/api/tickets", headers=_bearer())
     assert resp.status_code == 200
