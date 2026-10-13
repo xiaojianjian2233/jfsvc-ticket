@@ -127,6 +127,7 @@ def test_initial_uses_resolved_catalog_before_routing():
         raw={},
     )
     with (
+        patch("app.api.webhooks._post_ingest_allowed", return_value=True),
         patch(
             "app.services.agents.answer_draft.generate_initial_ticket_answer",
             side_effect=lambda _: order.append("answer"),
@@ -150,6 +151,7 @@ def test_initial_still_runs_when_classification_fails():
 
     order = []
     with (
+        patch("app.api.webhooks._post_ingest_allowed", return_value=True),
         patch(
             "app.services.agents.answer_draft.generate_initial_ticket_answer",
             side_effect=lambda _: order.append("answer"),

@@ -521,7 +521,11 @@ def list_tickets(
         # 历史数据可能在入库时直接把来源产品/模块写进 ticket 生效字段。未经过
         # 系统归类且尚未毕业的工单不展示这些旧来源值；归类完成后再展示系统结果。
         # 飞书来源工单（feishu_ai）例外：产品分类=提单产品，问题模块=提单模块。
-        if t.hub_issue_id is None and t.module_classified_at is None and t.source_code != "feishu_ai":
+        if (
+            t.hub_issue_id is None
+            and t.module_classified_at is None
+            and t.source_code != "feishu_ai"
+        ):
             s.product_line_code = None
             s.module = None
         if t.assigned_user_id is not None:
@@ -555,7 +559,9 @@ def list_tickets(
         s.children_count = len(t.children_ticket_ids or []) or 1
         # 提单人信息从 reporter JSON 解析（入库写的是 name/mobile/email）
         rep = t.reporter if isinstance(t.reporter, dict) else {}
-        s.reporter_name = rep.get("name") or (t.reporter if isinstance(t.reporter, str) else None) or None
+        s.reporter_name = (
+            rep.get("name") or (t.reporter if isinstance(t.reporter, str) else None) or None
+        )
         s.reporter_mobile = rep.get("mobile") or rep.get("phone") or None
         s.reporter_email = rep.get("email") or None
         # 来源工单编号（展示用，回落 source_ticket_id）
@@ -573,9 +579,7 @@ def list_tickets(
             orig_cat = (t.source_payload or {}).get("_original_catalog") or {}
             if not s.product_name:
                 s.product_name = (
-                    s.product_line_name
-                    or orig_cat.get("product_line_code")
-                    or s.product_line_code
+                    s.product_line_name or orig_cat.get("product_line_code") or s.product_line_code
                 )
             if not s.product_line_name and s.product_name:
                 s.product_line_name = s.product_name
@@ -1647,9 +1651,14 @@ def ticket_reply_endpoint(
                 reason="主管人工答复",
             )
         record_ticket_action(
-            db, target_hub, action="reply", changed_by=f"user:{user.name}", reason="主管答复客户"
+            db,
+            target_hub,
+            action="reply",
+            changed_by=f"user:{user.name}",
+            reason="主管答复客户",
+            current_reply_only=True,
         )
-        set_hub_tickets_handler(db, target_hub, user.user_id)
+        set_hub_tickets_handler(db, target_hub, user.user_id, current_reply_only=True)
         db.commit()
 
     return TicketReplyResponse(

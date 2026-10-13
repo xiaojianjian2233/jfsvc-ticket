@@ -38,7 +38,6 @@ from app.core.logging import get_logger
 from app.db import make_session
 from app.models import HubIssue, Ticket, User
 from app.repositories.status_history import StatusHistoryRepository
-from app.services.hub_issues.hub_dedup import maybe_supersede_duplicate
 from app.services.hub_issues.module_owner import consume_module_owner
 from app.services.hub_issues.webhook_push import (
     _SOURCE_ZH,
@@ -268,9 +267,17 @@ def _sync_tickets_dev_stage(db: Session, hub: HubIssue, *, record_transfer: bool
         )
         .all()
     )
-    terminal = {"closed", "done", "resolved", "transferred_return"}
+    terminal = {
+        "answered",
+        "closed",
+        "done",
+        "rejected",
+        "resolved",
+        "superseded",
+        "transferred_return",
+    }
     for t in tickets:
-        if t.status not in terminal:
+        if t.status not in terminal and t.closed_reason != "customer_cancelled":
             t.process_stage = "产研处理" if t.source_code == "feishu_ai" else "研发处理"
 
 
@@ -357,6 +364,9 @@ def push_hub_issue_to_linear(
         if hub.type not in ("Bug_fix", "Demand"):
             logger.info("linear_push_skip_type", hub_issue_id=hub_issue_id, type=hub.type)
             return None
+        if hub.status == "closed":
+            logger.info("linear_push_skip_closed", hub_issue_id=hub_issue_id)
+            return None
         if (
             hub.linear_uuid is not None or hub.linear_identifier is not None
         ) and hub.status not in ("returned", "dev_returned"):
@@ -375,12 +385,6 @@ def push_hub_issue_to_linear(
         if hub.superseded_by_hub_issue_id is not None:
             logger.info("linear_push_skip_superseded", hub_issue_id=hub_issue_id)
             return None
-        # hub 级语义去重：与已推的同产品线 hub 重复 → supersede，不重复建
-        if settings.hub_dedup_enabled and hub.status not in ("returned", "dev_returned"):
-            dup_id = maybe_supersede_duplicate(db, hub)
-            if dup_id is not None:
-                return None
-
         # ---- 出口分流 ----
         # 默认直连 Linear GraphQL（需 key+team+push_enabled）；开启时走飞书 webhook 分流。
         if settings.linear_webhook_enabled:

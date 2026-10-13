@@ -213,6 +213,60 @@ def test_lightweight_ping_takes_over_immediately_after_dispatch(
 
 
 @respx.mock
+def test_lightweight_status_5_skips_takeover_and_agents(
+    app_client,
+    ingest_world: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """客户撤销的终态工单只落关闭记录，不得接管或启动 AI/转产研链路。"""
+    _stub_ksm_auth(respx)
+    _stub_subscribe_callback(
+        respx,
+        {
+            "billId": "BILL-CANCELLED-1",
+            "billNumber": "R-CANCELLED-1",
+            "title": "客户已撤销",
+            "status": "5",
+            "product": {"number": "C28", "name": "金蝶发票云"},
+            "version": {"mainproductname": "金蝶云星空"},
+            "module": {"name": "财务模块"},
+            "customerInfo": {"customerNumber": "C-CANCEL", "customerName": "测试公司"},
+            "handleSteps": [
+                {
+                    "handleInfo": {"action": "已撤销"},
+                    "dealopinion": "反馈人撤销",
+                }
+            ],
+        },
+    )
+    called = {"agents": 0}
+    monkeypatch.setattr(
+        webhook_module,
+        "run_post_ingest_agents",
+        lambda _ticket_id: called.__setitem__("agents", called["agents"] + 1),
+    )
+
+    resp = app_client.post(
+        "/webhook/ksm?access_token=test-token",
+        json={
+            "billId": "BILL-CANCELLED-1",
+            "noticeNum": "N-CANCEL",
+            "subscribeNum": "S-CANCEL",
+        },
+    )
+
+    assert resp.status_code == 200
+    ticket = ingest_world.query(Ticket).filter_by(source_ticket_id="BILL-CANCELLED-1").one()
+    assert ticket.status == "closed"
+    assert ticket.process_stage == "完成"
+    assert ticket.cached_reply_content == "客户主动撤销关闭工单"
+    assert ticket.ksm_takeover_status is None
+    assert called["agents"] == 0
+    assert not any("lockKsmOrder" in str(call.request.url) for call in respx.calls)
+    assert not any("handleKsmOrder" in str(call.request.url) for call in respx.calls)
+
+
+@respx.mock
 def test_lightweight_ping_id_field_fallback(app_client, ingest_world: Session) -> None:
     """Per doc: KSM sometimes uses `id` instead of `billId`."""
     _stub_ksm_auth(respx)

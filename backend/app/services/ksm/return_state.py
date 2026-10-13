@@ -18,7 +18,7 @@ from app.repositories.status_history import StatusHistoryRepository
 from app.services.hub_issues.op_status import OP_TRANSFERRED_RETURN, apply_op_status
 
 _TICKET_TERMINAL_STATUSES = frozenset(
-    {"done", "closed", "rejected", "superseded", "transferred_return"}
+    {"answered", "done", "closed", "rejected", "resolved", "superseded", "transferred_return"}
 )
 
 
@@ -105,7 +105,9 @@ def apply_ksm_returned(
         .where(
             HubIssue.ticket_id == ticket.id,
             HubIssue.deleted_at.is_(None),
-            HubIssue.status.notin_(("released", "answered", "closed", "transferred_return", "returned")),
+            HubIssue.status.notin_(
+                ("released", "answered", "closed", "transferred_return", "returned")
+            ),
         )
         .values(status="transferred_return")
     )

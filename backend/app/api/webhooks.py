@@ -65,6 +65,20 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
+def _post_ingest_allowed(ticket_id: int) -> bool:
+    """Reject delayed agent work after a source-side terminal transition."""
+    db = make_session()
+    try:
+        ticket = db.get(Ticket, ticket_id)
+        if ticket is None or ticket.deleted_at is not None:
+            return False
+        if ticket.status in ("closed", "done", "transferred_return"):
+            return False
+        return not (ticket.source_code == "ksm" and str(ticket.source_status or "") == "5")
+    finally:
+        db.close()
+
+
 def _route_by_type(
     ticket_id: int, ticket_type: str | None, confidence: float, *, bar: float
 ) -> None:
@@ -203,8 +217,14 @@ def run_post_ingest_agents(ticket_id: int) -> None:
     )
 
     settings = get_settings()
+    if not _post_ingest_allowed(ticket_id):
+        logger.info("post_ingest_skip_terminal", ticket_id=ticket_id)
+        return
     if settings.vision_enabled:
         extract_ticket_attachments(ticket_id)
+    if not _post_ingest_allowed(ticket_id):
+        logger.info("post_ingest_skip_terminal_after_vision", ticket_id=ticket_id)
+        return
 
     # 飞书工单（feishu_ai）专项流转：
     # 若产品分类、问题模块已完整并匹配到产研责任田责任人，直接自动转产研推送给 Linear 处理，
@@ -229,10 +249,19 @@ def run_post_ingest_agents(ticket_id: int) -> None:
         db.close()
 
     tri = run_ticket_triage(ticket_id)
+    if not _post_ingest_allowed(ticket_id):
+        logger.info("post_ingest_skip_terminal_after_triage", ticket_id=ticket_id)
+        return
     # 先写入规范产品线/模块，再生成首次答复。否则 KSM 未传 productLineCode 时，
     # Agent 只会拿到原始模块并追问产品版本，后续归类结果也不会刷新旧草稿。
     _resolve_module(ticket_id)
+    if not _post_ingest_allowed(ticket_id):
+        logger.info("post_ingest_skip_terminal_after_module_resolve", ticket_id=ticket_id)
+        return
     generate_initial_ticket_answer(ticket_id)
+    if not _post_ingest_allowed(ticket_id):
+        logger.info("post_ingest_skip_terminal_after_answer", ticket_id=ticket_id)
+        return
     if tri is None:
         # 分诊失败仍独立完成产品模块归类和首次草稿，不继续自动分流。
         return
@@ -241,7 +270,7 @@ def run_post_ingest_agents(ticket_id: int) -> None:
     _route_by_type(ticket_id, tri.type, tri.confidence, bar=settings.hub_issue_auto_confidence)
 
     # 混合单直接生成对应的 Hub 子任务（废弃原 Child 工单拆分机制）
-    if tri.is_mixed and tri.sub_problems:
+    if tri.is_mixed and tri.sub_problems and _post_ingest_allowed(ticket_id):
         _populate_subtasks_from_triage(ticket_id, tri.sub_problems)
 
 
@@ -343,8 +372,8 @@ def _run_ksm_takeover(
         if ticket.status in ("closed", "transferred_return", "done"):
             logger.info("ksm_takeover_skip_terminal", ticket_id=ticket_id, status=ticket.status)
             return
-        if str(detail.get("status") or ticket.source_status or "") in ("4", "6"):
-            logger.info("ksm_takeover_skip_status_4_or_6", ticket_id=ticket_id)
+        if str(detail.get("status") or ticket.source_status or "") in ("4", "5", "6"):
+            logger.info("ksm_takeover_skip_terminal_source_status", ticket_id=ticket_id)
             return
         takeover_ksm_ticket(
             db,
@@ -436,7 +465,9 @@ def _ksm_async_fetch_and_ingest(bill_id: str) -> None:
                 ticket_row.ksm_notice_num = notice.notice_num
                 ticket_row.ksm_subscribe_num = notice.subscribe_num
             db.commit()
-            ingested_ticket_id = result.ticket_id if not result.deduped else None
+            ingested_ticket_id = (
+                result.ticket_id if not result.deduped and not result.skip_post_ingest else None
+            )
             logger.info(
                 "ksm_async_ingest_committed",
                 bill_id=bill_id,
@@ -565,7 +596,7 @@ async def ksm_webhook(
         trace_id=get_trace_id(),
     )
     # D3-C/D: post-ingest agents after sync ingest (skip dedup).
-    if not result.deduped:
+    if not result.deduped and not result.skip_post_ingest:
         background_tasks.add_task(run_post_ingest_agents, result.ticket_id)
     return KSMAck(code=0)
 

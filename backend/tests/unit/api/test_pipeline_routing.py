@@ -37,6 +37,8 @@ def spy(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
     # （drain_operation_auto_reply），_route_by_type 不再同步调 auto_answer_operation。
     calls: dict[str, list] = {"graduate": [], "split": [], "route_child": []}
     monkeypatch.setattr(wh, "extract_ticket_attachments", lambda tid: None)
+    # 本文件只验证链路编排，不创建数据库工单；终态闸门单独测试。
+    monkeypatch.setattr(wh, "_post_ingest_allowed", lambda tid: True)
 
     def fake_graduate(tid):  # type: ignore[no-untyped-def]
         calls["graduate"].append(tid)

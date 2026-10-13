@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
@@ -25,6 +26,7 @@ from app.services.hub_issues.op_status import (
     OP_SUPPLEMENTING,
     apply_op_status,
 )
+from app.services.ksm.cancel_state import KSM_CUSTOMER_CANCELLED_REASON
 
 logger = get_logger(__name__)
 
@@ -72,7 +74,27 @@ def request_supply(
         raise SupplySyncError(f"hub_issue {hub_issue_id} not found")
 
     tickets = (
-        db.query(Ticket).filter(Ticket.hub_issue_id == hub.id, Ticket.deleted_at.is_(None)).all()
+        db.query(Ticket)
+        .filter(
+            Ticket.hub_issue_id == hub.id,
+            Ticket.deleted_at.is_(None),
+            Ticket.status.notin_(
+                (
+                    "answered",
+                    "closed",
+                    "done",
+                    "rejected",
+                    "resolved",
+                    "superseded",
+                    "transferred_return",
+                )
+            ),
+            or_(
+                Ticket.closed_reason.is_(None),
+                Ticket.closed_reason != KSM_CUSTOMER_CANCELLED_REASON,
+            ),
+        )
+        .all()
     )
     history = StatusHistoryRepository(db)
     ticket_ids: list[int] = []

@@ -38,6 +38,9 @@ from app.services.hub_issues.linear_push import _resolve_label_ids, _resolve_tit
 logger = get_logger(__name__)
 
 _DEV_TYPES = ("Bug_fix", "Demand")
+_TERMINAL_TICKET_STATUSES = frozenset(
+    {"answered", "closed", "done", "rejected", "resolved", "superseded", "transferred_return"}
+)
 
 
 class OwnerSplitError(Exception):
@@ -245,7 +248,14 @@ def notify_sub_issue_done(db: Session, sub: HubIssueLinearIssue) -> int:
     tickets = (
         db.query(Ticket).filter(Ticket.hub_issue_id == hub.id, Ticket.deleted_at.is_(None)).all()
     )
-    sourced = [t for t in tickets if t.source_code and t.source_ticket_id]
+    sourced = [
+        t
+        for t in tickets
+        if t.source_code
+        and t.source_ticket_id
+        and t.status not in _TERMINAL_TICKET_STATUSES
+        and t.closed_reason != "customer_cancelled"
+    ]
     if not sourced:
         sub.notified_at = now  # 自查/无源客户渠道 → 无处可通知
         logger.info("sub_issue_notify_no_sourced", hub_issue_id=hub.id, sub_id=sub.id)

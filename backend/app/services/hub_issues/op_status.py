@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
@@ -18,6 +18,7 @@ from app.models import HubIssue
 from app.repositories.status_history import StatusHistoryRepository
 
 logger = get_logger(__name__)
+_KSM_CUSTOMER_CANCELLED_REASON = "customer_cancelled"
 
 OP_PROCESSING = "processing"
 OP_ANSWERED = "answered"
@@ -110,6 +111,7 @@ def record_ticket_action(
     action: str,
     changed_by: str,
     reason: str,
+    current_reply_only: bool = False,
 ) -> int:
     """给 hub 的每条关联 ticket 补写一条操作审计（entity_type='ticket'）。
 
@@ -120,9 +122,33 @@ def record_ticket_action(
     """
     from app.models import Ticket
 
-    tickets = (
-        db.query(Ticket).filter(Ticket.hub_issue_id == hub.id, Ticket.deleted_at.is_(None)).all()
+    query = db.query(Ticket).filter(
+        Ticket.hub_issue_id == hub.id,
+        Ticket.deleted_at.is_(None),
+        or_(
+            Ticket.closed_reason.is_(None),
+            Ticket.closed_reason != _KSM_CUSTOMER_CANCELLED_REASON,
+        ),
     )
+    if current_reply_only:
+        # author_reply 先把本轮有效工单的缓存版本提升到 Hub 当前版本。
+        # 用版本筛选可区分“刚在本轮被答复”与“旧周期已答复”工单。
+        query = query.filter(Ticket.cached_reply_version == hub.reply_content_version)
+    else:
+        query = query.filter(
+            Ticket.status.notin_(
+                (
+                    "answered",
+                    "closed",
+                    "done",
+                    "rejected",
+                    "resolved",
+                    "superseded",
+                    "transferred_return",
+                )
+            )
+        )
+    tickets = query.all()
     repo = StatusHistoryRepository(db)
     for t in tickets:
         repo.record(
@@ -137,7 +163,13 @@ def record_ticket_action(
     return len(tickets)
 
 
-def set_hub_tickets_handler(db: Session, hub: HubIssue, user_id: int) -> int:
+def set_hub_tickets_handler(
+    db: Session,
+    hub: HubIssue,
+    user_id: int,
+    *,
+    current_reply_only: bool = False,
+) -> int:
     """把 hub 下所有未删关联 ticket 的处理人（handler_user_id）置为 user_id。
 
     处理人随「毕业运营分派 / 答复 / 转交」流动到工单。不 commit（复用调用方事务）。
@@ -145,9 +177,31 @@ def set_hub_tickets_handler(db: Session, hub: HubIssue, user_id: int) -> int:
     """
     from app.models import Ticket
 
-    tickets = (
-        db.query(Ticket).filter(Ticket.hub_issue_id == hub.id, Ticket.deleted_at.is_(None)).all()
+    query = db.query(Ticket).filter(
+        Ticket.hub_issue_id == hub.id,
+        Ticket.deleted_at.is_(None),
+        or_(
+            Ticket.closed_reason.is_(None),
+            Ticket.closed_reason != _KSM_CUSTOMER_CANCELLED_REASON,
+        ),
     )
+    if current_reply_only:
+        query = query.filter(Ticket.cached_reply_version == hub.reply_content_version)
+    else:
+        query = query.filter(
+            Ticket.status.notin_(
+                (
+                    "answered",
+                    "closed",
+                    "done",
+                    "rejected",
+                    "resolved",
+                    "superseded",
+                    "transferred_return",
+                )
+            )
+        )
+    tickets = query.all()
     for t in tickets:
         t.handler_user_id = user_id
     return len(tickets)

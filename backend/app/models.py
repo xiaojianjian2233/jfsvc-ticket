@@ -626,6 +626,9 @@ class HubIssue(Base):
     linear_status_synced_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # 同一问题完成后被客户再次严格命中时，Hub 复用但会创建新 Linear issue。
+    # 当前 Linear 仍落上面的单值字段，历史周期追加到这里，避免覆盖后丢审计。
+    linear_history: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     # D4 优化 v2: hub 语义去重向量（建 Linear 前比对同产品线已有 hub，避免重复 issue）
     embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
     scheduled_iteration: Mapped[str | None] = mapped_column(String(64), nullable=True)

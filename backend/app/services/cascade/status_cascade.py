@@ -35,8 +35,9 @@ logger = get_logger(__name__)
 _TICKET_CASCADE_STATUSES = frozenset({"in_progress", "processing", "released", "answered"})
 
 _TICKET_TERMINAL_STATUSES = frozenset(
-    {"done", "closed", "rejected", "superseded", "transferred_return"}
+    {"answered", "done", "closed", "rejected", "resolved", "superseded", "transferred_return"}
 )
+_KSM_CUSTOMER_CANCELLED_REASON = "customer_cancelled"
 
 
 @dataclass(slots=True)
@@ -91,9 +92,9 @@ def apply_hub_status(
                 )
                 .all()
             )
-            terminal = {"closed", "done", "resolved", "transferred_return"}
+            terminal = _TICKET_TERMINAL_STATUSES
             for t in tickets:
-                if t.status not in terminal:
+                if t.status not in terminal and t.closed_reason != _KSM_CUSTOMER_CANCELLED_REASON:
                     t.process_stage = "服务处理"
         return result
 
@@ -114,11 +115,16 @@ def apply_hub_status(
         .all()
     )
     for t in tickets:
+        if (
+            t.status in _TICKET_TERMINAL_STATUSES
+            or t.closed_reason == _KSM_CUSTOMER_CANCELLED_REASON
+        ):
+            continue
         if to_status in ("released", "answered", "closed", "resolved"):
             t.process_stage = "完成"
         elif to_status in ("in_progress", "processing") and hub.type in ("Bug_fix", "Demand"):
             t.process_stage = "产研处理" if t.source_code == "feishu_ai" else "研发处理"
-        if t.status == ticket_target_status or t.status in _TICKET_TERMINAL_STATUSES:
+        if t.status == ticket_target_status:
             continue
         t_prev = t.status
         t.status = ticket_target_status

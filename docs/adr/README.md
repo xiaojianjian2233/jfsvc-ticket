@@ -11,6 +11,8 @@
 | 0013 | [LLM Router 与多 Provider failover](0013-llm-router-provider-strategy.md) | D3 | Accepted |
 | 0014 | [agent_decisions 极简审计表](0014-agent-decisions-minimal-audit.md) | D3 | Accepted |
 | 0015 | [JSON 向量代替 pgvector](0015-json-vectors-over-pgvector.md) | D3-E | Accepted |
+| 0016 | [Agent 流水线重构](0016-agent-pipeline-restructure.md) | D3/D4 | Accepted |
+| 0017 | [严格重复工单共享 Hub 生命周期](0017-shared-hub-duplicate-lifecycle.md) | D4 | Accepted |
 
 预留：
 - 0007 状态级联与 sync_outbox fan-out (D4) — 已实现，ADR 待补（见 `services/cascade/`）

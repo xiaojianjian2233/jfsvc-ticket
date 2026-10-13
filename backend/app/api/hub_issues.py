@@ -411,9 +411,7 @@ def _clean_person_name(raw: str | None) -> str | None:
     return s or None
 
 
-def _resolve_responsible_user_name(
-    db: Session, hub: HubIssue, linked: list[Ticket]
-) -> str | None:
+def _resolve_responsible_user_name(db: Session, hub: HubIssue, linked: list[Ticket]) -> str | None:
     primary_tk = linked[0] if linked else None
     stage = (primary_tk.process_stage if primary_tk else "") or "服务处理"
     is_dev_stage = stage in ("研发处理", "产研处理", "查验处理")
@@ -628,10 +626,15 @@ def author_reply_endpoint(
         )
         # 答复留痕：给关联工单写时间轴节点（详情页左侧「处理节点」）
         record_ticket_action(
-            db, hub, action="reply", changed_by=f"user:{user.name}", reason="主管答复客户"
+            db,
+            hub,
+            action="reply",
+            changed_by=f"user:{user.name}",
+            reason="主管答复客户",
+            current_reply_only=True,
         )
         # 答复者成为处理人（hub 下所有关联工单同步）
-        set_hub_tickets_handler(db, hub, user.user_id)
+        set_hub_tickets_handler(db, hub, user.user_id, current_reply_only=True)
         db.commit()
 
     logger.info(
@@ -1424,7 +1427,9 @@ def update_subtask_endpoint(
                     ticket.product_line_code = body.product_line_code
                 if body.module is not None:
                     ticket.module = body.module
-        if (ticket.hub_issue_id == hub.id or hub.ticket_id == ticket.id) and hub.assigned_user_id is not None:
+        if (
+            ticket.hub_issue_id == hub.id or hub.ticket_id == ticket.id
+        ) and hub.assigned_user_id is not None:
             ticket.assigned_user_id = hub.assigned_user_id
         # 8) & 9) 飞书工单补充完整产品分类、问题模块且匹配到研发责任田责任人后，自动转产研并更新处理环节为「产研处理」
         if ticket.source_code == "feishu_ai" and ticket.assigned_user_id is not None:
@@ -1464,9 +1469,7 @@ def delete_subtask_endpoint(
 
     hub.deleted_at = datetime.now(UTC)
     linked_tickets = (
-        db.query(Ticket)
-        .filter(Ticket.hub_issue_id == hub.id, Ticket.deleted_at.is_(None))
-        .all()
+        db.query(Ticket).filter(Ticket.hub_issue_id == hub.id, Ticket.deleted_at.is_(None)).all()
     )
     for t in linked_tickets:
         next_sub = (

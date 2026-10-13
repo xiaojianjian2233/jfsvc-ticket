@@ -66,6 +66,28 @@ def test_no_candidates_returns_none(db_session: Session) -> None:
     assert hub.embedding == [1.0, 0.0]  # 顺带存了向量
 
 
+def test_exact_text_match_does_not_require_existing_embedding(db_session: Session) -> None:
+    existing = _hub(
+        db_session,
+        2,
+        type="Operation",
+        title="开票 状态不同步",
+        canonical_body="操作后状态未同步",
+        embedding=None,
+    )
+    new = _hub(
+        db_session,
+        3,
+        type="Operation",
+        title="开票状态不同步",
+        canonical_body="操作后  状态未同步",
+    )
+    match = hub_dedup.find_duplicate_match(db_session, new)
+    assert match is not None
+    assert match.hub_id == existing.id
+    assert match.exact_text is True
+
+
 def test_dedup_hit(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     # 已推 Linear 的历史 hub（同产品线 + 有 embedding）
     existing = _hub(
@@ -77,7 +99,7 @@ def test_dedup_hit(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None
         db_session,
         new,
         embedding_client=_FakeEmb([0.99, 0.1]),  # 与 existing 高相似
-        router=_router(f'{{"is_dup": true, "dup_hub_id": {existing.id}, "confidence": 0.9}}'),
+        router=_router(f'{{"is_dup": true, "dup_hub_id": {existing.id}, "confidence": 0.99}}'),
     )  # type: ignore[arg-type]
     assert out == existing.id
 
@@ -150,7 +172,7 @@ def test_operation_candidate_no_linear_required(
         db_session,
         new,
         embedding_client=_FakeEmb([0.99, 0.1]),
-        router=_router(f'{{"is_dup": true, "dup_hub_id": {existing.id}, "confidence": 0.9}}'),
+        router=_router(f'{{"is_dup": true, "dup_hub_id": {existing.id}, "confidence": 0.99}}'),
     )  # type: ignore[arg-type]
     assert out == existing.id  # Operation 不要求 linear_uuid 也能查到候选
 
@@ -173,31 +195,21 @@ def test_operation_not_pushed_still_candidate(db_session: Session) -> None:
         db_session,
         new,
         embedding_client=_FakeEmb([1.0, 0.0]),
-        router=_router(f'{{"is_dup": true, "dup_hub_id": {existing.id}}}'),
+        router=_router(f'{{"is_dup": true, "dup_hub_id": {existing.id}, "confidence": 0.99}}'),
     )  # type: ignore[arg-type]
     assert out == existing.id
 
 
-# ---- maybe_supersede_duplicate 公共函数 ----
-
-
-def test_maybe_supersede_marks_and_counts(
+def test_strict_match_rejects_confidence_below_095(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    existing = _hub(db_session, 100, type="Operation", occurrence_count=1)
-    cur = _hub(db_session, 101, type="Operation")
-    monkeypatch.setattr(hub_dedup, "find_duplicate_hub", lambda db, hub: existing.id)
-    dup = hub_dedup.maybe_supersede_duplicate(db_session, cur)
-    assert dup == existing.id
-    db_session.refresh(cur)
-    db_session.refresh(existing)
-    assert cur.superseded_by_hub_issue_id == existing.id
-    assert existing.occurrence_count == 2
-
-
-def test_maybe_supersede_none_when_no_dup(
-    db_session: Session, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    cur = _hub(db_session, 110, type="Operation")
-    monkeypatch.setattr(hub_dedup, "find_duplicate_hub", lambda db, hub: None)
-    assert hub_dedup.maybe_supersede_duplicate(db_session, cur) is None
+    existing = _hub(db_session, 92, type="Operation", embedding=[1.0, 0.0])
+    new = _hub(db_session, 93, type="Operation")
+    monkeypatch.setattr(hub_dedup, "load_prompt", lambda name: "判定提示词")
+    out = hub_dedup.find_duplicate_hub(
+        db_session,
+        new,
+        embedding_client=_FakeEmb([0.99, 0.1]),
+        router=_router(f'{{"is_dup": true, "dup_hub_id": {existing.id}, "confidence": 0.94}}'),
+    )  # type: ignore[arg-type]
+    assert out is None

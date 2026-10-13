@@ -148,6 +148,7 @@ def test_short_codes_increment(world: Session) -> None:
 
 def test_graduate_merges_on_dedup_hit(world: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     import app.services.hub_issues.creator as creator_mod
+    from app.services.hub_issues.hub_dedup import DedupMatch
 
     orig = HubIssue(
         short_code="HUB-ORIG",
@@ -160,20 +161,24 @@ def test_graduate_merges_on_dedup_hit(world: Session, monkeypatch: pytest.Monkey
     world.add(orig)
     world.flush()
     t = _make_ticket(world, 20)
-    # mock 查重命中 orig（并模拟 supersede 副作用）
-    monkeypatch.setattr(creator_mod, "maybe_supersede_duplicate", lambda db, hub: orig.id)
+    monkeypatch.setattr(
+        creator_mod,
+        "find_duplicate_match",
+        lambda db, hub: DedupMatch(orig.id, 1.0, True),
+    )
     res = ensure_hub_issue_for_ticket(t.id, created_by="agent:hub_issue_auto", db=world)
     assert res.created is False
     assert res.hub_issue_id == orig.id
     world.refresh(t)
     assert t.hub_issue_id == orig.id  # ticket 挂原 hub
+    assert world.query(HubIssue).count() == 1  # 查重探针 Hub 不留重复记录
 
 
 def test_graduate_creates_when_no_dup(world: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     import app.services.hub_issues.creator as creator_mod
 
     t = _make_ticket(world, 21)
-    monkeypatch.setattr(creator_mod, "maybe_supersede_duplicate", lambda db, hub: None)
+    monkeypatch.setattr(creator_mod, "find_duplicate_match", lambda db, hub: None)
     res = ensure_hub_issue_for_ticket(t.id, created_by="agent:hub_issue_auto", db=world)
     assert res.created is True
 
@@ -187,6 +192,7 @@ def test_dedup_merge_into_answered_hub_backfills_reply(
     """
     import app.services.hub_issues.creator as creator_mod
     from app.models import SyncOutbox
+    from app.services.hub_issues.hub_dedup import DedupMatch
 
     orig = HubIssue(
         short_code="HUB-ANSWERED",
@@ -203,7 +209,11 @@ def test_dedup_merge_into_answered_hub_backfills_reply(
     world.add(orig)
     world.flush()
     t = _make_ticket(world, 30, predicted_type="Operation")
-    monkeypatch.setattr(creator_mod, "maybe_supersede_duplicate", lambda db, hub: orig.id)
+    monkeypatch.setattr(
+        creator_mod,
+        "find_duplicate_match",
+        lambda db, hub: DedupMatch(orig.id, 1.0, True),
+    )
     res = ensure_hub_issue_for_ticket(t.id, created_by="agent:hub_issue_auto", db=world)
     assert res.created is False
     world.refresh(t)
@@ -223,6 +233,7 @@ def test_dedup_merge_into_unanswered_hub_no_backfill(
     """合并到未答复 hub（reply_v=0）→ 不回填（没答复可发）。"""
     import app.services.hub_issues.creator as creator_mod
     from app.models import SyncOutbox
+    from app.services.hub_issues.hub_dedup import DedupMatch
 
     orig = HubIssue(
         short_code="HUB-UNANSWERED",
@@ -237,7 +248,11 @@ def test_dedup_merge_into_unanswered_hub_no_backfill(
     world.add(orig)
     world.flush()
     t = _make_ticket(world, 31, predicted_type="Operation")
-    monkeypatch.setattr(creator_mod, "maybe_supersede_duplicate", lambda db, hub: orig.id)
+    monkeypatch.setattr(
+        creator_mod,
+        "find_duplicate_match",
+        lambda db, hub: DedupMatch(orig.id, 1.0, True),
+    )
     ensure_hub_issue_for_ticket(t.id, created_by="agent:hub_issue_auto", db=world)
     world.refresh(t)
     assert t.cached_reply_content is None
@@ -267,7 +282,7 @@ def test_manual_graduate_skips_dedup(world: Session, monkeypatch: pytest.MonkeyP
         called["dedup"] += 1
         return orig.id  # 若被调用会命中合并
 
-    monkeypatch.setattr(creator_mod, "maybe_supersede_duplicate", _spy)
+    monkeypatch.setattr(creator_mod, "find_duplicate_match", _spy)
     res = ensure_hub_issue_for_ticket(
         t.id, created_by="user:boss", type_override="Bug_fix", db=world
     )
@@ -344,7 +359,7 @@ def test_auto_bugfix_gated_to_pending_review(
     _point_make_session_at(sqlite_engine, monkeypatch)
     pushed: list[int] = []
     monkeypatch.setattr(linear_push, "push_hub_issue_to_linear", lambda hid: pushed.append(hid))
-    monkeypatch.setattr(creator_mod, "maybe_supersede_duplicate", lambda db, hub: None)
+    monkeypatch.setattr(creator_mod, "find_duplicate_match", lambda db, hub: None)
 
     result = creator_mod.create_hub_issue_for_ticket_auto(tid)
     assert result is not None and result.type == "Bug_fix"
@@ -366,7 +381,7 @@ def test_auto_operation_gated_to_pending_review(
     t = _make_ticket(world, 41, predicted_type="Operation")
     tid = t.id
     _point_make_session_at(sqlite_engine, monkeypatch)
-    monkeypatch.setattr(creator_mod, "maybe_supersede_duplicate", lambda db, hub: None)
+    monkeypatch.setattr(creator_mod, "find_duplicate_match", lambda db, hub: None)
 
     result = creator_mod.create_hub_issue_for_ticket_auto(tid)
     assert result is not None and result.type == "Operation"
@@ -391,7 +406,7 @@ def test_auto_operation_accuracy_review_skips_pending_review(
     t = _make_ticket(world, 43, predicted_type="Operation")
     tid = t.id
     _point_make_session_at(sqlite_engine, monkeypatch)
-    monkeypatch.setattr(creator_mod, "maybe_supersede_duplicate", lambda db, hub: None)
+    monkeypatch.setattr(creator_mod, "find_duplicate_match", lambda db, hub: None)
 
     result = creator_mod.create_hub_issue_for_ticket_auto(tid)
     assert result is not None and result.type == "Operation"
@@ -420,7 +435,7 @@ def test_auto_operation_not_gated_when_gate_classify_off(
     t = _make_ticket(world, 42, predicted_type="Operation")
     tid = t.id
     _point_make_session_at(sqlite_engine, monkeypatch)
-    monkeypatch.setattr(creator_mod, "maybe_supersede_duplicate", lambda db, hub: None)
+    monkeypatch.setattr(creator_mod, "find_duplicate_match", lambda db, hub: None)
 
     result = creator_mod.create_hub_issue_for_ticket_auto(tid)
     assert result is not None and result.type == "Operation"

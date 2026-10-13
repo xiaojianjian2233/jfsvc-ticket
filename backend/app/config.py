@@ -217,6 +217,9 @@ class Settings(BaseSettings):
     # D4 优化 v2: 建 Linear 前 hub 级语义去重（命中则 supersede 到已有 hub，不重复推）
     hub_dedup_enabled: bool = True
     hub_dedup_threshold: float = 0.85  # 余弦下限
+    # 自动挂载会触发状态继承/外部回写，必须比普通相似召回更严格。
+    hub_dedup_strict_threshold: float = 0.95
+    hub_dedup_strict_confidence: float = 0.95
     hub_dedup_top_k: int = 5
 
     # ---- PII ----

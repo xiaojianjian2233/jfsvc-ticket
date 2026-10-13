@@ -1,7 +1,8 @@
-"""hub 级语义去重（D4 优化 v2 §三需求4，移植 sample _hub_dedup）.
+"""hub 级严格语义去重。
 
-建 Linear 前对 hub embedding，召回同产品线**已推送 Linear** 的历史 hub，余弦 top_k +
-LLM 确认 → 命中则当前 hub supersede 到已有 hub、不重复建 Linear（保证一 hub 一 Linear）。
+新接入的非拆单工单在毕业时查找同产品线、同类型的历史 Hub。只有文字完全一致，
+或者向量相似度与 LLM 置信度都达到严格门槛时才共享原 Hub；不再生成第二个
+持久 Hub。适用于全部 Hub 类型，研发类也可在尚未推 Linear 时被新工单命中。
 
 降级（embedding/LLM 失败）一律返回 None=不去重，宁可多建一个 issue 也不漏推。
 向量存 hub_issues.embedding（JSON），Python 余弦（同 ADR-0015）。
@@ -10,7 +11,8 @@ LLM 确认 → 命中则当前 hub supersede 到已有 hub、不重复建 Linear
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +24,7 @@ from app.core.llm_router import LLMMessage, LLMRouter, LLMRouterError
 from app.core.llm_router.embeddings import EmbeddingClient, EmbeddingError, cosine_similarity
 from app.core.logging import get_logger
 from app.models import HubIssue
-from app.repositories.status_history import StatusHistoryRepository
+from app.services.hub_issues.duplicate_attach import candidate_is_eligible
 from app.services.skills.prompt_store import load_prompt
 
 logger = get_logger(__name__)
@@ -32,6 +34,17 @@ _PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "prompts"
 
 def _hub_text(hub: HubIssue) -> str:
     return f"{hub.title or ''}\n{(hub.canonical_body or '')[:1500]}".strip()
+
+
+def _normalized_hub_text(hub: HubIssue) -> str:
+    return re.sub(r"\s+", "", _hub_text(hub)).casefold()
+
+
+@dataclass(slots=True, frozen=True)
+class DedupMatch:
+    hub_id: int
+    similarity: float
+    exact_text: bool
 
 
 def ensure_hub_embedding(
@@ -52,19 +65,13 @@ def ensure_hub_embedding(
 
 
 def _candidate_query(hub: HubIssue):  # type: ignore[no-untyped-def]
-    """候选过滤按类型分流：同产品线 + 同类型 + 有 embedding。
-    研发类(Bug_fix/Demand)额外要求已推 Linear（保持"一 hub 一 Linear"）；
-    运营/内部类(Operation/Internal_task)不要求 linear_uuid（它们本就不推 Linear）。"""
-    q = select(HubIssue).where(
+    """候选只限同产品线、同类型的真实 Hub。"""
+    return select(HubIssue).where(
         HubIssue.id != hub.id,
         HubIssue.deleted_at.is_(None),
         HubIssue.product_line_code == hub.product_line_code,
         HubIssue.type == hub.type,  # 不跨类型合并
-        HubIssue.embedding.isnot(None),
     )
-    if hub.type in ("Bug_fix", "Demand"):
-        q = q.where(HubIssue.linear_uuid.isnot(None))
-    return q
 
 
 def find_duplicate_hub(
@@ -75,20 +82,52 @@ def find_duplicate_hub(
     router: LLMRouter | None = None,
 ) -> int | None:
     """返回与 hub 重复的已有 hub_id，否则 None。永不抛（降级 None）。"""
+    match = find_duplicate_match(db, hub, embedding_client=embedding_client, router=router)
+    return match.hub_id if match is not None else None
+
+
+def find_duplicate_match(
+    db: Session,
+    hub: HubIssue,
+    *,
+    embedding_client: EmbeddingClient | None = None,
+    router: LLMRouter | None = None,
+) -> DedupMatch | None:
+    """Strict duplicate match with lifecycle eligibility and evidence."""
     settings = get_settings()
+    rows = [
+        row
+        for row in db.execute(_candidate_query(hub)).scalars().all()
+        if candidate_is_eligible(db, row)
+    ]
+
+    # 字面完全一致不依赖向量服务；即使 embedding/LLM 故障，也能做确定性关联。
+    current_text = _normalized_hub_text(hub)
+    exact = sorted(
+        (row for row in rows if _normalized_hub_text(row) == current_text),
+        key=lambda row: row.id,
+    )
+    if exact:
+        row = exact[0]
+        logger.info(
+            "hub_dedup_exact_hit",
+            hub_issue_id=hub.id,
+            dup_hub_id=row.id,
+            similarity=1.0,
+        )
+        return DedupMatch(hub_id=row.id, similarity=1.0, exact_text=True)
+
     vec = ensure_hub_embedding(db, hub, client=embedding_client)
     if vec is None:
         return None
-
-    rows = db.execute(_candidate_query(hub)).scalars().all()
+    rows = [row for row in rows if row.embedding]
     scored = sorted(
         ((cosine_similarity(vec, r.embedding or []), r) for r in rows),
         key=lambda t: t[0],
         reverse=True,
     )
-    top = [(s, r) for s, r in scored if s >= settings.hub_dedup_threshold][
-        : settings.hub_dedup_top_k
-    ]
+    strict_threshold = max(settings.hub_dedup_threshold, settings.hub_dedup_strict_threshold)
+    top = [(s, r) for s, r in scored if s >= strict_threshold][: settings.hub_dedup_top_k]
     if not top:
         return None
 
@@ -102,7 +141,11 @@ def find_duplicate_hub(
         for s, r in top
     ]
     try:
-        prompt = load_prompt("hub_dedup")
+        prompt = load_prompt("hub_dedup") + (
+            "\n\n当前执行严格匹配：适用于 Operation、Bug_fix、Demand 和 "
+            "Internal_task 全部类型；只有完全是同一个问题才允许 is_dup=true，"
+            f"且 confidence 必须不低于 {settings.hub_dedup_strict_confidence:.2f}。"
+        )
         router = router or LLMRouter.from_settings()
         resp = router.complete(
             [
@@ -120,7 +163,11 @@ def find_duplicate_hub(
             temperature=0.0,
             response_format={"type": "json_object"},
         )
-        parsed = _parse(resp.content, {r.id for _, r in top})
+        parsed = _parse(
+            resp.content,
+            {r.id for _, r in top},
+            min_confidence=settings.hub_dedup_strict_confidence,
+        )
     except (LLMRouterError, _HubDedupError) as e:
         logger.warning("hub_dedup_llm_failed", hub_issue_id=hub.id, error=str(e))
         return None
@@ -128,43 +175,16 @@ def find_duplicate_hub(
     if parsed.get("is_dup") and parsed.get("dup_hub_id"):
         dup_id = int(parsed["dup_hub_id"])
         logger.info("hub_dedup_hit", hub_issue_id=hub.id, dup_hub_id=dup_id)
-        return dup_id
+        score = next(score for score, row in top if row.id == dup_id)
+        return DedupMatch(hub_id=dup_id, similarity=score, exact_text=False)
     return None
-
-
-def maybe_supersede_duplicate(db: Session, hub: HubIssue) -> int | None:
-    """查重命中则当前 hub supersede 到原 hub + 原 hub occurrence_count+1。
-    返回原 hub_id，否则 None（含降级）。也顺带把 hub.embedding 存好。Commits。
-    供 creator（所有类型毕业后）+ linear_push（Bug/Demand 推前兜底）共用。"""
-    dup_id = find_duplicate_hub(db, hub)
-    if dup_id is None:
-        return None
-    dup = db.get(HubIssue, dup_id)
-    if dup is None or dup.deleted_at is not None:
-        return None
-    now = datetime.now(UTC)
-    hub.superseded_by_hub_issue_id = dup_id
-    hub.supersede_reason = f"hub-dedup: 与 {dup.short_code} 同一问题，合并复用"
-    dup.occurrence_count += 1
-    dup.last_seen_at = now
-    StatusHistoryRepository(db).record(
-        entity_type="hub_issue",
-        entity_id=hub.id,
-        from_status=hub.status,
-        to_status=hub.status,
-        changed_by="agent:hub_dedup",
-        reason=hub.supersede_reason,
-    )
-    db.commit()
-    logger.info("hub_superseded_by_dedup", hub_issue_id=hub.id, dup_hub_id=dup_id)
-    return dup_id
 
 
 class _HubDedupError(Exception):
     pass
 
 
-def _parse(content: str, candidate_ids: set[int]) -> dict[str, Any]:
+def _parse(content: str, candidate_ids: set[int], *, min_confidence: float = 0.0) -> dict[str, Any]:
     try:
         data = json.loads(content.strip())
     except json.JSONDecodeError as e:
@@ -175,4 +195,8 @@ def _parse(content: str, candidate_ids: set[int]) -> dict[str, Any]:
         dup = data.get("dup_hub_id")
         if not isinstance(dup, int) or dup not in candidate_ids:
             raise _HubDedupError(f"dup_hub_id {dup!r} not in candidates")
+        confidence = data.get("confidence")
+        if not isinstance(confidence, int | float) or float(confidence) < min_confidence:
+            data["is_dup"] = False
+            data["dup_hub_id"] = None
     return data

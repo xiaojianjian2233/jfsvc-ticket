@@ -43,6 +43,11 @@ from app.services.hub_issues.op_status import (
 )
 from app.services.identity.resolver import IdentityInput, IdentityResolver
 from app.services.ingest.content_refresh import apply_content_refresh
+from app.services.ksm.cancel_state import (
+    KSM_CANCELLED_NOTE,
+    KSM_CUSTOMER_CANCELLED_REASON,
+    apply_ksm_cancelled,
+)
 from app.services.ksm.return_state import apply_ksm_returned
 
 logger = get_logger(__name__)
@@ -57,6 +62,8 @@ class IngestResult:
     routing_decision: str  # 'assigned' | 'multi_match' | 'default_pool'
     assigned_user_ids: list[int] = field(default_factory=list)
     deduped: bool = False  # True if (source, source_ticket_id) already existed
+    # 入站即终态的工单不得进入接管、AI 分类或转产研后续链路。
+    skip_post_ingest: bool = False
 
 
 class IngestError(Exception):
@@ -212,6 +219,20 @@ class KSMIngester:
             self._sync_ksm_fields(existing, payload)
             hub = self._db.get(HubIssue, existing.hub_issue_id) if existing.hub_issue_id else None
             op = hub.op_status if hub is not None and hub.deleted_at is None else None
+
+            # KSM status=5 是“反馈人主动撤销”的权威终态。无论首次推送还是已有
+            # 工单重推，都必须关闭 ticket/关联 hub、落默认处理说明并停止出站任务。
+            is_ksm_cancelled = (
+                str(payload.get("sourceStatus") or payload.get("status") or "") == "5"
+            )
+            if is_ksm_cancelled:
+                apply_ksm_cancelled(self._db, existing)
+                logger.info(
+                    "ksm_ingest_cancelled_sync",
+                    bill_id=bill_id,
+                    existing_ticket_id=existing.id,
+                )
+                return self._dedup_result(existing, skip_post_ingest=True)
 
             # 若 KSM 推送携带结案状态（sourceStatus=4 或 status=4），
             # 属于答复后的关单状态同步或客户评价关单，绝不作为客户驳回重新打开工单
@@ -401,7 +422,9 @@ class KSMIngester:
         # 3. Create ticket (type=Raw, status=received)。产品分类/问题模块不采用
         # 来源系统原值，统一留空，后续只由 module_resolve 系统归类链写入生效值。
         short_code = self._tickets.next_short_code()
-        is_already_closed = str(payload.get("sourceStatus") or "") == "4"
+        source_status = str(payload.get("sourceStatus") or payload.get("status") or "")
+        is_ksm_cancelled = source_status == "5"
+        is_already_closed = source_status in ("4", "5")
         initial_status = "closed" if is_already_closed else "processing"
         initial_stage = "完成" if is_already_closed else "服务处理"
         ticket = Ticket(
@@ -419,6 +442,9 @@ class KSMIngester:
             feature=payload.get("featureName") or payload.get("feature"),
             title=payload.get("title"),
             body=payload.get("content") or payload.get("description"),
+            cached_reply_content=KSM_CANCELLED_NOTE if is_ksm_cancelled else None,
+            cached_reply_version=1 if is_ksm_cancelled else None,
+            closed_reason=KSM_CUSTOMER_CANCELLED_REASON if is_ksm_cancelled else None,
             reporter={
                 "name": payload.get("accountName"),
                 "email": payload.get("email"),
@@ -437,8 +463,8 @@ class KSMIngester:
         # 4. Dispatch（按来源+规则派单，取代旧 Router 按产品线/模块路由——分派提前到
         # 产品线/模块判定之前，处理人=责任人，triage/module_resolve 之后不再改写）
         self._db.flush()  # dispatch_handler.add_log 需要 ticket.id 已落库
-        dr = dispatch_handler(self._db, ticket)
-        if dr.user_id is not None:
+        dr = None if is_already_closed else dispatch_handler(self._db, ticket)
+        if dr is not None and dr.user_id is not None:
             ticket.assigned_user_id = dr.user_id
             ticket.handler_user_id = dr.user_id  # 处理人初始=责任人
         # 无匹配规则/无可用处理人 → leave None; 主管经「仅未分配」筛选后人工归属
@@ -467,7 +493,11 @@ class KSMIngester:
                 )
             )
 
-        dispatch_decision = "assigned" if dr.user_id is not None else "no_match"
+        dispatch_decision = (
+            "terminal"
+            if is_already_closed
+            else ("assigned" if dr is not None and dr.user_id is not None else "no_match")
+        )
 
         # 5. Status history
         self._history.record(
@@ -477,12 +507,19 @@ class KSMIngester:
             to_status=initial_status,
             changed_by="system:ingest",
             reason=f"ksm webhook: {bill_id}"
-            + (" (KSM已处理完成关单)" if is_already_closed else ""),
+            + (
+                " (客户主动撤销关闭工单)"
+                if is_ksm_cancelled
+                else (" (KSM已处理完成关单)" if is_already_closed else "")
+            ),
             metadata={
                 "source": "ksm",
                 "routing_decision": dispatch_decision,
-                "matched_scope": "dispatch_rule" if dr.rule_id is not None else "none",
-                "rationale": dr.reason,
+                "matched_scope": (
+                    "dispatch_rule" if dr is not None and dr.rule_id is not None else "none"
+                ),
+                "rationale": dr.reason if dr is not None else "KSM 终态工单跳过派单",
+                "processing_note": KSM_CANCELLED_NOTE if is_ksm_cancelled else None,
             },
         )
 
@@ -500,8 +537,9 @@ class KSMIngester:
             customer_id=resolve.customer_id,
             customer_identity_id=resolve.customer_identity_id,
             routing_decision=dispatch_decision,
-            assigned_user_ids=[dr.user_id] if dr.user_id is not None else [],
+            assigned_user_ids=[dr.user_id] if dr is not None and dr.user_id is not None else [],
             deduped=False,
+            skip_post_ingest=is_already_closed,
         )
 
     # ---- internal ------------------------------------------------------
@@ -604,7 +642,7 @@ class KSMIngester:
         ident = self._db.get(CustomerIdentity, ticket.customer_identity_id)
         return ident.customer_id if ident else 0
 
-    def _dedup_result(self, existing: Ticket) -> IngestResult:
+    def _dedup_result(self, existing: Ticket, *, skip_post_ingest: bool = False) -> IngestResult:
         """已存在 ticket 的返回结果（重复心跳与补料回填共用；字段全取自 existing）。"""
         return IngestResult(
             ticket_id=existing.id,
@@ -614,4 +652,5 @@ class KSMIngester:
             routing_decision="dedup",
             assigned_user_ids=[existing.assigned_user_id] if existing.assigned_user_id else [],
             deduped=True,
+            skip_post_ingest=skip_post_ingest,
         )

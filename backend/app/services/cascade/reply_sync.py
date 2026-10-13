@@ -20,10 +20,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.models import HubIssue, HubIssueReplyHistory, SyncOutbox, Ticket
+from app.services.ksm.cancel_state import KSM_CUSTOMER_CANCELLED_REASON
 
 logger = get_logger(__name__)
 
@@ -77,7 +79,27 @@ def author_reply(
     )
 
     tickets = (
-        db.query(Ticket).filter(Ticket.hub_issue_id == hub.id, Ticket.deleted_at.is_(None)).all()
+        db.query(Ticket)
+        .filter(
+            Ticket.hub_issue_id == hub.id,
+            Ticket.deleted_at.is_(None),
+            Ticket.status.notin_(
+                (
+                    "answered",
+                    "closed",
+                    "done",
+                    "rejected",
+                    "resolved",
+                    "superseded",
+                    "transferred_return",
+                )
+            ),
+            or_(
+                Ticket.closed_reason.is_(None),
+                Ticket.closed_reason != KSM_CUSTOMER_CANCELLED_REASON,
+            ),
+        )
+        .all()
     )
     cascaded: list[int] = []
     outbox_ids: list[int] = []
@@ -136,6 +158,8 @@ def backfill_reply_to_ticket(db: Session, hub: HubIssue, ticket: Ticket) -> bool
     绝不把草稿经 outbox 扇给第二个客户（"草稿绝不入 outbox"）。
     """
     if hub.reply_content_version < 1 or not hub.reply_content or hub.reply_is_draft:
+        return False
+    if ticket.closed_reason == KSM_CUSTOMER_CANCELLED_REASON:
         return False
 
     ticket.cached_reply_content = hub.reply_content

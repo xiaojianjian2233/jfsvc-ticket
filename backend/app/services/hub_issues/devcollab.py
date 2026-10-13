@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -25,6 +26,7 @@ from app.core.logging import get_logger
 from app.models import HubIssue, SyncOutbox, Ticket
 from app.repositories.status_history import StatusHistoryRepository
 from app.services.hub_issues.creator import _next_hub_short_code
+from app.services.ksm.cancel_state import KSM_CUSTOMER_CANCELLED_REASON
 
 logger = get_logger(__name__)
 
@@ -155,7 +157,27 @@ def notify_release(
         )
 
     tickets = (
-        db.query(Ticket).filter(Ticket.hub_issue_id == hub.id, Ticket.deleted_at.is_(None)).all()
+        db.query(Ticket)
+        .filter(
+            Ticket.hub_issue_id == hub.id,
+            Ticket.deleted_at.is_(None),
+            Ticket.status.notin_(
+                (
+                    "answered",
+                    "closed",
+                    "done",
+                    "rejected",
+                    "resolved",
+                    "superseded",
+                    "transferred_return",
+                )
+            ),
+            or_(
+                Ticket.closed_reason.is_(None),
+                Ticket.closed_reason != KSM_CUSTOMER_CANCELLED_REASON,
+            ),
+        )
+        .all()
     )
     sourced = [t for t in tickets if t.source_code and t.source_ticket_id]
     if not sourced:

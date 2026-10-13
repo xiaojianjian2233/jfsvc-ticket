@@ -246,6 +246,85 @@ def test_ksm_source_fields_synced_on_reingest_noop_path(ingest_world: Session) -
     assert ticket.ksm_close_node_status == "1"
 
 
+def test_first_ingest_status_5_closes_without_dispatch_or_post_ingest(
+    ingest_world: Session,
+) -> None:
+    """KSM 客户撤销单首次入站即终态，不派单也不进入后续智能体链路。"""
+    rule = _rule(ingest_world, match_sources=["ksm"])
+    ingest_world.add(DispatchAssignee(rule_id=rule.id, user_id=1, tier="main", is_active=True))
+    ingest_world.commit()
+
+    result = KSMIngester(ingest_world).ingest(
+        _payload(billId="bill-cancelled-new", sourceStatus="5", status="5")
+    )
+    ingest_world.commit()
+
+    ticket = ingest_world.get(Ticket, result.ticket_id)
+    assert ticket is not None
+    assert result.deduped is False
+    assert result.skip_post_ingest is True
+    assert result.routing_decision == "terminal"
+    assert result.assigned_user_ids == []
+    assert ticket.status == "closed"
+    assert ticket.process_stage == "完成"
+    assert ticket.assigned_user_id is None
+    assert ticket.handler_user_id is None
+    assert ticket.cached_reply_content == "客户主动撤销关闭工单"
+    assert ticket.cached_reply_version == 1
+
+
+def test_existing_status_5_closes_ticket_hub_and_stops_outbox(db_session) -> None:  # type: ignore[no-untyped-def]
+    """已有工单收到撤销重推时，ticket/Hub/处理说明/出站任务全部收敛。"""
+    from app.services.ingest import ksm_ingester as mod
+
+    existing, hub = _seed_existing_with_hub(
+        db_session,
+        op_status=None,
+        bill_id="bill-cancelled-existing",
+        short_code="TKT-CANCEL-1",
+        hub_short_code="HUB-CANCEL-1",
+    )
+    hub.ticket_id = existing.id
+    hub.type = "Demand"
+    hub.status = "pending_review"
+    existing.status = "processing"
+    existing.process_stage = "服务处理"
+    existing.ksm_takeover_status = "handled"
+    row = SyncOutbox(
+        kind="reply",
+        target_source_code="ksm",
+        ticket_id=existing.id,
+        source_ticket_id=existing.source_ticket_id,
+        hub_issue_id=hub.id,
+        payload={"reply_content": "旧答复"},
+        status="pending",
+        attempts=2,
+    )
+    db_session.add(row)
+    db_session.commit()
+
+    result = mod.KSMIngester(db_session).ingest(
+        {"billId": existing.source_ticket_id, "sourceStatus": "5", "status": "5"}
+    )
+    db_session.commit()
+
+    db_session.refresh(existing)
+    db_session.refresh(hub)
+    db_session.refresh(row)
+    assert result.deduped is True
+    assert result.skip_post_ingest is True
+    assert existing.source_status == "5"
+    assert existing.status == "closed"
+    assert existing.process_stage == "完成"
+    assert existing.cached_reply_content == "客户主动撤销关闭工单"
+    assert existing.ksm_takeover_status is None
+    assert hub.status == "closed"
+    assert hub.reply_content is None  # 撤销说明只属于该客户工单，不覆盖 Hub 公共答复
+    assert row.status == "skipped"
+    assert row.attempts == 2
+    assert row.last_error is not None and "status=5" in row.last_error
+
+
 def test_ksm_service_level_mapped_and_persisted(ingest_world: Session) -> None:
     """入库提取 serviceLevel 代码并通过 SlaLevel 表或内置字典解析为对应中文名称。"""
     # 1. 50 对应战略客户绿色通道（内置字典兜底）
@@ -821,7 +900,7 @@ def test_ingest_ignores_status_2_echo_at_return_target(db_session, monkeypatch) 
     db_session.refresh(hub)
     assert existing.status == "transferred_return"
     assert existing.ksm_takeover_status is None
-    assert hub.status == "transferred_return"
+    assert hub.status == "returned"
     assert hub.op_status == OP_TRANSFERRED_RETURN
 
 
