@@ -10,9 +10,10 @@ import os
 import random
 import re
 import time
-import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
+
+BEIJING_TZ = timezone(timedelta(hours=8))
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -454,7 +455,8 @@ def match_bot_agent(
 
 def check_human_capacity(db: Session) -> tuple[bool, bool, int, int, str]:
     schedule = get_db_schedule_settings(db)
-    now = datetime.now()
+    # 统一强制按北京时间（UTC+8 / Asia/Shanghai）判断坐席接待时段与周末/工作日规则
+    now = datetime.now(BEIJING_TZ)
     current_time_str = now.strftime("%H:%M")
     is_weekend = now.weekday() >= 5
     slots = schedule.weekend_slots if is_weekend else schedule.weekday_slots
@@ -1268,7 +1270,7 @@ def get_workbench_sessions(
         )
 
         if s.session_type == "online":
-            if s.status == "in_progress":
+            if s.status == "in_progress" and s.is_human:
                 counts.online_in_progress += 1
                 grouped["online_in_progress"].append(card)
             elif s.status == "queue":
@@ -1465,6 +1467,10 @@ def send_agent_message(
     session = db.query(ReceptionSession).filter(ReceptionSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
+    if not session.is_human:
+        raise HTTPException(status_code=400, detail="该会话尚未正式转人工接待，坐席不可直接发送消息")
+    if session.status in ("closed", "converted"):
+        raise HTTPException(status_code=400, detail="当前会话已结束或已转工单，不可继续发送消息")
 
     agent_record = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == user.user_id).first()
     agent_display_name = agent_record.nickname if (agent_record and agent_record.nickname) else user.name
@@ -2457,6 +2463,12 @@ def client_send_message(
     session.unread_count = (session.unread_count or 0) + 1
     session.updated_at = now
 
+    # 核心优化：收到客户消息后立即 commit 持久化，避免后续 Agent 作答（耗时数秒）期间长事务锁定，
+    # 并确保客户端并发轮询及坐席工作台能实时立即查到刚刚发送的客户消息
+    db.commit()
+    db.refresh(msg)
+    db.refresh(session)
+
     # 1. 核心交互闭环：识别“已解决”反馈（支持 Agent 接待阶段与人工接待阶段自动关闭，对齐节点 7.1）
     content_stripped = body.content.strip()
     last_eval_msg = (
@@ -2673,6 +2685,18 @@ def client_send_message(
                     f"我是{clean_agent_name}",
                     bot_answer,
                 )
+
+            # 核心守卫：大模型推理完毕后，先刷新会话最新状态。
+            # 若在此期间该会话已被转工单（converted）、已关闭（closed）或已转人工接管，立即停止，禁止再写入任何智能体答复！
+            db.refresh(session)
+            if session.status in ("converted", "closed") or session.is_human:
+                logger.info(
+                    "Session %s was updated (status=%s, is_human=%s) during agent inference, discard bot reply",
+                    session_id,
+                    session.status,
+                    session.is_human,
+                )
+                return MessageOut.model_validate(msg)
 
             agent_display_name = (
                 f"{matched_agent.avatar} {matched_agent.name}"

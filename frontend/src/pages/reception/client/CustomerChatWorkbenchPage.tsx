@@ -555,7 +555,9 @@ export function CustomerChatWorkbenchPage({
       };
       setCurrentSession(converted);
       syncSessionToStorage(converted);
-      removeOngoingSessionId(currentSession.id);
+      // 停止尚未完成的智能体分析态
+      setIsBotAnalyzing(false);
+      // 保留当前会话直到客户看到确认信息，不立即从当前视图移除
 
       const newMsgs = await clientFetchMessages(currentSession.id);
       setMessages(newMsgs);
@@ -632,12 +634,26 @@ export function CustomerChatWorkbenchPage({
 
         if (msgs && msgs.length > 0) {
           setMessages((prev) => {
+            // 核心防御：保留 prev 中仍处于 pending 状态（已乐观添加但后端尚未返回确认）的消息，防止被轮询覆盖抹除
+            const pendingMsgs = prev.filter(
+              (p) =>
+                p.isPending &&
+                !msgs.some(
+                  (m) =>
+                    m.sender_type === p.sender_type &&
+                    m.content === p.content
+                )
+            );
+
+            const merged = [...msgs, ...pendingMsgs];
+
             if (
-              msgs.length !== prev.length ||
-              msgs[msgs.length - 1]?.id !== prev[prev.length - 1]?.id
+              merged.length !== prev.length ||
+              merged[merged.length - 1]?.id !== prev[prev.length - 1]?.id ||
+              merged[merged.length - 1]?.content !== prev[prev.length - 1]?.content
             ) {
               setTimeout(scrollToBottom, 50);
-              return msgs;
+              return merged;
             }
             return prev;
           });
@@ -947,6 +963,7 @@ export function CustomerChatWorkbenchPage({
     setSending(true);
     try {
       let activeSession = currentSession;
+      let baseMessages: MessageItem[] | null = null;
 
       // 核心业务逻辑：若处于提示状态（未选中历史会话），客户直接发送新消息则在后端生成新会话记录
       if (!activeSession) {
@@ -964,6 +981,9 @@ export function CustomerChatWorkbenchPage({
         activeSession = initRes.session;
         setCurrentSession(activeSession);
         syncSessionToStorage(activeSession);
+        if (initRes.messages && initRes.messages.length > 0) {
+          baseMessages = initRes.messages;
+        }
       }
 
       // 发送文本消息
@@ -990,8 +1010,12 @@ export function CustomerChatWorkbenchPage({
           content: textToSend,
           is_read: false,
           created_at: nowIso,
+          isPending: true,
         };
-        setMessages((prev) => [...prev, tempCustomerMsg]);
+        setMessages((prev) => {
+          const base = baseMessages !== null ? baseMessages : prev;
+          return [...base, tempCustomerMsg];
+        });
         if (typeof overrideContent !== "string") {
           setInputMessage("");
           setQuotedMessage(null);
@@ -1004,7 +1028,6 @@ export function CustomerChatWorkbenchPage({
           setTimeout(scrollToBottom, 50);
         }
 
-        const sendStartTime = Date.now();
         try {
           await clientSendMessage(
             activeSession.id,
@@ -1041,13 +1064,6 @@ export function CustomerChatWorkbenchPage({
             throw sendErr;
           }
         } finally {
-          // 保证前端平稳展示“问题正常分析中，请耐心等待...”至少 2 秒，消除瞬间闪烁与不自然答复（测试环境下跳过）
-          if (import.meta.env.MODE !== "test") {
-            const elapsed = Date.now() - sendStartTime;
-            if (elapsed < 2000) {
-              await new Promise((resolve) => setTimeout(resolve, 2000 - elapsed));
-            }
-          }
           // 接口调用完成后立即刷新最新消息列表与会话状态，大模型答复落库后关闭分析状态并呈现答复
           try {
             const [latestMsgs, sessionsRes] = await Promise.all([
@@ -1818,6 +1834,8 @@ export function CustomerChatWorkbenchPage({
                     className={`px-2 py-0.5 rounded text-[12.5px] font-medium ${
                       currentSession.status === "in_progress"
                         ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        : currentSession.status === "converted"
+                        ? "bg-blue-50 text-blue-700 border border-blue-200"
                         : isClosed
                         ? "bg-slate-100 text-slate-600 border border-slate-200"
                         : "bg-cyan-50 text-cyan-700 border border-cyan-200"
@@ -1825,6 +1843,8 @@ export function CustomerChatWorkbenchPage({
                   >
                     {currentSession.status === "in_progress"
                       ? "坐席在线沟通中"
+                      : currentSession.status === "converted"
+                      ? "已转售后工单"
                       : isClosed
                       ? "已结束（只读）"
                       : "排队中，客服正接入..."}
@@ -1872,6 +1892,35 @@ export function CustomerChatWorkbenchPage({
               )}
             </div>
           </div>
+
+          {/* 工单创建成功固定常驻展示工单号与查看进度入口 */}
+          {currentSession && (currentSession.status === "converted" || currentSession.ticket_short_code) && (
+            <div className="bg-gradient-to-r from-blue-50/95 via-indigo-50/90 to-blue-50/95 border-b border-blue-200 px-4 py-2.5 flex items-center justify-between text-[13px] flex-none shadow-2xs animate-fadeIn z-10">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <span className="flex items-center gap-1.5 px-2 py-0.5 bg-blue-600 text-white font-bold rounded text-[12px] shadow-2xs">
+                  <span>📋</span>
+                  <span>关联售后工单</span>
+                </span>
+                <span className="font-mono font-bold text-blue-900 bg-white px-2 py-0.5 rounded border border-blue-300 text-[13.5px] select-text cursor-text">
+                  {currentSession.ticket_short_code || (currentSession.ticket_id ? `TKT-${currentSession.ticket_id}` : "已生成售后工单")}
+                </span>
+                <span className="text-slate-600 text-[12.5px]">
+                  技术服务团队加急处理中，请在工单信息处关注进度
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setRightTab("tickets");
+                  setTicketSubTab("processing");
+                }}
+                className="text-[12.5px] font-semibold text-[rgb(35,94,212)] hover:underline flex items-center gap-1 cursor-pointer flex-none ml-2"
+              >
+                <span>查看工单详情</span>
+                <span>&gt;</span>
+              </button>
+            </div>
+          )}
 
           {/* 对话消息流展示区（字体整体加2个号） */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">

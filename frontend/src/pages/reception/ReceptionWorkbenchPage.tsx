@@ -163,7 +163,7 @@ export function ReceptionWorkbenchPage() {
       // 确定默认选中会话
       let candidateList: SessionItem[] = [];
       if (effectiveMainTab === "online") {
-        if (effectiveOnlineSubTab === "in_progress") candidateList = data.sessions.online_in_progress;
+        if (effectiveOnlineSubTab === "in_progress") candidateList = data.sessions.online_in_progress.filter((s) => s.is_human);
         else if (effectiveOnlineSubTab === "queue") candidateList = data.sessions.online_queue;
         else if (effectiveOnlineSubTab === "pending") candidateList = data.sessions.online_pending;
         else candidateList = data.sessions.online_closed;
@@ -227,7 +227,7 @@ export function ReceptionWorkbenchPage() {
 
           let candidateList: SessionItem[] = [];
           if (mainTab === "online") {
-            if (onlineSubTab === "in_progress") candidateList = wbData.sessions.online_in_progress;
+            if (onlineSubTab === "in_progress") candidateList = wbData.sessions.online_in_progress.filter((s) => s.is_human);
             else if (onlineSubTab === "queue") candidateList = wbData.sessions.online_queue;
             else if (onlineSubTab === "pending") candidateList = wbData.sessions.online_pending;
             else candidateList = wbData.sessions.online_closed;
@@ -521,6 +521,9 @@ export function ReceptionWorkbenchPage() {
     if (
       (!inputMessage.trim() && stagedAttachments.length === 0) ||
       !activeSession ||
+      !activeSession.is_human ||
+      activeSession.status === "closed" ||
+      activeSession.status === "converted" ||
       sendingMessage
     ) {
       return;
@@ -653,10 +656,11 @@ export function ReceptionWorkbenchPage() {
       const inProgressSessions =
         workbenchData?.sessions.online_in_progress.filter(
           (s) =>
-            !currentAgent ||
-            s.agent_user_id === currentAgent.user_id ||
-            s.agent_name === currentAgent.user_name ||
-            s.agent_name === currentAgent.nickname
+            s.is_human &&
+            (!currentAgent ||
+              s.agent_user_id === currentAgent.user_id ||
+              s.agent_name === currentAgent.user_name ||
+              s.agent_name === currentAgent.nickname)
         ) || [];
 
       if (inProgressSessions.length > 0) {
@@ -729,7 +733,7 @@ export function ReceptionWorkbenchPage() {
   const currentCardList: SessionItem[] = (() => {
     if (!workbenchData) return [];
     if (mainTab === "online") {
-      if (onlineSubTab === "in_progress") return workbenchData.sessions.online_in_progress;
+      if (onlineSubTab === "in_progress") return workbenchData.sessions.online_in_progress.filter((s) => s.is_human);
       if (onlineSubTab === "queue") return workbenchData.sessions.online_queue;
       if (onlineSubTab === "pending") return workbenchData.sessions.online_pending;
       return workbenchData.sessions.online_closed;
@@ -1187,7 +1191,7 @@ export function ReceptionWorkbenchPage() {
                     type="button"
                     title="添加附件（支持图片、文件；也可直接拖拽至录入框或 Ctrl+V 粘贴）"
                     aria-label="添加附件"
-                    disabled={activeSession.status === "closed" || activeSession.status === "converted"}
+                    disabled={!activeSession.is_human || activeSession.status === "closed" || activeSession.status === "converted"}
                     onClick={() => fileInputRef.current?.click()}
                     className="flex items-center gap-1.5 px-2 py-1 rounded text-slate-600 hover:text-[rgb(35,94,212)] hover:bg-blue-50 transition cursor-pointer text-xs disabled:opacity-40 disabled:cursor-not-allowed"
                   >
@@ -1308,7 +1312,7 @@ export function ReceptionWorkbenchPage() {
                 <textarea
                   ref={textareaRef}
                   value={inputMessage}
-                  disabled={activeSession.status === "closed" || activeSession.status === "converted"}
+                  disabled={!activeSession.is_human || activeSession.status === "closed" || activeSession.status === "converted"}
                   onChange={(e) => setInputMessage(e.target.value)}
                   onPaste={handlePaste}
                   onKeyDown={(e) => {
@@ -1318,7 +1322,9 @@ export function ReceptionWorkbenchPage() {
                     }
                   }}
                   placeholder={
-                    activeSession.status === "closed" || activeSession.status === "converted"
+                    !activeSession.is_human
+                      ? "当前会话尚未正式转人工接待，坐席不可直接发送消息"
+                      : activeSession.status === "closed" || activeSession.status === "converted"
                       ? "当前会话已结束或已转工单，不可继续发送消息"
                       : "输入回复内容给客户，回车快捷发送，Shift+Enter 换行；支持拖拽或 Ctrl+V 粘贴图片与文件..."
                   }
@@ -1333,15 +1339,23 @@ export function ReceptionWorkbenchPage() {
               </div>
 
               <div className="flex items-center justify-between">
-                <span className="text-[11px] text-slate-400">
-                  按 Enter 快捷发送，Shift + Enter 换行
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-slate-400">
+                    按 Enter 快捷发送，Shift + Enter 换行
+                  </span>
+                  {!activeSession.is_human && (
+                    <span className="text-[11px] px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-medium">
+                      🤖 智能体接待中（未转人工）
+                    </span>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={handleSendMessage}
                   disabled={
                     (!inputMessage.trim() && stagedAttachments.length === 0) ||
                     sendingMessage ||
+                    !activeSession.is_human ||
                     activeSession.status === "closed" ||
                     activeSession.status === "converted"
                   }

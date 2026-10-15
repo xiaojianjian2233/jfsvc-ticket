@@ -110,6 +110,41 @@ class TestOpenApiChannelSync(unittest.TestCase):
         self.client.end_session("")
         self.client._request.assert_not_called()
 
+    def test_global_token_caching_and_clearing(self) -> None:
+        AiCsClient.clear_token_cache()
+        # Mock get_token response
+        mock_resp = MagicMock()
+        mock_resp.is_success = True
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "errcode": "0000",
+            "data": {"token": "cached_tok_999", "expires_in": "3600"},
+        }
+
+        mock_http = MagicMock()
+        mock_http.get.return_value = mock_resp
+
+        client1 = AiCsClient(self.config, http_client=mock_http)
+        tok1 = client1._ensure_token()
+        self.assertEqual(tok1, "cached_tok_999")
+        self.assertEqual(mock_http.get.call_count, 1)
+
+        # Another client instance with same config must read from global cache without network call
+        mock_http2 = MagicMock()
+        client2 = AiCsClient(self.config, http_client=mock_http2)
+        tok2 = client2._ensure_token()
+        self.assertEqual(tok2, "cached_tok_999")
+        mock_http2.get.assert_not_called()
+
+        # Clear token cache
+        AiCsClient.clear_token_cache()
+        client3 = AiCsClient(self.config, http_client=mock_http2)
+        mock_http2.get.return_value = mock_resp
+        tok3 = client3._ensure_token()
+        self.assertEqual(tok3, "cached_tok_999")
+        mock_http2.get.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
+

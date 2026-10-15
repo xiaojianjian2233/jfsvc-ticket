@@ -343,3 +343,72 @@ def test_bot_config_clears_default_when_fallback_becomes_normal(
     assert saved["default_agent_id"] == ""
     saved_default = next(agent for agent in saved["agents"] if agent["id"] == old_default_id)
     assert saved_default["agent_type"] == "normal"
+
+
+def test_send_agent_message_guards_and_workbench_filtering(
+    app_client: TestClient, db_session: Session
+) -> None:
+    """验证：
+    1. 坐席工作台进行中会话仅包含 is_human=True 的会话；
+    2. 未正式转人工或已转工单的会话，禁止坐席直接发送消息。
+    """
+    headers = _bearer(201, name="坐席小赵", role="assignee")
+
+    # 1. 创建一个未转人工的进行中会话（智能体接待）
+    s_bot = ReceptionSession(
+        id="ZXHH202610140091",
+        session_type="online",
+        contact_name="未转人工客户",
+        contact_phone="13800001111",
+        status="in_progress",
+        is_human=False,
+    )
+    # 2. 创建一个已转人工的进行中会话
+    s_human = ReceptionSession(
+        id="ZXHH202610140092",
+        session_type="online",
+        contact_name="已转人工客户",
+        contact_phone="13800002222",
+        status="in_progress",
+        is_human=True,
+    )
+    db_session.add_all([s_bot, s_human])
+    db_session.commit()
+
+    # 3. 检查坐席工作台会话队列：online_in_progress 只能包含已转人工的会话
+    res = app_client.get("/api/reception/workbench/sessions", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    in_progress_ids = [c["id"] for c in data["sessions"]["online_in_progress"]]
+    assert "ZXHH202610140092" in in_progress_ids
+    assert "ZXHH202610140091" not in in_progress_ids
+
+    # 4. 坐席向未转人工的会话发消息，必须被拦截并返回 400
+    r_deny = app_client.post(
+        f"/api/reception/workbench/sessions/{s_bot.id}/send-message",
+        json={"content": "您好，人工坐席为您服务"},
+        headers=headers,
+    )
+    assert r_deny.status_code == 400
+    assert "尚未正式转人工" in r_deny.json()["detail"]
+
+    # 5. 坐席向已转人工的会话发消息，成功返回 200
+    r_ok = app_client.post(
+        f"/api/reception/workbench/sessions/{s_human.id}/send-message",
+        json={"content": "您好，人工客服已接入"},
+        headers=headers,
+    )
+    assert r_ok.status_code == 200
+    assert r_ok.json()["sender_type"] == "agent"
+
+    # 6. 会话转工单后，坐席再发消息被拦截 400
+    s_human.status = "converted"
+    db_session.commit()
+    r_converted_deny = app_client.post(
+        f"/api/reception/workbench/sessions/{s_human.id}/send-message",
+        json={"content": "工单已建，继续发消息"},
+        headers=headers,
+    )
+    assert r_converted_deny.status_code == 400
+    assert "不可继续发送消息" in r_converted_deny.json()["detail"]
+

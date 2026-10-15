@@ -80,6 +80,7 @@ export interface MessageItem {
   content: string;
   is_read: boolean;
   created_at: string;
+  isPending?: boolean;
 }
 
 export interface WorkbenchQueueData {
@@ -950,7 +951,7 @@ export async function fetchWorkbenchSessions(): Promise<WorkbenchQueueData> {
 
   for (const s of sessions) {
     if (s.session_type === "online") {
-      if (s.status === "in_progress") {
+      if (s.status === "in_progress" && s.is_human) {
         counts.online_in_progress++;
         grouped.online_in_progress.push(s);
       } else if (s.status === "queue") {
@@ -1274,12 +1275,22 @@ export function isWithinReceptionTime(
   settings: ScheduleSettings,
   now: Date = new Date()
 ): boolean {
-  const day = now.getDay(); // 0 is Sunday, 6 is Saturday
-  const isWeekend = day === 0 || day === 6;
+  // 统一强制按北京时间 (Asia/Shanghai, UTC+8) 判断坐席服务时段与周末/工作日
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Shanghai",
+    hour12: false,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const parts = formatter.formatToParts(now);
+  const partMap: Record<string, string> = {};
+  for (const p of parts) {
+    partMap[p.type] = p.value;
+  }
+  const isWeekend = partMap.weekday === "Sat" || partMap.weekday === "Sun";
   const slots = isWeekend ? settings.weekend_slots : settings.weekday_slots;
-  const hours = String(now.getHours()).padStart(2, "0");
-  const minutes = String(now.getMinutes()).padStart(2, "0");
-  const timeStr = `${hours}:${minutes}`;
+  const timeStr = `${partMap.hour}:${partMap.minute}`;
 
   for (const slot of slots) {
     if (slot.start <= timeStr && timeStr <= slot.end) {

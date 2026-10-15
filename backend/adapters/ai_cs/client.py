@@ -20,9 +20,10 @@ Errors:
 from __future__ import annotations
 
 import hashlib
+import logging
+import threading
 import time
 from collections.abc import Callable
-import logging
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -37,6 +38,32 @@ except Exception:
 _OK = "0000"
 # Refresh the token this many seconds before it actually expires.
 _TOKEN_REFRESH_MARGIN = 300.0
+
+# 模块级全局 Token 缓存与持久长连接池，大幅消除频繁建立 TCP/TLS 握手与鉴权请求的耗时
+_GLOBAL_TOKEN_CACHE: dict[str, tuple[str, float]] = {}
+_TOKEN_CACHE_LOCK = threading.Lock()
+
+_SHARED_HTTP_CLIENTS: dict[float, httpx.Client] = {}
+_SHARED_CLIENT_LOCK = threading.Lock()
+
+
+def get_shared_client(timeout_seconds: float = 30.0) -> httpx.Client:
+    """获取或初始化共享的持久 httpx.Client 长连接池。"""
+    with _SHARED_CLIENT_LOCK:
+        client = _SHARED_HTTP_CLIENTS.get(timeout_seconds)
+        if client is None or client.is_closed:
+            client = httpx.Client(
+                timeout=timeout_seconds,
+                trust_env=False,
+                limits=httpx.Limits(
+                    max_keepalive_connections=20,
+                    max_connections=50,
+                    keepalive_expiry=60.0,
+                ),
+            )
+            _SHARED_HTTP_CLIENTS[timeout_seconds] = client
+        return client
+
 
 from .exceptions import AiCsAuthError, AiCsBusinessError, AiCsNetworkError
 from .types import (
@@ -58,17 +85,37 @@ class AiCsClient:
         *,
         http_client: httpx.Client | None = None,
         clock: Callable[[], float] = time.time,
+        use_shared_http: bool = True,
     ) -> None:
         self._cfg = config
-        self._owns_http = http_client is None
-        self._http = http_client or httpx.Client(timeout=config.timeout_seconds, trust_env=False)
         self._clock = clock
+        self._use_shared_http = use_shared_http and (http_client is None)
+        if http_client is not None:
+            self._owns_http = False
+            self._http = http_client
+        elif self._use_shared_http:
+            self._owns_http = False
+            self._http = get_shared_client(config.timeout_seconds)
+        else:
+            self._owns_http = True
+            self._http = httpx.Client(timeout=config.timeout_seconds, trust_env=False)
         self._token: str | None = None
         self._token_expires_at: float = 0.0
 
     def close(self) -> None:
         if self._owns_http:
             self._http.close()
+
+    @classmethod
+    def clear_token_cache(cls, app_id: str | None = None) -> None:
+        """清空全局 Token 缓存（主要用于测试隔离或主动失效）。"""
+        with _TOKEN_CACHE_LOCK:
+            if app_id:
+                for key in list(_GLOBAL_TOKEN_CACHE.keys()):
+                    if key.endswith(f":{app_id}"):
+                        _GLOBAL_TOKEN_CACHE.pop(key, None)
+            else:
+                _GLOBAL_TOKEN_CACHE.clear()
 
     def __enter__(self) -> AiCsClient:
         return self
@@ -282,8 +329,23 @@ class AiCsClient:
     # ---- auth -------------------------------------------------------
 
     def _ensure_token(self) -> str:
-        if self._token and self._clock() < self._token_expires_at:
+        cache_key = f"{self._cfg.base_url}:{self._cfg.app_id}"
+        now = self._clock()
+
+        # 1. 优先从全局缓存读取有效令牌，完全消除每次调用的网络往返开销
+        with _TOKEN_CACHE_LOCK:
+            cached = _GLOBAL_TOKEN_CACHE.get(cache_key)
+            if cached:
+                token, exp = cached
+                if now < exp:
+                    self._token = token
+                    self._token_expires_at = exp
+                    return token
+
+        # 2. 检查实例级缓存
+        if self._token and now < self._token_expires_at:
             return self._token
+
         create_time = str(int(self._clock()))
         sign = hashlib.md5(
             f"{self._cfg.app_id}{create_time}{self._cfg.app_key}".encode(),
@@ -298,6 +360,9 @@ class AiCsClient:
         except httpx.TransportError as e:
             raise AiCsNetworkError(f"network error getting AI 客服 token: {e}") from e
         if resp.status_code in (401, 403):
+            with _TOKEN_CACHE_LOCK:
+                _GLOBAL_TOKEN_CACHE.pop(cache_key, None)
+            self._token = None
             raise AiCsAuthError(f"AI 客服 token auth failed ({resp.status_code})")
         data = self._unwrap(resp)
         token = str((data or {}).get("token") or "")
@@ -309,6 +374,8 @@ class AiCsClient:
             ttl = 0.0
         self._token = token
         self._token_expires_at = self._clock() + max(ttl - _TOKEN_REFRESH_MARGIN, 0.0)
+        with _TOKEN_CACHE_LOCK:
+            _GLOBAL_TOKEN_CACHE[cache_key] = (token, self._token_expires_at)
         return token
 
     # ---- transport --------------------------------------------------
@@ -319,13 +386,17 @@ class AiCsClient:
             resp = self._http.request(
                 method,
                 f"{self._cfg.base_url}{path}",
-                headers={"token": token, "Content-Type": "application/json", "Connection": "close"},
+                headers={"token": token, "Content-Type": "application/json"},
                 json=json,
                 timeout=self._cfg.timeout_seconds,
             )
         except httpx.TransportError as e:
             raise AiCsNetworkError(f"network error calling AI 客服 {path}: {e}") from e
         if resp.status_code in (401, 403):
+            cache_key = f"{self._cfg.base_url}:{self._cfg.app_id}"
+            with _TOKEN_CACHE_LOCK:
+                _GLOBAL_TOKEN_CACHE.pop(cache_key, None)
+            self._token = None
             raise AiCsAuthError(f"AI 客服 auth failed ({resp.status_code}) on {path}")
         return self._unwrap(resp)
 
