@@ -16,6 +16,15 @@ from adapters.ai_cs import (
     AiCsNetworkError,
 )
 
+
+@pytest.fixture(autouse=True)
+def _isolate_global_token_cache() -> None:
+    """Keep shared production token caching from leaking between unit tests."""
+    AiCsClient.clear_token_cache()
+    yield
+    AiCsClient.clear_token_cache()
+
+
 BASE = "http://ai-cs.test"
 
 
@@ -417,6 +426,7 @@ def test_image_answer_uses_channel_contract_and_closes_session():
         "images": ["https://example.com/a.png"],
         "ai_agent_cid": "cid-1",
         "skill": "customer-service",
+        "msg_type": "TEXT",
     }
     assert json.loads(end.calls[0].request.content) == {"ai_agent_cid": "cid-1"}
     assert result.answer == "读图成功"

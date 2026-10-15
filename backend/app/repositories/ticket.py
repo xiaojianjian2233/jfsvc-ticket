@@ -215,9 +215,10 @@ class TicketRepository:
                 today_count += 1
 
             # 3. 超时工单：受 visible_to_user_id 约束
-            if visible_to_user_id is None or ticket.handler_user_id == visible_to_user_id:
-                if self._is_overdue(ticket, product_sla_hours, now):
-                    overdue += 1
+            if (
+                visible_to_user_id is None or ticket.handler_user_id == visible_to_user_id
+            ) and self._is_overdue(ticket, product_sla_hours, now):
+                overdue += 1
         return TicketQuickStats(green_vip=green_vip, today=today_count, overdue=overdue)
 
     def _overdue_ticket_ids(self) -> list[int]:
@@ -588,7 +589,7 @@ class TicketRepository:
         cutoff = (now or datetime.now(UTC)) - threshold
         active_statuses = (
             "processing",
-                    "supplementing",
+            "supplementing",
             "exception",
             "received",
             "linked",

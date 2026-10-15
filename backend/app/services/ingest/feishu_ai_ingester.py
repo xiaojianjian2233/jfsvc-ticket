@@ -129,6 +129,7 @@ def resolve_feishu_product_and_module(
             if enabled_modules:
                 selected_module = enabled_modules[0]
 
+        pl_row: ProductLine | None
         if selected_module is not None:
             pl_row = pl_by_code[selected_module.product_line_code]
         elif enabled_pl_rows:
@@ -452,7 +453,8 @@ class FeishuAiIngester:
                 deduped=True,
             )
 
-        cust_dict = payload.get("customer") if isinstance(payload.get("customer"), dict) else {}
+        raw_customer = payload.get("customer")
+        cust_dict: dict[str, Any] = raw_customer if isinstance(raw_customer, dict) else {}
         c_name = (
             str(
                 payload.get("customer-name")

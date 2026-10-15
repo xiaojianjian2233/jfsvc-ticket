@@ -171,8 +171,12 @@ class Settings(BaseSettings):
     #   appid:    sadajfkefhksjh
     #   app_key:  addk23-adasfsf-asdasc
     ai_cs_base_url: str = "https://apse-sg-proxy.piaozone.com/agent"
-    ai_cs_app_id: str = "zc1c6hjdsiFGiz"  # AI 客服 open-api appid (支持 OPEN_API_APP_ID 环境变量覆盖)
-    ai_cs_app_key: str = "1de1f420ed08409bbc3d4b9a156b4941"  # 签名密钥 (支持 OPEN_API_APP_KEY 环境变量覆盖)
+    ai_cs_app_id: str = (
+        "zc1c6hjdsiFGiz"  # AI 客服 open-api appid (支持 OPEN_API_APP_ID 环境变量覆盖)
+    )
+    ai_cs_app_key: str = (
+        "1de1f420ed08409bbc3d4b9a156b4941"  # 签名密钥 (支持 OPEN_API_APP_KEY 环境变量覆盖)
+    )
     ai_cs_managed_skills: str = "customer-service,customer-service-feishu"
     # replay 走 LLM 生成，AI 客服服务端可能较慢；客户端超时（秒）。可 .env 覆盖。
     ai_cs_timeout_seconds: float = 180.0
@@ -253,10 +257,16 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _resolve_ai_cs_credentials(self) -> "Settings":
-        env_id = os.environ.get("OPEN_API_APP_ID", "").strip() or os.environ.get("AI_CS_APP_ID", "").strip()
+        env_id = (
+            os.environ.get("OPEN_API_APP_ID", "").strip()
+            or os.environ.get("AI_CS_APP_ID", "").strip()
+        )
         if env_id:
             object.__setattr__(self, "ai_cs_app_id", env_id)
-        env_key = os.environ.get("OPEN_API_APP_KEY", "").strip() or os.environ.get("AI_CS_APP_KEY", "").strip()
+        env_key = (
+            os.environ.get("OPEN_API_APP_KEY", "").strip()
+            or os.environ.get("AI_CS_APP_KEY", "").strip()
+        )
         if env_key:
             object.__setattr__(self, "ai_cs_app_key", env_key)
         env_url = os.environ.get("AI_CS_BASE_URL", "").strip()

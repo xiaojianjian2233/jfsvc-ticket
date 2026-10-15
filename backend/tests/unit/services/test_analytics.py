@@ -139,8 +139,24 @@ def test_by_dev_staff_uses_hub_owner_for_bug_and_demand(db_session):
         [
             User(id=1, feishu_uid="ou_a", name="研发甲", role="assignee"),
             User(id=2, feishu_uid="ou_b", name="研发乙", role="assignee"),
-            HubIssue(id=101, short_code="HUB-000101", type="Bug_fix", title="bug", status="created", owner_user_id=1, ticket_id=1001),
-            HubIssue(id=102, short_code="HUB-000102", type="Demand", title="demand", status="created", owner_user_id=2, ticket_id=1002),
+            HubIssue(
+                id=101,
+                short_code="HUB-000101",
+                type="Bug_fix",
+                title="bug",
+                status="created",
+                owner_user_id=1,
+                ticket_id=1001,
+            ),
+            HubIssue(
+                id=102,
+                short_code="HUB-000102",
+                type="Demand",
+                title="demand",
+                status="created",
+                owner_user_id=2,
+                ticket_id=1002,
+            ),
         ]
     )
     # assigned_user_id 是受理处理人；看板必须按 hub.owner_user_id（研发责任人）统计。
@@ -164,7 +180,15 @@ def test_by_dev_staff_keeps_all_named_owners(db_session):
     db_session.add_all(
         [
             User(id=3, feishu_uid="ou_cs", name="刘伟成", role="member"),
-            HubIssue(id=103, short_code="HUB-000103", type="Bug_fix", title="bug", status="created", owner_user_id=3, ticket_id=1003),
+            HubIssue(
+                id=103,
+                short_code="HUB-000103",
+                type="Bug_fix",
+                title="bug",
+                status="created",
+                owner_user_id=3,
+                ticket_id=1003,
+            ),
         ]
     )
     _tk(db_session, predicted_type="Bug_fix", assigned_user_id=None, hub_issue_id=103)

@@ -301,9 +301,15 @@ def test_quick_stats_green_vip_and_today_role_isolation(
     world.commit()
 
     # 管理员统计全系统未关闭的绿色战略客户；非管理员只统计分配给自己的处理中绿色战略客户
-    admin_stats = app_client.get("/api/tickets/quick-stats", headers=_bearer(1, role="admin")).json()
-    u2_stats = app_client.get("/api/tickets/quick-stats", headers=_bearer(2, role="assignee")).json()
-    u3_stats = app_client.get("/api/tickets/quick-stats", headers=_bearer(3, role="supervisor")).json()
+    admin_stats = app_client.get(
+        "/api/tickets/quick-stats", headers=_bearer(1, role="admin")
+    ).json()
+    u2_stats = app_client.get(
+        "/api/tickets/quick-stats", headers=_bearer(2, role="assignee")
+    ).json()
+    u3_stats = app_client.get(
+        "/api/tickets/quick-stats", headers=_bearer(3, role="supervisor")
+    ).json()
 
     assert u2_stats["green_vip"] == 1
     assert u3_stats["green_vip"] == 0
@@ -315,13 +321,17 @@ def test_quick_stats_green_vip_and_today_role_isolation(
     assert admin_stats["today"] >= 4
 
     # 快捷筛选列表 green_vip 与徽标口径严格保持一致
-    admin_list = app_client.get("/api/tickets?quick_filter=green_vip", headers=_bearer(1, role="admin")).json()
+    admin_list = app_client.get(
+        "/api/tickets?quick_filter=green_vip", headers=_bearer(1, role="admin")
+    ).json()
     admin_codes = [it["short_code"] for it in admin_list["items"]]
     assert "TKT-GV-U2-PROC" in admin_codes
     assert "TKT-GV-UNASSIGNED" in admin_codes
     assert "TKT-GV-U2-CLOSED" not in admin_codes
 
-    u2_list = app_client.get("/api/tickets?quick_filter=green_vip", headers=_bearer(2, role="assignee")).json()
+    u2_list = app_client.get(
+        "/api/tickets?quick_filter=green_vip", headers=_bearer(2, role="assignee")
+    ).json()
     u2_codes = [it["short_code"] for it in u2_list["items"]]
     assert u2_codes == ["TKT-GV-U2-PROC"]
 

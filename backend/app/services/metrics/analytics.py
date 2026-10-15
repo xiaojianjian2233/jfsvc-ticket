@@ -119,6 +119,7 @@ def compute_ticket_analytics(
             ),
         ),
     )
+
     def count_matching(condition: ColumnElement[bool]) -> int:
         return db.scalar(select(func.count(Ticket.id)).where(flt, condition)) or 0
 
@@ -196,12 +197,8 @@ def compute_ticket_analytics(
             and_(pending, Ticket.predicted_type.in_(("Bug_fix", "Demand")))
         ),
         overdue_count=count_matching(overdue),
-        overdue_operation_count=count_matching(
-            and_(overdue, Ticket.predicted_type == "Operation")
-        ),
-        overdue_dev_count=count_matching(
-            and_(overdue, Ticket.predicted_type.in_(_DEV_TYPES))
-        ),
+        overdue_operation_count=count_matching(and_(overdue, Ticket.predicted_type == "Operation")),
+        overdue_dev_count=count_matching(and_(overdue, Ticket.predicted_type.in_(_DEV_TYPES))),
         returned_count=count_matching(returned),
     )
 
@@ -251,10 +248,7 @@ def compute_ticket_analytics(
         .group_by(Ticket.assigned_user_id, User.name)
     ).all()
     by_assignee = sorted(
-        [
-            {"user_id": uid, "name": name or "(未分配)", "total": c}
-            for uid, name, c in as_rows
-        ],
+        [{"user_id": uid, "name": name or "(未分配)", "total": c} for uid, name, c in as_rows],
         key=lambda x: x["total"],
         reverse=True,
     )[:15]
@@ -323,7 +317,6 @@ def compute_ticket_analytics(
         if ptype in d["by_type"]:
             d["by_type"][ptype] += c
     by_dev_staff = sorted(dev_map.values(), key=lambda x: x["total"], reverse=True)[:20]
-
 
     return TicketAnalytics(
         kpi=kpi,

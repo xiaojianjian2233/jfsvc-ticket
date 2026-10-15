@@ -29,8 +29,21 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from .exceptions import AiCsAuthError, AiCsBusinessError, AiCsNetworkError
+from .types import (
+    AiCsConfig,
+    ChannelAnswerResult,
+    DraftSummary,
+    ReplayResult,
+    SkillDetail,
+    SkillFile,
+    SkillSummary,
+    SkillVersion,
+)
+
 try:
     from app.core.logging import get_logger
+
     logger = get_logger(__name__)
 except Exception:
     logger = logging.getLogger(__name__)
@@ -63,19 +76,6 @@ def get_shared_client(timeout_seconds: float = 30.0) -> httpx.Client:
             )
             _SHARED_HTTP_CLIENTS[timeout_seconds] = client
         return client
-
-
-from .exceptions import AiCsAuthError, AiCsBusinessError, AiCsNetworkError
-from .types import (
-    AiCsConfig,
-    ChannelAnswerResult,
-    DraftSummary,
-    ReplayResult,
-    SkillDetail,
-    SkillFile,
-    SkillSummary,
-    SkillVersion,
-)
 
 
 class AiCsClient:
@@ -309,6 +309,13 @@ class AiCsClient:
         Images are a top-level array, never HTML inside replay.question. This
         endpoint does not document cited_knowledge; do not invent citations.
         """
+        # Validate before creating a remote session. Invalid input must not
+        # consume server resources or leave an unnecessary session behind.
+        if not 1 <= len(images) <= 5:
+            raise ValueError("images must contain 1 to 5 URLs")
+        if any(urlsplit(url).scheme not in ("http", "https") for url in images):
+            raise ValueError("images require HTTP/HTTPS URLs")
+
         cid = self.ask_init()
         try:
             res = self.answer_no_stream(question=question, cid=cid, images=images, skill=skill)
@@ -324,7 +331,6 @@ class AiCsClient:
             except Exception as exc:
                 # Cleanup must not discard a successful answer or mask the primary error.
                 logger.warning("ai_cs_image_session_cleanup_failed", error_type=type(exc).__name__)
-
 
     # ---- auth -------------------------------------------------------
 

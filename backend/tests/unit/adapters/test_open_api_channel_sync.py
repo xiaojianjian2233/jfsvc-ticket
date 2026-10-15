@@ -28,7 +28,9 @@ class TestOpenApiChannelSync(unittest.TestCase):
         self.client.close()
 
     def test_ask_init_success(self) -> None:
-        self.client._request = MagicMock(return_value={"ai_agent_cid": "cid_abc_123", "biz_type": "AI_AGENT"})  # type: ignore
+        self.client._request = MagicMock(
+            return_value={"ai_agent_cid": "cid_abc_123", "biz_type": "AI_AGENT"}
+        )  # type: ignore
         cid = self.client.ask_init()
         self.assertEqual(cid, "cid_abc_123")
         self.client._request.assert_called_once_with("GET", "/open-api/ask/ask_init")
@@ -147,4 +149,3 @@ class TestOpenApiChannelSync(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -406,7 +406,9 @@ def auto_answer_operation(
                 )
                 # 已请求客户补料时，不能由异步 AI 草稿覆盖回处理中。
                 if hub.op_status == OP_SUPPLEMENTING:
-                    logger.info("operation_answer_review_skipped_supplementing", hub_issue_id=hub.id)
+                    logger.info(
+                        "operation_answer_review_skipped_supplementing", hub_issue_id=hub.id
+                    )
                     return False
                 _save_draft_reply(db, hub, content=answer)
                 apply_op_status(

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from adapters.linear import IssueState, LinearNetworkError
 from app.config import get_settings
-from app.models import HubIssue, StatusHistory
+from app.models import HubIssue, Source, StatusHistory, Ticket
 from app.services.hub_issues.linear_status_sync import sync_linear_statuses
 
 
@@ -37,11 +37,24 @@ def _linear_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _hub(db: Session, n: int, **ov) -> HubIssue:  # type: ignore[no-untyped-def]
+    source_code = f"lss-{n}"
+    db.add(Source(code=source_code, name=f"Linear 状态同步测试源 {n}"))
+    ticket = Ticket(
+        short_code=f"TKT-LSS-BASE-{n}",
+        source_code=source_code,
+        source_ticket_id=f"base-{n}",
+        type="Raw",
+        status="processing",
+        title=f"问题 {n}",
+    )
+    db.add(ticket)
+    db.flush()
     base = {
         "short_code": f"HUB-LSS-{n}",
         "type": "Bug_fix",
         "title": f"问题 {n}",
         "status": "created",
+        "ticket_id": ticket.id,
         "linear_uuid": f"uuid-{n}",
         "linear_identifier": f"CNPRD-{n}",
     }
@@ -153,7 +166,7 @@ def test_linear_error_sets_failed_not_raises(db_session: Session) -> None:
 
 def test_completed_cascades_to_linked_tickets(db_session: Session) -> None:
     """决策 14 联动：Linear Done → hub released → 源工单 released + outbox。"""
-    from app.models import Source, SyncOutbox, Ticket
+    from app.models import SyncOutbox
 
     db_session.add(Source(code="ksm", name="KSM"))
     db_session.commit()
@@ -205,5 +218,6 @@ def test_linear_comments_synced_to_hub_reply_content(db_session: Session) -> Non
     sync_linear_statuses(db_session, client=_FakeLinearClient([st]))  # type: ignore[arg-type]
     db_session.refresh(hub)
     assert hub.status == "dev_returned"
-    assert hub.reply_content == "【沟通记录】客户反馈升级报错\n【产研反馈】：产品已经做兼容，直接升级"
-
+    assert (
+        hub.reply_content == "【沟通记录】客户反馈升级报错\n【产研反馈】：产品已经做兼容，直接升级"
+    )

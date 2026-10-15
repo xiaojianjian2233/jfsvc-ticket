@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import logging
@@ -10,10 +9,9 @@ import os
 import random
 import re
 import time
+import uuid
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
-
-BEIJING_TZ = timezone(timedelta(hours=8))
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,11 +19,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import String, and_, desc, func, or_
 from sqlalchemy.orm import Session
 
+from adapters.ai_cs import AiCsClient, AiCsConfig
 from app.api.deps.auth import AuthedUser, require_user
 from app.config import get_settings
 from app.db import get_session
 from app.models import (
-    CustomerIdentity,
     ProductLine,
     ReceptionAgent,
     ReceptionMessage,
@@ -37,16 +35,17 @@ from app.models import (
     Ticket,
     User,
 )
+from app.piaozone_config import get_company_title_config, get_rpa_config
 from app.repositories.ticket import TicketRepository
 from app.services.ingest.catalog_upsert import safe_product_line_code
-from adapters.ai_cs import AiCsClient, AiCsConfig, AiCsError
+
+BEIJING_TZ = timezone(timedelta(hours=8))
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # 内存会话缓存：维护 session_id -> ai_agent_cid 映射，支持多轮连续问答
 _session_ai_cid_cache: dict[str, str] = {}
-
 
 
 # -----------------------------------------------------------------------------
@@ -147,7 +146,9 @@ class BotEscalationStrategy(BaseModel):
     enable_agent_reception: bool = True
     probe_working_hours: bool = True
     probe_human_agents: bool = True
-    ask_transfer_text: str = "很抱歉没能解决您的问题。当前有在线专业人工客服，是否为您转接人工坐席？"
+    ask_transfer_text: str = (
+        "很抱歉没能解决您的问题。当前有在线专业人工客服，是否为您转接人工坐席？"
+    )
     no_human_guide_text: str = "当前人工坐席均在忙碌中或已下班，建议您直接提交售后工单，我们将由技术专家加急排查并在第一时间答复您！"
     show_ticket_button: bool = True
 
@@ -261,7 +262,15 @@ DEFAULT_BOT_CONFIG = {
                 "match_mode": "any",
                 "product_keywords": ["数电票", "全电发票", "进销项", "发票云"],
                 "company_keywords": [],
-                "message_keywords": ["开票", "红字", "勾选", "作废", "差额征税", "纸电混合", "税控盘"],
+                "message_keywords": [
+                    "开票",
+                    "红字",
+                    "勾选",
+                    "作废",
+                    "差额征税",
+                    "纸电混合",
+                    "税控盘",
+                ],
             },
             "is_enabled": True,
         },
@@ -273,7 +282,15 @@ DEFAULT_BOT_CONFIG = {
                 "match_mode": "any",
                 "product_keywords": ["税企直连", "纳税申报", "税局端"],
                 "company_keywords": [],
-                "message_keywords": ["申报", "扣税", "税局", "认证", "增值税", "所得税", "接口超时"],
+                "message_keywords": [
+                    "申报",
+                    "扣税",
+                    "税局",
+                    "认证",
+                    "增值税",
+                    "所得税",
+                    "接口超时",
+                ],
             },
             "is_enabled": True,
         },
@@ -393,7 +410,7 @@ def match_bot_agent(
     prod_candidates: list[str] = []
     if product_line and product_line.strip():
         prod_candidates.append(product_line.strip().lower())
-    for p in (purchased_products or []):
+    for p in purchased_products or []:
         if p and p.strip():
             prod_candidates.append(p.strip().lower())
 
@@ -411,13 +428,18 @@ def match_bot_agent(
         if agent.agent_type == "fallback":
             continue
 
-        agent_lines = [l.strip().lower() for l in (agent.product_lines or ["全部"])]
+        agent_lines = [line.strip().lower() for line in (agent.product_lines or ["全部"])]
         agent_channels = [c.strip().lower() for c in (agent.source_channels or ["全部"])]
 
         score = 0
         prod_match = False
         if prod_candidates:
-            if any(l in cand or cand in l for l in agent_lines if l != "全部" for cand in prod_candidates):
+            if any(
+                line in cand or cand in line
+                for line in agent_lines
+                if line != "全部"
+                for cand in prod_candidates
+            ):
                 score += 3
                 prod_match = True
             elif "全部" in agent_lines:
@@ -441,10 +463,9 @@ def match_bot_agent(
                 score += 1
                 channel_match = True
 
-        if prod_match and channel_match:
-            if score > best_score:
-                best_score = score
-                best_agent = agent
+        if prod_match and channel_match and score > best_score:
+            best_score = score
+            best_agent = agent
 
     if best_agent and best_score >= 1:
         return best_agent
@@ -481,7 +502,7 @@ def check_human_capacity(db: Session) -> tuple[bool, bool, int, int, str]:
         current_active_load = (
             db.query(func.count(ReceptionSession.id))
             .filter(
-                ReceptionSession.is_human == True,
+                ReceptionSession.is_human.is_(True),
                 ReceptionSession.status == "in_progress",
                 ReceptionSession.agent_user_id.in_(online_user_ids),
             )
@@ -658,7 +679,7 @@ def clean_and_extract_ticket_content(
         if len(valid_customer_questions) == 1:
             body = valid_customer_questions[0]
         else:
-            body = "\n".join(f"{i+1}. {q}" for i, q in enumerate(valid_customer_questions))
+            body = "\n".join(f"{i + 1}. {q}" for i, q in enumerate(valid_customer_questions))
     else:
         body = "客户在线咨询未解决，申请售后工单协助处理。"
 
@@ -1305,7 +1326,9 @@ def invite_session(
         raise HTTPException(status_code=404, detail="会话不存在")
 
     agent_record = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == user.user_id).first()
-    agent_display_name = agent_record.nickname if (agent_record and agent_record.nickname) else user.name
+    agent_display_name = (
+        agent_record.nickname if (agent_record and agent_record.nickname) else user.name
+    )
 
     session.status = "in_progress"
     session.is_human = True
@@ -1338,7 +1361,9 @@ def suspend_session(
     session.status = "pending"
 
     agent_record = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == user.user_id).first()
-    agent_display_name = agent_record.nickname if (agent_record and agent_record.nickname) else user.name
+    agent_display_name = (
+        agent_record.nickname if (agent_record and agent_record.nickname) else user.name
+    )
 
     # 系统自动回复客户
     auto_reply = ReceptionMessage(
@@ -1419,7 +1444,9 @@ def convert_to_ticket(
         raise HTTPException(status_code=404, detail="会话不存在")
 
     agent_record = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == user.user_id).first()
-    agent_display_name = agent_record.nickname if (agent_record and agent_record.nickname) else user.name
+    agent_display_name = (
+        agent_record.nickname if (agent_record and agent_record.nickname) else user.name
+    )
 
     # 真实创建 Ticket 记录（自动根据会话清洗提取产品问题与内容）
     ticket = create_ticket_from_reception_session(
@@ -1468,12 +1495,16 @@ def send_agent_message(
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
     if not session.is_human:
-        raise HTTPException(status_code=400, detail="该会话尚未正式转人工接待，坐席不可直接发送消息")
+        raise HTTPException(
+            status_code=400, detail="该会话尚未正式转人工接待，坐席不可直接发送消息"
+        )
     if session.status in ("closed", "converted"):
         raise HTTPException(status_code=400, detail="当前会话已结束或已转工单，不可继续发送消息")
 
     agent_record = db.query(ReceptionAgent).filter(ReceptionAgent.user_id == user.user_id).first()
-    agent_display_name = agent_record.nickname if (agent_record and agent_record.nickname) else user.name
+    agent_display_name = (
+        agent_record.nickname if (agent_record and agent_record.nickname) else user.name
+    )
 
     now = datetime.now(UTC)
     msg = ReceptionMessage(
@@ -1679,7 +1710,6 @@ def webhook_external_llm_reply(
         created_at=now,
     )
     db.add(msg)
-    session.last_message = body.content[:200]
     session.last_message_at = now
     session.updated_at = now
     db.commit()
@@ -1929,16 +1959,66 @@ class ClientEvaluateRequest(BaseModel):
 
 
 MOCK_ENTERPRISES = [
-    {"company_name": "腾讯科技（深圳）有限公司", "tax_no": "91440300708461136T", "status": "存续", "legal_person": "马化腾"},
-    {"company_name": "阿里巴巴（中国）网络技术有限公司", "tax_no": "91330100716105852F", "status": "存续", "legal_person": "蒋芳"},
-    {"company_name": "北京百度网讯科技有限公司", "tax_no": "91110000802100433B", "status": "存续", "legal_person": "梁志祥"},
-    {"company_name": "华为技术有限公司", "tax_no": "914403001922038216", "status": "存续", "legal_person": "赵明路"},
-    {"company_name": "比亚迪股份有限公司", "tax_no": "91440300192317458F", "status": "存续", "legal_person": "王传福"},
-    {"company_name": "美团科技有限公司", "tax_no": "91110108MA01712M9L", "status": "存续", "legal_person": "王兴"},
-    {"company_name": "上海寻梦信息技术有限公司", "tax_no": "91310000324443210P", "status": "存续", "legal_person": "朱健冲"},
-    {"company_name": "浙江吉利控股集团有限公司", "tax_no": "91330000749021884X", "status": "存续", "legal_person": "李书福"},
-    {"company_name": "深圳市大疆创新科技有限公司", "tax_no": "91440300795432587N", "status": "存续", "legal_person": "汪滔"},
-    {"company_name": "中国移动通信集团有限公司", "tax_no": "911100007109250324", "status": "存续", "legal_person": "杨杰"},
+    {
+        "company_name": "腾讯科技（深圳）有限公司",
+        "tax_no": "91440300708461136T",
+        "status": "存续",
+        "legal_person": "马化腾",
+    },
+    {
+        "company_name": "阿里巴巴（中国）网络技术有限公司",
+        "tax_no": "91330100716105852F",
+        "status": "存续",
+        "legal_person": "蒋芳",
+    },
+    {
+        "company_name": "北京百度网讯科技有限公司",
+        "tax_no": "91110000802100433B",
+        "status": "存续",
+        "legal_person": "梁志祥",
+    },
+    {
+        "company_name": "华为技术有限公司",
+        "tax_no": "914403001922038216",
+        "status": "存续",
+        "legal_person": "赵明路",
+    },
+    {
+        "company_name": "比亚迪股份有限公司",
+        "tax_no": "91440300192317458F",
+        "status": "存续",
+        "legal_person": "王传福",
+    },
+    {
+        "company_name": "美团科技有限公司",
+        "tax_no": "91110108MA01712M9L",
+        "status": "存续",
+        "legal_person": "王兴",
+    },
+    {
+        "company_name": "上海寻梦信息技术有限公司",
+        "tax_no": "91310000324443210P",
+        "status": "存续",
+        "legal_person": "朱健冲",
+    },
+    {
+        "company_name": "浙江吉利控股集团有限公司",
+        "tax_no": "91330000749021884X",
+        "status": "存续",
+        "legal_person": "李书福",
+    },
+    {
+        "company_name": "深圳市大疆创新科技有限公司",
+        "tax_no": "91440300795432587N",
+        "status": "存续",
+        "legal_person": "汪滔",
+    },
+    {
+        "company_name": "中国移动通信集团有限公司",
+        "tax_no": "911100007109250324",
+        "status": "存续",
+        "legal_person": "杨杰",
+    },
 ]
 
 
@@ -1974,7 +2054,8 @@ def client_lookup_phone(
                     tax_no=s.tax_no or "",
                     tenant_name=s.tenant_name,
                     tenant_no=s.tenant_no,
-                    purchased_products=getattr(s, "purchased_products", None) or ["发票云标准版", "数电发票乐企模块"],
+                    purchased_products=getattr(s, "purchased_products", None)
+                    or ["发票云标准版", "数电发票乐企模块"],
                     contact_name=s.contact_name,
                 )
             )
@@ -2103,14 +2184,6 @@ def client_search_enterprises(
 # 8. 基础平台-rpa / 订单系统租户查询接口 (Apifox 接口契约)
 # -----------------------------------------------------------------------------
 
-from app.piaozone_config import (
-    COMPANY_TITLE_CONFIG,
-    RPA_PROD_CONFIG,
-    RPA_SIT_CONFIG,
-    get_company_title_config,
-    get_rpa_config,
-)
-
 
 def query_tenant_by_company_rpa_single(
     tax_no: str, company_name: str, config: dict[str, str]
@@ -2143,7 +2216,10 @@ def query_tenant_by_company_rpa_single(
                     },
                 )
                 if resp.status_code == 200:
-                    res_json = resp.json()
+                    raw_response: object = resp.json()
+                    if not isinstance(raw_response, dict):
+                        return None
+                    res_json: dict[str, Any] = raw_response
                     if res_json.get("errcode") == "0000" and res_json.get("data"):
                         items = res_json["data"]
                         if isinstance(items, list) and len(items) > 0:
@@ -2178,9 +2254,7 @@ def query_tenant_by_company_rpa_single(
     return None
 
 
-def query_tenant_by_company_rpa(
-    tax_no: str = "", company_name: str = ""
-) -> dict[str, Any] | None:
+def query_tenant_by_company_rpa(tax_no: str = "", company_name: str = "") -> dict[str, Any] | None:
     """双环境级联查询租户：优先查询测试环境（SIT），若未命中或出错级联尝试生产环境（PROD）"""
     sit_cfg = get_rpa_config("sit")
     prod_cfg = get_rpa_config("prod")
@@ -2215,7 +2289,9 @@ def client_fetch_tenant_profile(
             return TenantProfileResponse(
                 tenant_no=str(rpa_res["tenantNo"]),
                 tenant_name=str(rpa_res["tenantName"]),
-                purchased_products=rpa_res.get("purchasedProducts", ["发票云敏捷版", "数电发票乐企模块"]),
+                purchased_products=rpa_res.get(
+                    "purchasedProducts", ["发票云敏捷版", "数电发票乐企模块"]
+                ),
             )
 
     # 2. 检查本地数据库历史接待会话记录
@@ -2233,7 +2309,8 @@ def client_fetch_tenant_profile(
         return TenantProfileResponse(
             tenant_no=existing.tenant_no,
             tenant_name=existing.tenant_name,
-            purchased_products=getattr(existing, "purchased_products", None) or ["发票云标准版", "数电发票采集模块"],
+            purchased_products=getattr(existing, "purchased_products", None)
+            or ["发票云标准版", "数电发票采集模块"],
         )
 
     # 3. 兜底默认生成
@@ -2266,7 +2343,11 @@ def client_init_session(
             .order_by(desc(ReceptionSession.created_at))
             .first()
         )
-        if history_session and history_session.contact_name and not history_session.contact_name.startswith("客户_"):
+        if (
+            history_session
+            and history_session.contact_name
+            and not history_session.contact_name.startswith("客户_")
+        ):
             contact_name = history_session.contact_name
         else:
             contact_name = phone
@@ -2458,7 +2539,6 @@ def client_send_message(
     )
     db.add(msg)
 
-    session.last_message = body.content[:200]
     session.last_message_at = now
     session.unread_count = (session.unread_count or 0) + 1
     session.updated_at = now
@@ -2481,13 +2561,21 @@ def client_send_message(
     has_resolution_prompt = False
     if last_eval_msg and last_eval_msg.content:
         has_resolution_prompt = bool(
-            re.search(r"(?:1\s*解决|是否(?:已经)?解决|解决您的(?:问题|疑问))", last_eval_msg.content)
+            re.search(
+                r"(?:1\s*解决|是否(?:已经)?解决|解决您的(?:问题|疑问))", last_eval_msg.content
+            )
         )
 
-    is_resolved_feedback = (
-        content_stripped in ("1 解决", "1.解决", "1、解决", "已解决", "问题已解决", "好了", "行了", "满意")
-        or (has_resolution_prompt and content_stripped == "1")
-    )
+    is_resolved_feedback = content_stripped in (
+        "1 解决",
+        "1.解决",
+        "1、解决",
+        "已解决",
+        "问题已解决",
+        "好了",
+        "行了",
+        "满意",
+    ) or (has_resolution_prompt and content_stripped == "1")
 
     if is_resolved_feedback:
         bot_time = datetime.now(UTC)
@@ -2515,7 +2603,6 @@ def client_send_message(
                 created_at=bot_time,
             )
             db.add(bot_msg)
-            session.last_message = bot_answer[:200]
             session.last_message_at = bot_time
 
             # 释放 Open API Channel 远程会话
@@ -2541,7 +2628,6 @@ def client_send_message(
                 created_at=bot_time,
             )
             db.add(sys_msg)
-            session.last_message = sys_answer[:200]
             session.last_message_at = bot_time
 
         db.commit()
@@ -2561,13 +2647,20 @@ def client_send_message(
         bot_config = get_db_bot_config(db)
 
         # 2. 识别“未解决 / 2”等关键词，直接触发未解决探针引导
-        is_unresolved_feedback = (
-            content_stripped in ("2 未解决", "2.未解决", "2、未解决", "未解决", "没解决", "没有解决", "问题未解决")
-            or (has_resolution_prompt and content_stripped == "2")
-        )
+        is_unresolved_feedback = content_stripped in (
+            "2 未解决",
+            "2.未解决",
+            "2、未解决",
+            "未解决",
+            "没解决",
+            "没有解决",
+            "问题未解决",
+        ) or (has_resolution_prompt and content_stripped == "2")
         if is_unresolved_feedback:
             strat = bot_config.escalation_strategy
-            in_working_hours, has_capacity, online_count, idle_capacity, _ = check_human_capacity(db)
+            in_working_hours, has_capacity, _online_count, _idle_capacity, _ = check_human_capacity(
+                db
+            )
             allow_human = True
             if strat.probe_working_hours and not in_working_hours:
                 allow_human = False
@@ -2586,7 +2679,6 @@ def client_send_message(
                 created_at=card_time,
             )
             db.add(card_msg)
-            session.last_message = prompt_text[:200]
             session.last_message_at = card_time
         else:
             # 正常咨询：匹配对应 Agent 并生成结构化自动应答
@@ -2614,8 +2706,14 @@ def client_send_message(
             if ai_cs_app_id and ai_cs_app_key:
                 try:
                     cfg = AiCsConfig.from_settings(settings)
-                    cached_cid = getattr(session, "ai_agent_cid", None) or _session_ai_cid_cache.get(session_id)
-                    primary_skill = matched_agent.skills[0] if (matched_agent and matched_agent.skills) else None
+                    cached_cid = getattr(
+                        session, "ai_agent_cid", None
+                    ) or _session_ai_cid_cache.get(session_id)
+                    primary_skill = (
+                        matched_agent.skills[0]
+                        if (matched_agent and matched_agent.skills)
+                        else None
+                    )
                     effective_skill = "customer-service"
                     if primary_skill in ("customer-service", "customer-service-feishu"):
                         effective_skill = primary_skill
@@ -2635,7 +2733,9 @@ def client_send_message(
                         # 核心联动：若 Open API Channel 识别到转人工意图（TRANSFER）
                         if res.transfer_result == "TRANSFER":
                             strat = bot_config.escalation_strategy
-                            in_working_hours, has_capacity, online_count, idle_capacity, _ = check_human_capacity(db)
+                            in_working_hours, has_capacity, _online_count, _idle_capacity, _ = (
+                                check_human_capacity(db)
+                            )
                             allow_human = True
                             if strat.probe_working_hours and not in_working_hours:
                                 allow_human = False
@@ -2643,10 +2743,18 @@ def client_send_message(
                                 allow_human = False
 
                             action_type = "ask_transfer" if allow_human else "guide_ticket"
-                            prompt_text = strat.ask_transfer_text if allow_human else strat.no_human_guide_text
+                            prompt_text = (
+                                strat.ask_transfer_text
+                                if allow_human
+                                else strat.no_human_guide_text
+                            )
                             transfer_card_prompt = (action_type, prompt_text)
                 except Exception as e:
-                    logger.warning("Call Open API Channel answer_no_stream failed for session %s: %s", session_id, e)
+                    logger.warning(
+                        "Call Open API Channel answer_no_stream failed for session %s: %s",
+                        session_id,
+                        e,
+                    )
 
             # 2. 若未从 Open API Channel 获取到答复，检查是否配置了第三方大模型推送地址 (webhook_url)
             if not bot_answer and matched_agent.webhook_url and matched_agent.webhook_url.strip():
@@ -2672,13 +2780,17 @@ def client_send_message(
                                     or ""
                                 )
                 except Exception as e:
-                    logger.warning("Push to external LLM webhook failed for agent %s: %s", matched_agent.id, e)
+                    logger.warning(
+                        "Push to external LLM webhook failed for agent %s: %s", matched_agent.id, e
+                    )
 
             # 3. 若第三方仍未返回回复，则平滑降级使用本地知识库/规则回复
             if not bot_answer:
                 bot_answer = generate_bot_answer(matched_agent, body.content)
 
-            clean_agent_name = _clean_agent_display_name(matched_agent.name if matched_agent else session.agent_name)
+            clean_agent_name = _clean_agent_display_name(
+                matched_agent.name if matched_agent else session.agent_name
+            )
             if bot_answer and clean_agent_name:
                 bot_answer = re.sub(
                     r"我是\s*(?:发票云)?(?:智能)?(?:客服|综合|服务|AI)?助手",
@@ -2714,7 +2826,6 @@ def client_send_message(
             )
             db.add(bot_msg)
             session.agent_name = agent_display_name
-            session.last_message = bot_answer[:200]
             session.last_message_at = bot_time
 
             # 4. 若大模型识别需要转人工，联动向客户推送转人工引导探针卡片
@@ -2730,9 +2841,7 @@ def client_send_message(
                     created_at=card_time,
                 )
                 db.add(card_msg)
-                session.last_message = prompt_text[:200]
                 session.last_message_at = card_time
-
 
     db.commit()
     db.refresh(msg)
@@ -2798,7 +2907,6 @@ def client_mark_unresolved(
         created_at=now,
     )
     db.add(card_msg)
-    session.last_message = prompt_text[:200]
     session.last_message_at = now
     session.updated_at = now
     db.commit()
@@ -2902,7 +3010,6 @@ def client_resolve_session(
             created_at=now,
         )
         db.add(bot_msg)
-        session.last_message = bot_answer[:200]
         session.last_message_at = now
 
         cid = _session_ai_cid_cache.pop(session_id, None)
@@ -2927,7 +3034,6 @@ def client_resolve_session(
             created_at=now,
         )
         db.add(sys_msg)
-        session.last_message = sys_answer[:200]
         session.last_message_at = now
 
     db.commit()
@@ -3030,10 +3136,11 @@ def client_close_session(
             with AiCsClient(cfg) as ai_client:
                 ai_client.end_session(cid)
         except Exception as e:
-            logger.warning("Call Open API Channel end_session failed for %s (cid=%s): %s", session_id, cid, e)
+            logger.warning(
+                "Call Open API Channel end_session failed for %s (cid=%s): %s", session_id, cid, e
+            )
 
     return {"status": "ok", "closed_at": now.isoformat()}
-
 
 
 @router.post("/client/sessions/{session_id}/evaluate")
@@ -3539,9 +3646,7 @@ def client_get_tickets(
         .all()
     )
 
-    tickets = [
-        t for t in candidate_tickets if _extract_ticket_reporter_mobile(t) == phone
-    ][:50]
+    tickets = [t for t in candidate_tickets if _extract_ticket_reporter_mobile(t) == phone][:50]
 
     # 预加载用户姓名
     user_ids = set()
@@ -3570,13 +3675,15 @@ def client_get_tickets(
             cat = "processing"
 
         # 处理人（服务处理环节展示服务处理人，研发处理环节展示产研责任人）
+        assigned_name = user_map.get(t.assigned_user_id) if t.assigned_user_id is not None else None
+        handler_name = user_map.get(t.handler_user_id) if t.handler_user_id is not None else None
         if t.process_stage in ("研发处理", "产研处理"):
-            handler = user_map.get(t.assigned_user_id) or user_map.get(t.handler_user_id) or "研发责任人"
+            handler = assigned_name or handler_name or "研发责任人"
         else:
             handler = (
-                user_map.get(t.handler_user_id)
+                handler_name
                 or (rep_name if t.source_code == "feishu_ai" else None)
-                or user_map.get(t.assigned_user_id)
+                or assigned_name
                 or "客服处理人"
             )
 
@@ -3586,7 +3693,9 @@ def client_get_tickets(
         hours_elapsed = round((now - rec).total_seconds() / 3600.0, 1)
 
         t_num = t.source_ticket_number or t.source_ticket_id or t.short_code
-        src_name = SOURCE_CHANNEL_NAMES.get(t.source_code or "", (t.source_code or "服务单").upper())
+        src_name = SOURCE_CHANNEL_NAMES.get(
+            t.source_code or "", (t.source_code or "服务单").upper()
+        )
 
         reply_content = t.cached_reply_content
         if not reply_content and t.source_payload and isinstance(t.source_payload, dict):
@@ -3598,10 +3707,18 @@ def client_get_tickets(
 
         reply_time_str = None
         if t.customer_replied_at:
-            r_at = t.customer_replied_at if t.customer_replied_at.tzinfo else t.customer_replied_at.replace(tzinfo=UTC)
+            r_at = (
+                t.customer_replied_at
+                if t.customer_replied_at.tzinfo
+                else t.customer_replied_at.replace(tzinfo=UTC)
+            )
             reply_time_str = r_at.strftime("%Y-%m-%d %H:%M")
         elif t.actual_resolved_at:
-            r_at = t.actual_resolved_at if t.actual_resolved_at.tzinfo else t.actual_resolved_at.replace(tzinfo=UTC)
+            r_at = (
+                t.actual_resolved_at
+                if t.actual_resolved_at.tzinfo
+                else t.actual_resolved_at.replace(tzinfo=UTC)
+            )
             reply_time_str = r_at.strftime("%Y-%m-%d %H:%M")
 
         results.append(

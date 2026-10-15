@@ -145,6 +145,7 @@ def test_workbench_flow(app_client: TestClient, db_session: Session) -> None:
         company_name="百度在线网络技术（北京）有限公司",
         status="in_progress",
         session_type="online",
+        is_human=True,
     )
     db_session.add_all([s_queue, s_prog])
     db_session.commit()
@@ -226,7 +227,10 @@ def test_bot_config_and_client_escalation(app_client: TestClient, db_session: Se
     cfg["escalation_strategy"]["ask_transfer_text"] = "【自定义】请问需要转接人工客服吗？"
     r_put = app_client.put("/api/reception/bot-config", json=cfg, headers=headers)
     assert r_put.status_code == 200
-    assert r_put.json()["escalation_strategy"]["ask_transfer_text"] == "【自定义】请问需要转接人工客服吗？"
+    assert (
+        r_put.json()["escalation_strategy"]["ask_transfer_text"]
+        == "【自定义】请问需要转接人工客服吗？"
+    )
 
     # 3. 探针接口
     r_probe = app_client.get("/api/reception/client/probe-human-capacity")
@@ -357,6 +361,7 @@ def test_send_agent_message_guards_and_workbench_filtering(
     # 1. 创建一个未转人工的进行中会话（智能体接待）
     s_bot = ReceptionSession(
         id="ZXHH202610140091",
+        company_name="未转人工测试企业",
         session_type="online",
         contact_name="未转人工客户",
         contact_phone="13800001111",
@@ -366,6 +371,7 @@ def test_send_agent_message_guards_and_workbench_filtering(
     # 2. 创建一个已转人工的进行中会话
     s_human = ReceptionSession(
         id="ZXHH202610140092",
+        company_name="已转人工测试企业",
         session_type="online",
         contact_name="已转人工客户",
         contact_phone="13800002222",
@@ -411,4 +417,3 @@ def test_send_agent_message_guards_and_workbench_filtering(
     )
     assert r_converted_deny.status_code == 400
     assert "不可继续发送消息" in r_converted_deny.json()["detail"]
-

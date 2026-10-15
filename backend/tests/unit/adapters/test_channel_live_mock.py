@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import unittest
-import uuid
 
 import httpx
 
@@ -22,22 +21,34 @@ def _channel_mock_dispatcher(request: httpx.Request) -> httpx.Response:
         sign = request.url.params.get("sign", "")
         expected = hashlib.md5(f"{appid}{create_time}mock_app_key".encode()).hexdigest()
         if sign != expected:
-            return httpx.Response(400, json={"errcode": "100001", "description": "签名失败", "data": None})
+            return httpx.Response(
+                400, json={"errcode": "100001", "description": "签名失败", "data": None}
+            )
         return httpx.Response(
             200,
-            json={"errcode": "0000", "description": "操作成功", "data": {"token": "test-tok-999", "expires_in": "86400"}},
+            json={
+                "errcode": "0000",
+                "description": "操作成功",
+                "data": {"token": "test-tok-999", "expires_in": "86400"},
+            },
         )
 
     # All other endpoints require token header
     token = request.headers.get("token")
     if token != "test-tok-999":
-        return httpx.Response(401, json={"errcode": "100003", "description": "Token 无效", "data": None})
+        return httpx.Response(
+            401, json={"errcode": "100003", "description": "Token 无效", "data": None}
+        )
 
     # 2. GET /open-api/ask/ask_init
     if path == "/open-api/ask/ask_init":
         return httpx.Response(
             200,
-            json={"errcode": "0000", "description": "操作成功", "data": {"ai_agent_cid": "cid-test-12345", "biz_type": "AI_AGENT"}},
+            json={
+                "errcode": "0000",
+                "description": "操作成功",
+                "data": {"ai_agent_cid": "cid-test-12345", "biz_type": "AI_AGENT"},
+            },
         )
 
     # 3. POST /open-api/ask/answer_no_stream
@@ -45,7 +56,6 @@ def _channel_mock_dispatcher(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
         question = body.get("question", "")
         cid = body.get("ai_agent_cid", "")
-        images = body.get("images") or []
         transfer_result = "NO_ACTION"
         if "人工" in question:
             transfer_result = "TRANSFER"
@@ -76,9 +86,13 @@ def _channel_mock_dispatcher(request: httpx.Request) -> httpx.Response:
 
     # 4. POST /open-api/ask/end_session
     if path == "/open-api/ask/end_session":
-        return httpx.Response(200, json={"errcode": "0000", "description": "会话已结束", "data": None})
+        return httpx.Response(
+            200, json={"errcode": "0000", "description": "会话已结束", "data": None}
+        )
 
-    return httpx.Response(404, json={"errcode": "400000", "description": f"未找到接口: {path}", "data": None})
+    return httpx.Response(
+        404, json={"errcode": "400000", "description": f"未找到接口: {path}", "data": None}
+    )
 
 
 class TestChannelLiveMock(unittest.TestCase):

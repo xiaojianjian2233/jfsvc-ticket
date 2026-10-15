@@ -9,7 +9,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +22,8 @@ def load_raw_config() -> dict[str, Any]:
     target_path = Path(custom_path) if custom_path else _CONFIG_PATH
     if target_path.exists():
         try:
-            with open(target_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+            with open(target_path, encoding="utf-8") as f:
+                return cast(dict[str, Any], json.load(f))
         except Exception as e:
             logger.error("Failed to load piaozone_config.json from %s: %s", target_path, e)
     return {}
@@ -53,9 +53,15 @@ def get_company_title_config() -> dict[str, str]:
             "COMPANY_TITLE_ENDPOINT",
             raw.get("endpoint", "/bill/query/querytitles"),
         ),
-        "client_id": os.getenv("COMPANY_TITLE_CLIENT_ID", raw.get("client_id", "XXzM8oZ1FQGLJxZ-YK_svomMUA8")),
-        "client_secret": os.getenv("COMPANY_TITLE_CLIENT_SECRET", raw.get("client_secret", "5KcLc2OK2hIrsnbZOR4EzzM1dEM")),
-        "encrypt_key": os.getenv("COMPANY_TITLE_ENCRYPT_KEY", raw.get("encrypt_key", "kgr92kHxXNKIU6Cw")),
+        "client_id": os.getenv(
+            "COMPANY_TITLE_CLIENT_ID", raw.get("client_id", "XXzM8oZ1FQGLJxZ-YK_svomMUA8")
+        ),
+        "client_secret": os.getenv(
+            "COMPANY_TITLE_CLIENT_SECRET", raw.get("client_secret", "5KcLc2OK2hIrsnbZOR4EzzM1dEM")
+        ),
+        "encrypt_key": os.getenv(
+            "COMPANY_TITLE_ENCRYPT_KEY", raw.get("encrypt_key", "kgr92kHxXNKIU6Cw")
+        ),
     }
 
 
@@ -63,4 +69,3 @@ def get_company_title_config() -> dict[str, str]:
 RPA_SIT_CONFIG = get_rpa_config("sit")
 RPA_PROD_CONFIG = get_rpa_config("prod")
 COMPANY_TITLE_CONFIG = get_company_title_config()
-
