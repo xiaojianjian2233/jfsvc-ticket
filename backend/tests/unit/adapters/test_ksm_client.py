@@ -12,6 +12,7 @@ from adapters.ksm import (
     KSMBusinessError,
     KSMClient,
     KSMConfig,
+    KSMContentSecurityError,
     LockOrderRequest,
     ReturnOrderRequest,
     SplitOrderRequest,
@@ -360,6 +361,97 @@ def test_http_403_persists_after_refresh_raises_auth_error() -> None:
         c.lock_order(
             LockOrderRequest(bill_id="b", account="a", account_number="N", account_name="bob")
         )
+
+
+@respx.mock
+def test_handle_403_with_sql_after_refresh_is_content_security_error() -> None:
+    """答复正文命中 SQL 特征且强刷新后仍 403，应明确归类为正文安全拦截。"""
+    respx.post(f"{BASE}/ierp/api/getAppToken.do").mock(
+        side_effect=[
+            httpx.Response(200, json={"data": {"app_token": "app1"}}),
+            httpx.Response(200, json={"data": {"app_token": "app2"}}),
+        ]
+    )
+    respx.post(f"{BASE}/ierp/api/login.do").mock(
+        side_effect=[
+            httpx.Response(200, json={"data": {"access_token": "tok-old"}}),
+            httpx.Response(200, json={"data": {"access_token": "tok-new"}}),
+        ]
+    )
+    biz = respx.post(f"{BASE}/ierp/kapi/v2/kded/kded_wos/handleKsmOrder").mock(
+        return_value=httpx.Response(
+            403,
+            text=(
+                "request blocked; access_token=secret-token; contact=13800138000 user@example.com"
+            ),
+            headers={"X-Request-ID": "req-safe-123", "Content-Type": "text/plain"},
+        )
+    )
+
+    with _client() as c, pytest.raises(KSMContentSecurityError) as exc_info:
+        c.handle_order(
+            HandleOrderRequest(
+                bill_id="b",
+                account="a",
+                account_number="N",
+                account_name="bob",
+                node_id="node-1",
+                deal_opinion="update t_invoice set status = 2 where id = 1;",
+            )
+        )
+
+    error = exc_info.value
+    assert biz.call_count == 2
+    assert "正文包含 SQL" in str(error)
+    assert error.response_summary["request_id"] == "req-safe-123"
+    assert "secret-token" not in str(error.response_summary)
+    assert "13800138000" not in str(error.response_summary)
+    assert "user@example.com" not in str(error.response_summary)
+    assert "<redacted>" in str(error.response_summary)
+
+
+@respx.mock
+def test_handle_403_without_sensitive_content_remains_auth_error_with_summary() -> None:
+    """没有正文/WAF 特征的持续 403 仍按权限问题处理，并保留脱敏摘要。"""
+    respx.post(f"{BASE}/ierp/api/getAppToken.do").mock(
+        side_effect=[
+            httpx.Response(200, json={"data": {"app_token": "app1"}}),
+            httpx.Response(200, json={"data": {"app_token": "app2"}}),
+        ]
+    )
+    respx.post(f"{BASE}/ierp/api/login.do").mock(
+        side_effect=[
+            httpx.Response(200, json={"data": {"access_token": "tok-old"}}),
+            httpx.Response(200, json={"data": {"access_token": "tok-new"}}),
+        ]
+    )
+    respx.post(f"{BASE}/ierp/kapi/v2/kded/kded_wos/handleKsmOrder").mock(
+        return_value=httpx.Response(
+            403,
+            text="permission denied",
+            headers={"X-Trace-ID": "trace-456"},
+        )
+    )
+
+    with _client() as c, pytest.raises(KSMAuthError) as exc_info:
+        c.handle_order(
+            HandleOrderRequest(
+                bill_id="b",
+                account="a",
+                account_number="N",
+                account_name="bob",
+                node_id="node-1",
+                deal_opinion="正常答复内容",
+            )
+        )
+
+    assert "认证或操作权限校验失败" in str(exc_info.value)
+    assert exc_info.value.response_summary == {
+        "status": 403,
+        "content_type": "text/plain; charset=utf-8",
+        "request_id": "trace-456",
+        "body_excerpt": "permission denied",
+    }
 
 
 @respx.mock

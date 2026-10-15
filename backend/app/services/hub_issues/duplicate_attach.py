@@ -25,6 +25,7 @@ _TERMINAL = frozenset(
 )
 _DEV_DONE = frozenset({"answered", "closed", "done", "released", "resolved"})
 _RETURNED = frozenset({"returned", "transferred_return"})
+_INACTIVE_TICKET_STATUSES = frozenset({"supplementing", "transferred_return"})
 
 
 @dataclass(slots=True, frozen=True)
@@ -60,8 +61,16 @@ def all_linked_tickets_cancelled(db: Session, hub: HubIssue) -> bool:
     return bool(tickets) and all(t.closed_reason == KSM_CUSTOMER_CANCELLED_REASON for t in tickets)
 
 
+def all_linked_tickets_inactive(db: Session, hub: HubIssue) -> bool:
+    """Whether every historical source ticket is waiting/returned, with none active."""
+    tickets = linked_tickets(db, hub)
+    return bool(tickets) and all(t.status in _INACTIVE_TICKET_STATUSES for t in tickets)
+
+
 def candidate_is_eligible(db: Session, hub: HubIssue) -> bool:
     """Whether a historical Hub may receive a newly ingested strict duplicate."""
+    if all_linked_tickets_inactive(db, hub):
+        return True
     if hub.op_status == "supplementing" or hub.status == "supplementing":
         return False
     if hub.status in _RETURNED or hub.op_status == "transferred_return":
@@ -92,6 +101,8 @@ def attach_duplicate_ticket(
 
     if all_linked_tickets_cancelled(db, hub):
         _reopen_cancelled_hub(db, hub, ticket)
+    elif all_linked_tickets_inactive(db, hub):
+        _reactivate_inactive_hub(db, hub, ticket)
     elif hub.type in ("Bug_fix", "Demand") and hub.status in _DEV_DONE:
         _reactivate_dev_hub(db, hub, ticket)
         reactivated_for_linear = True
@@ -198,6 +209,36 @@ def _reopen_cancelled_hub(db: Session, hub: HubIssue, ticket: Ticket) -> None:
         to_status="processing",
         changed_by="system:hub_dedup",
         reason="全部关联工单曾撤销；收到严格重复的新工单后重新激活",
+    )
+
+
+def _reactivate_inactive_hub(db: Session, hub: HubIssue, ticket: Ticket) -> None:
+    """Reactivate a shared Hub whose old tickets are all returned/waiting for data.
+
+    Historical tickets retain their own terminal/waiting outcome. Only the new
+    source ticket and the shared Hub start a fresh processing cycle.
+    """
+    now = datetime.now(UTC)
+    prev = hub.status
+    hub.status = "processing"
+    hub.actual_resolved_at = None
+    hub.closed_at = None
+    hub.ticket_id = ticket.id
+    if hub.type == "Operation":
+        hub.op_status = "processing"
+        hub.op_status_changed_at = now
+    ticket.status = "processing"
+    ticket.process_stage = "研发处理" if hub.type in ("Bug_fix", "Demand") else "服务处理"
+    ticket.closed_reason = None
+    ticket.cached_reply_content = None
+    ticket.cached_reply_version = None
+    StatusHistoryRepository(db).record(
+        entity_type="hub_issue",
+        entity_id=hub.id,
+        from_status=prev,
+        to_status="processing",
+        changed_by="system:hub_dedup",
+        reason="历史关联工单均为退回转单或补充资料；收到严格重复的新工单后重新激活",
     )
 
 

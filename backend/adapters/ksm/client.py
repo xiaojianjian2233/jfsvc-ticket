@@ -18,6 +18,7 @@ Differences vs feishu-python:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -26,7 +27,7 @@ import httpx
 from app.core.logging import get_logger
 
 from .._token_cache import TokenCache
-from .exceptions import KSMAuthError, KSMBusinessError
+from .exceptions import KSMAuthError, KSMBusinessError, KSMContentSecurityError
 from .types import (
     HandleOrderRequest,
     KSMConfig,
@@ -40,6 +41,85 @@ from .types import (
 logger = get_logger(__name__)
 
 _TOKEN_TTL_FALLBACK = 30 * 60  # KSM 偶发不返回 expire_time 时使用 30 分钟兜底
+_RESPONSE_EXCERPT_LIMIT = 320
+_TRACE_HEADER_NAMES = (
+    "x-request-id",
+    "x-trace-id",
+    "trace-id",
+    "x-correlation-id",
+)
+_SQL_OR_SCRIPT_PATTERNS = (
+    re.compile(r"\bupdate\s+[\w.\"`]+\s+set\b", re.IGNORECASE),
+    re.compile(r"\bselect\b[\s\S]{0,240}\bfrom\b", re.IGNORECASE),
+    re.compile(r"\bdelete\s+from\b", re.IGNORECASE),
+    re.compile(r"\binsert\s+into\b", re.IGNORECASE),
+    re.compile(r"\b(?:drop|alter|truncate)\s+table\b", re.IGNORECASE),
+    re.compile(r"(?:--|/\*)\s*(?:select|update|delete|insert|sql|清空|状态)", re.IGNORECASE),
+    re.compile(r"<script\b|javascript:", re.IGNORECASE),
+)
+_SECURITY_RESPONSE_HINTS = (
+    "sql injection",
+    "waf",
+    "web application firewall",
+    "request blocked",
+    "blocked by policy",
+    "security policy",
+    "非法请求",
+    "安全策略",
+    "攻击",
+)
+
+
+def _redact_response_text(value: str) -> str:
+    """Keep a diagnostic excerpt without persisting tokens or common PII."""
+    compact = " ".join(value.split())
+    compact = re.sub(
+        r"(?i)(access[_-]?token|app[_-]?token|authorization|cookie|secret|password)"
+        r"([\s\"':=]+)([^\s,;\"']+)",
+        r"\1\2<redacted>",
+        compact,
+    )
+    compact = re.sub(r"(?i)bearer\s+[a-z0-9._~+/=-]+", "Bearer <redacted>", compact)
+    compact = re.sub(
+        r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
+        "<redacted-email>",
+        compact,
+    )
+    compact = re.sub(r"(?<!\d)1[3-9]\d{9}(?!\d)", "<redacted-mobile>", compact)
+    return compact[:_RESPONSE_EXCERPT_LIMIT]
+
+
+def _safe_response_summary(response: httpx.Response) -> dict[str, object]:
+    summary: dict[str, object] = {"status": response.status_code}
+    content_type = response.headers.get("content-type")
+    if content_type:
+        summary["content_type"] = content_type[:120]
+    for header in _TRACE_HEADER_NAMES:
+        value = response.headers.get(header)
+        if value:
+            summary["request_id"] = value[:160]
+            break
+    body_excerpt = _redact_response_text(response.text)
+    if body_excerpt:
+        summary["body_excerpt"] = body_excerpt
+    return summary
+
+
+def _has_sensitive_business_content(payload: dict[str, Any]) -> bool:
+    content = str(payload.get("dealOpinion") or "")
+    return any(pattern.search(content) for pattern in _SQL_OR_SCRIPT_PATTERNS)
+
+
+def _looks_like_content_security_block(
+    *,
+    op_name: str,
+    content_security_hint: bool,
+    response_summary: dict[str, object],
+) -> bool:
+    if op_name != "handleKsmOrder":
+        return False
+    excerpt = str(response_summary.get("body_excerpt") or "").lower()
+    return content_security_hint or any(hint in excerpt for hint in _SECURITY_RESPONSE_HINTS)
 
 
 class KSMClient:
@@ -127,7 +207,11 @@ class KSMClient:
     # ---- request helper ------------------------------------------------
 
     def _call_with_retry(
-        self, op_name: str, request_fn: Callable[[str], dict[str, Any]]
+        self,
+        op_name: str,
+        request_fn: Callable[[str], dict[str, Any]],
+        *,
+        content_security_hint: bool = False,
     ) -> dict[str, Any]:
         """Single force-refresh retry on either unauthorized shape KSM uses:
         business-layer (`errorCode=401` in a 200 JSON body — the documented
@@ -135,8 +219,11 @@ class KSMClient:
         HTTP 401/403 — observed in production, e.g. TKT-006280/R20260828-1894:
         a `403 Forbidden` on handleKsmOrder with an expired token that was
         never force-refreshed because `_is_unauthorized` only ever saw the
-        exception, not a JSON body to inspect). Any other HTTP error status
-        propagates unchanged — only 401/403 are treated as "token expired".
+        exception, not a JSON body to inspect). A first 401/403 gets one token
+        refresh. If the retry is still 403, handleKsmOrder requests with SQL/
+        script or explicit WAF response hints are classified as content-security
+        blocks; otherwise the failure remains an auth/operation-permission error.
+        Any other HTTP error status propagates unchanged.
         """
         token = self._get_token()
         try:
@@ -144,15 +231,44 @@ class KSMClient:
         except httpx.HTTPStatusError as e:
             if e.response.status_code not in (401, 403):
                 raise
-            logger.warning("ksm_http_unauthorized_retry", op=op_name, status=e.response.status_code)
+            logger.warning(
+                "ksm_http_unauthorized_retry",
+                op=op_name,
+                status=e.response.status_code,
+                response_summary=_safe_response_summary(e.response),
+            )
             token = self._get_token(force=True)
             try:
                 return request_fn(token)
             except httpx.HTTPStatusError as e2:
-                # 强刷新后仍 401/403：真正的鉴权失败（凭证/权限问题，非单纯 token
-                # 过期），包成 KSMAuthError 而不是让裸 httpx 异常泄漏出适配层。
+                if e2.response.status_code not in (401, 403):
+                    raise
+                response_summary = _safe_response_summary(e2.response)
+                if e2.response.status_code == 403 and _looks_like_content_security_block(
+                    op_name=op_name,
+                    content_security_hint=content_security_hint,
+                    response_summary=response_summary,
+                ):
+                    logger.warning(
+                        "ksm_content_security_blocked",
+                        op=op_name,
+                        response_summary=response_summary,
+                    )
+                    raise KSMContentSecurityError(
+                        op_name,
+                        response_summary=response_summary,
+                    ) from e2
+                # 强刷新后仍 401/403，且没有正文安全拦截特征：按真正的鉴权/
+                # 操作权限问题处理。摘要仅保留白名单头和脱敏截断正文。
+                logger.warning(
+                    "ksm_http_auth_failed_after_refresh",
+                    op=op_name,
+                    response_summary=response_summary,
+                )
                 raise KSMAuthError(
-                    f"{op_name} still {e2.response.status_code} after force-refresh"
+                    f"{op_name} 认证或操作权限校验失败（强刷新后仍 HTTP "
+                    f"{e2.response.status_code}）；KSM响应摘要={response_summary}",
+                    response_summary=response_summary,
                 ) from e2
         if _is_unauthorized(result):
             logger.warning("ksm_unauthorized_retry", op=op_name)
@@ -173,7 +289,11 @@ class KSMClient:
             resp.raise_for_status()
             return resp.json()  # type: ignore[no-any-return]
 
-        result = self._call_with_retry(op, call)
+        result = self._call_with_retry(
+            op,
+            call,
+            content_security_hint=_has_sensitive_business_content(payload),
+        )
         if raise_on_business_fail and not result.get("status"):
             raise KSMBusinessError(
                 op=op,

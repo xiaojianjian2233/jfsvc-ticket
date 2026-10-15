@@ -1,7 +1,7 @@
 """KSM (金蝶 ierp) adapter — full migration from feishu-python/app/ksm_client.py."""
 
 from .client import KSMClient
-from .exceptions import KSMAuthError, KSMBusinessError, KSMError
+from .exceptions import KSMAuthError, KSMBusinessError, KSMContentSecurityError, KSMError
 from .types import (
     HandleOrderRequest,
     KSMConfig,
@@ -18,6 +18,7 @@ __all__ = [
     "KSMBusinessError",
     "KSMClient",
     "KSMConfig",
+    "KSMContentSecurityError",
     "KSMError",
     "LockOrderRequest",
     "OrderDetail",

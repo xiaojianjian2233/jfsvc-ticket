@@ -162,6 +162,51 @@ def test_supplementing_and_unanswered_closed_hubs_are_not_eligible(
     assert candidate_is_eligible(db_session, closed) is False
 
 
+def test_supplementing_only_hub_is_eligible_and_reactivated(db_session: Session) -> None:
+    _source(db_session)
+    old = _ticket(
+        db_session,
+        15,
+        status="supplementing",
+        process_stage="完成",
+        cached_reply_content="请补充问题截图",
+    )
+    hub = _hub(db_session, old, status="supplementing", op_status="supplementing")
+    new = _ticket(db_session, 16, status="received")
+
+    assert candidate_is_eligible(db_session, hub) is True
+    result = attach_duplicate_ticket(db_session, new, hub, matched_score=1.0)
+    db_session.flush()
+
+    assert result.queued_return is False
+    assert hub.status == "processing"
+    assert hub.op_status == "processing"
+    assert hub.ticket_id == new.id
+    assert new.status == "processing"
+    assert new.process_stage == "服务处理"
+    assert new.cached_reply_content is None
+    assert old.status == "supplementing"
+    assert old.cached_reply_content == "请补充问题截图"
+
+
+def test_inactive_ticket_history_reactivates_even_if_hub_status_is_stale(
+    db_session: Session,
+) -> None:
+    _source(db_session)
+    old = _ticket(db_session, 17, status="transferred_return", process_stage="完成")
+    hub = _hub(db_session, old, status="closed", op_status="closed")
+    new = _ticket(db_session, 18, status="received")
+
+    assert candidate_is_eligible(db_session, hub) is True
+    attach_duplicate_ticket(db_session, new, hub, matched_score=1.0)
+    db_session.flush()
+
+    assert hub.status == "processing"
+    assert hub.op_status == "processing"
+    assert new.status == "processing"
+    assert old.status == "transferred_return"
+
+
 def test_completed_dev_hub_reopens_and_archives_old_linear_cycle(
     db_session: Session,
 ) -> None:
@@ -221,7 +266,7 @@ def test_completed_dev_hub_reopens_and_archives_old_linear_cycle(
     assert old.process_stage == old_stage
 
 
-def test_returned_hub_auto_returns_new_duplicate_with_same_note(db_session: Session) -> None:
+def test_returned_only_hub_reactivates_for_new_duplicate(db_session: Session) -> None:
     _source(db_session)
     old = _ticket(
         db_session,
@@ -253,12 +298,13 @@ def test_returned_hub_auto_returns_new_duplicate_with_same_note(db_session: Sess
     result = attach_duplicate_ticket(db_session, new, hub, matched_score=1.0)
     db_session.flush()
 
-    assert result.queued_return is True
-    assert new.status == "transferred_return"
-    assert new.process_stage == "完成"
-    pending = (
-        db_session.query(SyncOutbox)
-        .filter_by(ticket_id=new.id, kind="return", status="pending")
-        .one()
-    )
-    assert pending.payload["deal_opinion"] == "请转其他模块处理"
+    assert result.queued_return is False
+    assert hub.status == "processing"
+    assert hub.op_status == "processing"
+    assert hub.ticket_id == new.id
+    assert new.status == "processing"
+    assert new.process_stage == "服务处理"
+    assert new.cached_reply_content is None
+    assert old.status == "transferred_return"
+    assert old.cached_reply_content == "请转其他模块处理"
+    assert db_session.query(SyncOutbox).filter_by(ticket_id=new.id).count() == 0
