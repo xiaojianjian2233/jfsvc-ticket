@@ -10,7 +10,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, deleteByPath, getByPath, patchByPath, postByPath, rawRequest } from "@/api/client";
 import { currentRole, currentUserId, isSupervisor } from "@/api/auth";
 import { HUB_TYPES, HUB_TYPE_LABELS } from "@/api/hubTypes";
@@ -740,13 +740,12 @@ export function TicketDetailPage() {
     (isSupervisor() ||
       (d?.handler_user_id != null && currentUserId() === d.handler_user_id));
 
-  // 子工单列表查询（与 SubTicketList 共享缓存）
-  const childResults = useQueries({
-    queries: (d?.children_ticket_ids ?? []).map((cid) => ({
-      queryKey: ["ticket-detail", cid],
-      queryFn: () => getByPath("/api/tickets/{ticket_id}", { ticket_id: cid }),
-      staleTime: 30_000,
-    })),
+  // 当前工单关联的全部 Hub。与 SubTicketList 使用同一 queryKey，共享缓存；这里用于
+  // 工单基础信息的责任人并集，以及主 Hub 行的责任人姓名，避免误读 Ticket 的单值责任人。
+  const hubTasks = useQuery({
+    queryKey: ["ticket-subtasks", id],
+    queryFn: () => getByPath("/api/tickets/{ticket_id}/subtasks", { ticket_id: id }),
+    enabled: !Number.isNaN(id) && detail.isSuccess,
   });
 
   // 各子任务解决方案覆盖映射（提交答复时由处理说明解析会写）
@@ -754,50 +753,33 @@ export function TicketDetailPage() {
     Record<string | number, string>
   >({});
 
-  // 产研责任人：所有任务对应的产研人员并集，多个用英文逗号隔开，一行显示不换行
+  // 产研责任人：严格按 Hub 子任务从上到下汇总责任田责任人，去重后用英文逗号分隔。
+  // 有 Hub 数据时不得混入 Ticket.assigned_user_name（它只是单值快照，且可能属于另一 Hub）。
   const devOwners = useMemo(() => {
     const set = new Set<string>();
-    // 1. hub issue 默认研发负责人
-    if ((hub.data as any)?.default_assignee_name?.trim()) {
-      set.add(String((hub.data as any).default_assignee_name).trim());
+    const tasks = hubTasks.data ?? [];
+    for (const task of tasks) {
+      const name = task.assigned_user_name?.trim();
+      if (name) set.add(name);
     }
-    // 2. 主工单若为研发类且有处理人/研发责任人
-    if (isDevType && d?.assigned_user_name?.trim()) {
-      set.add(d.assigned_user_name.trim());
-    }
-    if ((d as any)?.dev_assignee_name?.trim()) {
-      set.add(String((d as any).dev_assignee_name).trim());
-    }
-    if ((d as any)?.rd_owner_name?.trim()) {
-      set.add(String((d as any).rd_owner_name).trim());
-    }
-    // 3. 子任务列表中的研发人员
-    childResults.forEach((r) => {
-      const c = r.data;
-      if (!c) return;
-      const cIsDev = c.predicted_type === "Bug_fix" || c.predicted_type === "Demand";
-      if (cIsDev && c.assigned_user_name?.trim()) {
-        set.add(c.assigned_user_name.trim());
+
+    // 尚未生成 Hub 的历史/待分类工单保留旧字段兜底；一旦存在 Hub，责任人只认 Hub。
+    if (tasks.length === 0) {
+      if ((hub.data as any)?.default_assignee_name?.trim()) {
+        set.add(String((hub.data as any).default_assignee_name).trim());
       }
-      if ((c as any)?.dev_assignee_name?.trim()) {
-        set.add(String((c as any).dev_assignee_name).trim());
+      if ((d as any)?.dev_assignee_name?.trim()) {
+        set.add(String((d as any).dev_assignee_name).trim());
       }
-      if ((c as any)?.rd_owner_name?.trim()) {
-        set.add(String((c as any).rd_owner_name).trim());
+      if ((d as any)?.rd_owner_name?.trim()) {
+        set.add(String((d as any).rd_owner_name).trim());
       }
-    });
-    // 4. hub sub_issues
-    const subIssues = (hub.data as any)?.sub_issues;
-    if (Array.isArray(subIssues)) {
-      subIssues.forEach((si: any) => {
-        if (si?.assignee_name?.trim()) {
-          set.add(String(si.assignee_name).trim());
-        }
-      });
     }
     const arr = Array.from(set).filter(Boolean);
     return arr.length > 0 ? arr.join(", ") : "—";
-  }, [hub.data, isDevType, d, childResults]);
+  }, [hubTasks.data, hub.data, d]);
+
+  const primaryHubTask = (hubTasks.data ?? []).find((task) => task.id === hubId);
 
   return (
     <div className="font-hub text-hub-text text-[13px] -m-6 min-h-full bg-hub-page pb-10 overscroll-y-none">
@@ -1535,7 +1517,6 @@ export function TicketDetailPage() {
                     <SubTicketList
                       ticketId={d.id}
                       ticketContent={d.body || d.title || ""}
-                      devOwners={devOwners}
                       ticketHandlerName={d.handler_user_name}
                       childIds={d.children_ticket_ids ?? []}
                       drafts={subDrafts}
@@ -1587,8 +1568,9 @@ export function TicketDetailPage() {
                           hub.data?.product_line_code || d.product_line_code || "",
                         module: hub.data?.module || d.module || "",
                         status: hub.data?.status ?? d.status,
-                        assigned_user_name: d.assigned_user_name,
-                        assigned_user_id: hub.data?.assigned_user_id ?? d.assigned_user_id,
+                        assigned_user_name: primaryHubTask?.assigned_user_name ?? null,
+                        assigned_user_id:
+                          primaryHubTask?.assigned_user_id ?? hub.data?.assigned_user_id ?? null,
                         cached_reply_content: extractPureSolution(
                           hub.data?.reply_is_draft && isDevType
                             ? d.cached_reply_content
@@ -3111,7 +3093,6 @@ export interface SubTaskSummaryItem {
 function SubTicketList({
   ticketId,
   ticketContent,
-  devOwners,
   ticketHandlerName,
   childIds = [],
   drafts,
@@ -3133,7 +3114,6 @@ function SubTicketList({
 }: {
   ticketId?: number;
   ticketContent?: string;
-  devOwners?: string;
   ticketHandlerName?: string | null;
   childIds: number[];
   drafts: { title: string; type: string; product_line?: string; module?: string }[];
@@ -4381,7 +4361,7 @@ function SubTicketList({
               const currentAssigneeName =
                 st.assigned_user_name ??
                 self.assigned_user_name ??
-                (self.assigned_user_id ? `#${self.assigned_user_id}` : devOwners || "—");
+                (self.assigned_user_id ? `#${self.assigned_user_id}` : "—");
               const plName =
                 productLineOptions.find((p) => p.code === st.product_line_code)?.name ||
                 st.product_line_code ||
@@ -4745,7 +4725,7 @@ function SubTicketList({
               const currentAssigneeName =
                 st.assigned_user_name ??
                 stk.assigned_user_name ??
-                (stk.assigned_user_id ? `#${stk.assigned_user_id}` : devOwners || "—");
+                (stk.assigned_user_id ? `#${stk.assigned_user_id}` : "—");
               const plName =
                 productLineOptions.find((p) => p.code === st.product_line_code)?.name ||
                 st.product_line_code ||
@@ -5108,7 +5088,7 @@ function SubTicketList({
               const isRowLocked = isDevTransferred && isDev;
               const currentAssigneeName =
                 st.assigned_user_name ??
-                (st.assigned_user_id ? `#${st.assigned_user_id}` : devOwners || "—");
+                (st.assigned_user_id ? `#${st.assigned_user_id}` : "—");
               const plName =
                 productLineOptions.find((p) => p.code === st.product_line_code)?.name ||
                 st.product_line_code ||

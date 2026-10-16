@@ -261,3 +261,56 @@ def test_update_subtask_matches_owner_for_operation_type(
 
     subtask_world.refresh(hub)
     assert hub.assigned_user_id == 10
+
+
+def test_updating_child_hub_owner_does_not_overwrite_primary_ticket_owner(
+    app_client: TestClient, subtask_world: Session
+) -> None:
+    """多 Hub 工单保存子任务时，仅主 Hub 可镜像 Ticket 的单值责任人。"""
+    from app.models import Module
+
+    primary = HubIssue(
+        ticket_id=100,
+        short_code="HUB-PRIMARY",
+        type="Demand",
+        title="主任务",
+        assigned_user_id=10,
+        status="processing",
+    )
+    child = HubIssue(
+        ticket_id=100,
+        short_code="HUB-CHILD",
+        type="Demand",
+        title="子任务",
+        assigned_user_id=10,
+        status="draft",
+    )
+    subtask_world.add_all([primary, child])
+    subtask_world.flush()
+    ticket = subtask_world.get(Ticket, 100)
+    assert ticket is not None
+    ticket.hub_issue_id = primary.id
+    ticket.assigned_user_id = 10
+    subtask_world.add(
+        Module(
+            product_line_code="PROLINE-TEST",
+            name="子任务模块",
+            dev_owners="carol",
+            status="enabled",
+            is_active=True,
+        )
+    )
+    subtask_world.commit()
+
+    resp = app_client.patch(
+        f"/api/hub-issues/{child.id}/subtask",
+        json={"product_line_code": "PROLINE-TEST", "module": "子任务模块"},
+        headers=_bearer(2),
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["assigned_user_id"] == 2
+    subtask_world.refresh(child)
+    subtask_world.refresh(ticket)
+    assert child.assigned_user_id == 2
+    assert ticket.assigned_user_id == 10

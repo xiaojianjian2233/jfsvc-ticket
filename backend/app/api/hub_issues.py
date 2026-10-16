@@ -1427,9 +1427,11 @@ def update_subtask_endpoint(
                     ticket.product_line_code = body.product_line_code
                 if body.module is not None:
                     ticket.module = body.module
-        if (
-            ticket.hub_issue_id == hub.id or hub.ticket_id == ticket.id
-        ) and hub.assigned_user_id is not None:
+        # Ticket 只能镜像其“主 Hub”的责任人。一个工单拆出多个 Hub 后，每个 Hub
+        # 都通过 hub.ticket_id 指回同一 Ticket；若子 Hub 也覆盖 Ticket.assigned_user_id，
+        # 依次保存子任务时主工单责任人会被最后一条子任务污染。多 Hub 的责任人并集
+        # 由详情接口返回的子任务列表在展示层汇总，不能压缩进这个单值字段。
+        if ticket.hub_issue_id == hub.id and hub.assigned_user_id is not None:
             ticket.assigned_user_id = hub.assigned_user_id
         # 8) & 9) 飞书工单补充完整产品分类、问题模块且匹配到研发责任田责任人后，自动转产研并更新处理环节为「产研处理」
         if ticket.source_code == "feishu_ai" and ticket.assigned_user_id is not None:

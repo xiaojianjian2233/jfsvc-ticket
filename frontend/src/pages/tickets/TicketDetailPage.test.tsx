@@ -1873,7 +1873,7 @@ describe("TicketDetailPage 出站回写失败横幅", () => {
       );
 
       expect(await screen.findByLabelText("处理环节：服务处理")).toBeInTheDocument();
-      expect(await screen.findByText("待完善的需求任务")).toBeInTheDocument();
+      expect((await screen.findAllByText("待完善的需求任务")).length).toBeGreaterThan(0);
       const transferDevBtn = screen.getByRole("button", { name: "转产研" });
 
       // 点击【转产研】
@@ -1962,6 +1962,74 @@ describe("TicketDetailPage 出站回写失败横幅", () => {
       expect(await screen.findByRole("columnheader", { name: "责任田责任人" })).toBeInTheDocument();
       expect(screen.queryByRole("columnheader", { name: "责任田人" })).not.toBeInTheDocument();
       expect(screen.queryByRole("columnheader", { name: "任务处理人" })).not.toBeInTheDocument();
+    });
+
+    it("多 Hub 工单按任务显示各自责任人，基础信息按行顺序去重汇总", async () => {
+      renderTicket(
+        {
+          id: 6685,
+          hub_issue_id: 1227,
+          status: "processing",
+          predicted_type: "Demand",
+          assigned_user_id: 22,
+          assigned_user_name: "池宇",
+        },
+        {
+          id: 1227,
+          short_code: "HUB-001210",
+          title: "主任务",
+          type: "Demand",
+          status: "processing",
+          assigned_user_id: 16,
+        },
+        undefined,
+        [
+          {
+            id: 1227,
+            short_code: "HUB-001210",
+            title: "主任务",
+            type: "Demand",
+            status: "processing",
+            assigned_user_id: 16,
+            assigned_user_name: "梁瑞然",
+          },
+          {
+            id: 4455,
+            short_code: "HUB-004455",
+            title: "子任务一",
+            type: "Demand",
+            status: "processing",
+            assigned_user_id: 89,
+            assigned_user_name: "黄潮鑫",
+          },
+          {
+            id: 4456,
+            short_code: "HUB-004456",
+            title: "子任务二",
+            type: "Demand",
+            status: "processing",
+            assigned_user_id: 22,
+            assigned_user_name: "池宇",
+          },
+          {
+            id: 4457,
+            short_code: "HUB-004457",
+            title: "子任务三",
+            type: "Demand",
+            status: "processing",
+            assigned_user_id: 16,
+            assigned_user_name: "梁瑞然",
+          },
+        ],
+      );
+
+      const mainRow = (await screen.findByText("HUB-001210")).closest("tr");
+      expect(mainRow).not.toBeNull();
+      expect(within(mainRow as HTMLElement).getByText("梁瑞然")).toBeInTheDocument();
+      expect(within(mainRow as HTMLElement).queryByText("池宇")).not.toBeInTheDocument();
+
+      const ownerUnion = await screen.findByText("梁瑞然, 黄潮鑫, 池宇");
+      expect(ownerUnion).toHaveAttribute("title", "梁瑞然, 黄潮鑫, 池宇");
     });
 
     it("维护知识库抽屉中点击【仅作答】按钮，内容回写至任务处理说明且不向知识库发送新增请求", async () => {
