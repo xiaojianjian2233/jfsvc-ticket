@@ -1018,9 +1018,10 @@ export function TicketDetailPage() {
                             (t) => t.status !== "processing" && t.status !== "closed",
                           );
                           const updatedSolMap: Record<string | number, string> = {};
+                          let hasPrimaryHub = Boolean(hub.data?.id ?? d.hub_issue_id);
                           try {
                             for (const t of unpushedTasks) {
-                              const targetHubId =
+                              let targetHubId =
                                 typeof t.key === "number"
                                   ? t.key
                                   : t.key === "self"
@@ -1038,7 +1039,39 @@ export function TicketDetailPage() {
                               const solWithFeedback = `【沟通记录】${communicationNote}\n【产研反馈】：${fbVal}`;
                               updatedSolMap[t.key] = solWithFeedback;
 
-                              if (!targetHubId) continue;
+                              // 低置信度工单可能尚未自动毕业 Hub。转产研时先把页面已
+                              // 确认的主任务真实落库，再继续保存说明和推送 Linear。
+                              // 任何一步失败都会进入 catch，不能再静默跳过并显示成功。
+                              if (!targetHubId) {
+                                if (!ticketId) {
+                                  throw new Error("工单编号为空，无法创建转产研任务");
+                                }
+                                const primaryForTransfer = !hasPrimaryHub;
+                                const created: any = await postByPath(
+                                  "/api/tickets/{ticket_id}/subtasks",
+                                  { ticket_id: ticketId },
+                                  {
+                                    title: t.title || d.title || "转产研任务",
+                                    type: t.type,
+                                    product_line_code: t.product_line_code,
+                                    module: t.module,
+                                    solution: solToSave,
+                                    assigned_user_id: t.assigned_user_id ?? null,
+                                    primary_for_transfer: primaryForTransfer,
+                                  },
+                                );
+                                targetHubId = Number(created?.id);
+                                if (!Number.isFinite(targetHubId) || targetHubId <= 0) {
+                                  throw new Error("Hub 创建失败，请刷新页面后重试");
+                                }
+                                if (primaryForTransfer) hasPrimaryHub = true;
+                                t.hub_id = targetHubId;
+                                if (created?.short_code) t.code = created.short_code;
+                                if (created?.assigned_user_id != null) {
+                                  t.assigned_user_id = created.assigned_user_id;
+                                  t.assigned_user_name = created.assigned_user_name ?? null;
+                                }
+                              }
 
                               // 1. 确保最新方案说明保存到 DB
                               await patchByPath(
@@ -3696,7 +3729,10 @@ function SubTicketList({
           ? overridePatch.type
           : st.type || self.predicted_type || "";
       const isDev = isDemandOrBug(taskType);
-      let effStatus = st.status ?? (st.confirmed ? "processing" : (self.status || "draft"));
+      // 未生成 Hub 时 self.status 是工单状态（通常为 processing），不能把它
+      // 误当成研发任务已在处理中，否则转产研会跳过真实创建与推送。
+      let effStatus =
+        st.status ?? (st.confirmed ? "processing" : (self.hub_id ? self.status || "draft" : "draft"));
       if (isDevTransferred && isDev && effStatus !== "dev_returned") {
         effStatus = "processing";
       }
@@ -3807,7 +3843,8 @@ function SubTicketList({
       const isOp = st.type === "Operation" || self.predicted_type === "Operation";
       let effStatus = isOpCompleted && isOp
         ? "completed"
-        : (st.status ?? (st.confirmed ? "processing" : (self.status || "draft")));
+        : (st.status ??
+          (st.confirmed ? "processing" : (self.hub_id ? self.status || "draft" : "draft")));
       if (isDevTransferred && isDev) {
         effStatus = "processing";
       }
@@ -4352,7 +4389,8 @@ function SubTicketList({
               const isOp = st.type === "Operation" || self.predicted_type === "Operation";
               let effStatus = isOpCompleted && isOp
                 ? "completed"
-                : (st.status ?? (st.confirmed ? "processing" : (self.status || "draft")));
+                : (st.status ??
+                  (st.confirmed ? "processing" : (self.hub_id ? self.status || "draft" : "draft")));
               if (isDevTransferred && isDev && effStatus !== "dev_returned") {
                 effStatus = "processing";
               }

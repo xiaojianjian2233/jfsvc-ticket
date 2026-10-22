@@ -545,6 +545,22 @@
         "title": "AuthorReplyResponse",
         "type": "object"
       },
+      "BatchNoticeIdsBody": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "BatchNoticeIdsBody",
+        "type": "object"
+      },
       "BatchRemoveAgentsBody": {
         "properties": {
           "agent_ids": {
@@ -680,6 +696,253 @@
         "title": "BatchSupplyResponse",
         "type": "object"
       },
+      "BotAgentProfile": {
+        "properties": {
+          "agent_type": {
+            "default": "normal",
+            "title": "Agent Type",
+            "type": "string"
+          },
+          "avatar": {
+            "default": "🤖",
+            "title": "Avatar",
+            "type": "string"
+          },
+          "code": {
+            "default": "",
+            "title": "Code",
+            "type": "string"
+          },
+          "created_at": {
+            "default": "",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "default": "系统管理员",
+            "title": "Created By",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_enabled": {
+            "default": true,
+            "title": "Is Enabled",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "product_lines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Product Lines",
+            "type": "array"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Skills",
+            "type": "array"
+          },
+          "source_channels": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Channels",
+            "type": "array"
+          },
+          "support_transfer_human": {
+            "default": true,
+            "title": "Support Transfer Human",
+            "type": "boolean"
+          },
+          "system_prompt": {
+            "default": "你是一名专业的发票云技术支持专家，请热情、专业、准确地解答用户的问题。",
+            "title": "System Prompt",
+            "type": "string"
+          },
+          "temperature": {
+            "default": 0.3,
+            "title": "Temperature",
+            "type": "number"
+          },
+          "transfer_human_rule": {
+            "default": "客户回复未解决且在人工工作时间有空闲坐席时触发转人工",
+            "title": "Transfer Human Rule",
+            "type": "string"
+          },
+          "unresolved_prompt": {
+            "default": "很抱歉没能彻底解决您的问题。",
+            "title": "Unresolved Prompt",
+            "type": "string"
+          },
+          "updated_at": {
+            "default": "",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "webhook_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Webhook Url"
+          },
+          "welcome_message": {
+            "default": "您好！我是智能小助手，请问有什么可以帮您？",
+            "title": "Welcome Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "BotAgentProfile",
+        "type": "object"
+      },
+      "BotConfigData": {
+        "properties": {
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/BotAgentProfile"
+            },
+            "title": "Agents",
+            "type": "array"
+          },
+          "default_agent_id": {
+            "default": "agent-general",
+            "title": "Default Agent Id",
+            "type": "string"
+          },
+          "escalation_strategy": {
+            "$ref": "#/components/schemas/BotEscalationStrategy"
+          },
+          "routing_rules": {
+            "items": {
+              "$ref": "#/components/schemas/BotRoutingRule"
+            },
+            "title": "Routing Rules",
+            "type": "array"
+          }
+        },
+        "title": "BotConfigData",
+        "type": "object"
+      },
+      "BotEscalationStrategy": {
+        "properties": {
+          "ask_transfer_text": {
+            "default": "很抱歉没能解决您的问题。当前有在线专业人工客服，是否为您转接人工坐席？",
+            "title": "Ask Transfer Text",
+            "type": "string"
+          },
+          "enable_agent_reception": {
+            "default": true,
+            "title": "Enable Agent Reception",
+            "type": "boolean"
+          },
+          "no_human_guide_text": {
+            "default": "当前人工坐席均在忙碌中或已下班，建议您直接提交售后工单，我们将由技术专家加急排查并在第一时间答复您！",
+            "title": "No Human Guide Text",
+            "type": "string"
+          },
+          "probe_human_agents": {
+            "default": true,
+            "title": "Probe Human Agents",
+            "type": "boolean"
+          },
+          "probe_working_hours": {
+            "default": true,
+            "title": "Probe Working Hours",
+            "type": "boolean"
+          },
+          "show_ticket_button": {
+            "default": true,
+            "title": "Show Ticket Button",
+            "type": "boolean"
+          }
+        },
+        "title": "BotEscalationStrategy",
+        "type": "object"
+      },
+      "BotRoutingCondition": {
+        "properties": {
+          "company_keywords": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Company Keywords",
+            "type": "array"
+          },
+          "match_mode": {
+            "default": "any",
+            "title": "Match Mode",
+            "type": "string"
+          },
+          "message_keywords": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Message Keywords",
+            "type": "array"
+          },
+          "product_keywords": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Product Keywords",
+            "type": "array"
+          }
+        },
+        "title": "BotRoutingCondition",
+        "type": "object"
+      },
+      "BotRoutingRule": {
+        "properties": {
+          "conditions": {
+            "$ref": "#/components/schemas/BotRoutingCondition"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_enabled": {
+            "default": true,
+            "title": "Is Enabled",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "target_agent_id": {
+            "title": "Target Agent Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "target_agent_id"
+        ],
+        "title": "BotRoutingRule",
+        "type": "object"
+      },
       "CatalogModuleOut": {
         "properties": {
           "code": {
@@ -758,6 +1021,559 @@
           "type"
         ],
         "title": "ClassificationActionResponse",
+        "type": "object"
+      },
+      "ClientEvaluateRequest": {
+        "properties": {
+          "comment": {
+            "default": "",
+            "title": "Comment",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "score"
+        ],
+        "title": "ClientEvaluateRequest",
+        "type": "object"
+      },
+      "ClientInitSessionRequest": {
+        "properties": {
+          "company_name": {
+            "title": "Company Name",
+            "type": "string"
+          },
+          "contact_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Name"
+          },
+          "contact_phone": {
+            "title": "Contact Phone",
+            "type": "string"
+          },
+          "is_historical": {
+            "default": false,
+            "title": "Is Historical",
+            "type": "boolean"
+          },
+          "purchased_products": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Purchased Products",
+            "type": "array"
+          },
+          "tax_no": {
+            "title": "Tax No",
+            "type": "string"
+          },
+          "tenant_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Name"
+          },
+          "tenant_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant No"
+          }
+        },
+        "required": [
+          "contact_phone",
+          "company_name",
+          "tax_no"
+        ],
+        "title": "ClientInitSessionRequest",
+        "type": "object"
+      },
+      "ClientLookupCompany": {
+        "properties": {
+          "company_name": {
+            "title": "Company Name",
+            "type": "string"
+          },
+          "contact_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Name"
+          },
+          "purchased_products": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Purchased Products",
+            "type": "array"
+          },
+          "tax_no": {
+            "title": "Tax No",
+            "type": "string"
+          },
+          "tenant_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Name"
+          },
+          "tenant_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant No"
+          }
+        },
+        "required": [
+          "company_name",
+          "tax_no"
+        ],
+        "title": "ClientLookupCompany",
+        "type": "object"
+      },
+      "ClientLookupPhoneResponse": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "exists": {
+            "title": "Exists",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ClientLookupCompany"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "phone": {
+            "title": "Phone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phone",
+          "exists",
+          "count",
+          "items"
+        ],
+        "title": "ClientLookupPhoneResponse",
+        "type": "object"
+      },
+      "ClientNoticeOut": {
+        "properties": {
+          "category": {
+            "default": "系统通知",
+            "title": "Category",
+            "type": "string"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_important": {
+            "default": false,
+            "title": "Is Important",
+            "type": "boolean"
+          },
+          "popup_prompt": {
+            "default": true,
+            "title": "Popup Prompt",
+            "type": "boolean"
+          },
+          "publish_time": {
+            "title": "Publish Time",
+            "type": "string"
+          },
+          "publisher": {
+            "default": "金蝶发票云服务团队",
+            "title": "Publisher",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "content",
+          "publish_time"
+        ],
+        "title": "ClientNoticeOut",
+        "type": "object"
+      },
+      "ClientSendMessageRequest": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "sender_name": {
+            "default": "客户",
+            "title": "Sender Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "ClientSendMessageRequest",
+        "type": "object"
+      },
+      "ClientSubmitTicketRequest": {
+        "properties": {
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "contact_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Name"
+          },
+          "contact_phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Phone"
+          },
+          "description": {
+            "minLength": 5,
+            "title": "Description",
+            "type": "string"
+          },
+          "tax_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax No"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 2,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "description"
+        ],
+        "title": "ClientSubmitTicketRequest",
+        "type": "object"
+      },
+      "ClientTicketConfirmRequest": {
+        "properties": {
+          "action": {
+            "pattern": "^(confirm|return)$",
+            "title": "Action",
+            "type": "string"
+          },
+          "phone": {
+            "minLength": 5,
+            "title": "Phone",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "phone",
+          "action"
+        ],
+        "title": "ClientTicketConfirmRequest",
+        "type": "object"
+      },
+      "ClientTicketConfirmResponse": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "status",
+          "message"
+        ],
+        "title": "ClientTicketConfirmResponse",
+        "type": "object"
+      },
+      "ClientTicketOut": {
+        "properties": {
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          },
+          "client_category": {
+            "title": "Client Category",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "handler_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Handler Name"
+          },
+          "hours_since_created": {
+            "title": "Hours Since Created",
+            "type": "number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "process_stage": {
+            "title": "Process Stage",
+            "type": "string"
+          },
+          "reply_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply At"
+          },
+          "reply_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply By"
+          },
+          "reply_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply Content"
+          },
+          "reporter_mobile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reporter Mobile"
+          },
+          "reporter_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reporter Name"
+          },
+          "short_code": {
+            "title": "Short Code",
+            "type": "string"
+          },
+          "source_code": {
+            "title": "Source Code",
+            "type": "string"
+          },
+          "source_name": {
+            "title": "Source Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "ticket_number": {
+            "title": "Ticket Number",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "short_code",
+          "ticket_number",
+          "source_code",
+          "source_name",
+          "handler_name",
+          "process_stage",
+          "status",
+          "client_category",
+          "title",
+          "created_at",
+          "hours_since_created"
+        ],
+        "title": "ClientTicketOut",
+        "type": "object"
+      },
+      "ClientTicketRemindRequest": {
+        "properties": {
+          "phone": {
+            "minLength": 5,
+            "title": "Phone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phone"
+        ],
+        "title": "ClientTicketRemindRequest",
+        "type": "object"
+      },
+      "ClientTicketRemindResponse": {
+        "properties": {
+          "hours_since_created": {
+            "title": "Hours Since Created",
+            "type": "number"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "notified": {
+            "title": "Notified",
+            "type": "boolean"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "notified",
+          "hours_since_created",
+          "message"
+        ],
+        "title": "ClientTicketRemindResponse",
         "type": "object"
       },
       "CloseComplaintBody": {
@@ -1390,6 +2206,17 @@
       },
       "CreateSubTaskBody": {
         "properties": {
+          "assigned_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned User Id"
+          },
           "module": {
             "anyOf": [
               {
@@ -1401,6 +2228,11 @@
             ],
             "title": "Module"
           },
+          "primary_for_transfer": {
+            "default": false,
+            "title": "Primary For Transfer",
+            "type": "boolean"
+          },
           "product_line_code": {
             "anyOf": [
               {
@@ -1411,6 +2243,18 @@
               }
             ],
             "title": "Product Line Code"
+          },
+          "solution": {
+            "anyOf": [
+              {
+                "maxLength": 20000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Solution"
           },
           "title": {
             "maxLength": 512,
@@ -2321,6 +3165,34 @@
         "title": "EligibleUserOut",
         "type": "object"
       },
+      "EnterpriseSearchResult": {
+        "properties": {
+          "company_name": {
+            "title": "Company Name",
+            "type": "string"
+          },
+          "legal_person": {
+            "default": "",
+            "title": "Legal Person",
+            "type": "string"
+          },
+          "status": {
+            "default": "存续",
+            "title": "Status",
+            "type": "string"
+          },
+          "tax_no": {
+            "title": "Tax No",
+            "type": "string"
+          }
+        },
+        "required": [
+          "company_name",
+          "tax_no"
+        ],
+        "title": "EnterpriseSearchResult",
+        "type": "object"
+      },
       "EscalationContextResponse": {
         "properties": {
           "ai_answer": {
@@ -2569,6 +3441,46 @@
           "child_ticket_ids"
         ],
         "title": "ExecuteSplitResponse",
+        "type": "object"
+      },
+      "ExternalLlmReplyRequest": {
+        "properties": {
+          "agent_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Code"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "sender_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender Name"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "content"
+        ],
+        "title": "ExternalLlmReplyRequest",
         "type": "object"
       },
       "FeatureIn": {
@@ -3350,6 +4262,18 @@
             ],
             "title": "Customer Verified At"
           },
+          "dev_transferred_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dev Transferred At"
+          },
           "expected_released_at": {
             "anyOf": [
               {
@@ -3622,6 +4546,17 @@
             ],
             "title": "Product Line Code"
           },
+          "product_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Name"
+          },
           "reject_count": {
             "default": 0,
             "title": "Reject Count",
@@ -3681,6 +4616,17 @@
               }
             ],
             "title": "Reply Updated At"
+          },
+          "responsible_user_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Responsible User Name"
           },
           "root_cause_analysis": {
             "anyOf": [
@@ -3806,9 +4752,9 @@
           "reply_content_version",
           "reply_updated_at",
           "feishu_task_status",
+          "reply_content",
           "canonical_body",
           "root_cause_analysis",
-          "reply_content",
           "reply_authored_by",
           "linear_uuid",
           "scheduled_iteration",
@@ -3895,6 +4841,18 @@
               }
             ],
             "title": "Closed At"
+          },
+          "dev_transferred_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dev Transferred At"
           },
           "expected_resolved_at": {
             "anyOf": [
@@ -4109,6 +5067,17 @@
               }
             ],
             "title": "Release Notified At"
+          },
+          "reply_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply Content"
           },
           "reply_content_version": {
             "title": "Reply Content Version",
@@ -4960,9 +5929,53 @@
       },
       "LinkedTicket": {
         "properties": {
+          "assigned_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned User Id"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          },
+          "handler_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Handler User Id"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "process_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Process Stage"
           },
           "short_code": {
             "title": "Short Code",
@@ -4990,9 +6003,31 @@
             ],
             "title": "Source Ticket Id"
           },
+          "source_ticket_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Ticket Number"
+          },
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
           }
         },
         "required": [
@@ -5435,6 +6470,185 @@
           "created_at"
         ],
         "title": "ModuleScopeOut",
+        "type": "object"
+      },
+      "NoticeCreateBody": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "end_date": {
+            "title": "End Date",
+            "type": "string"
+          },
+          "popup_prompt": {
+            "default": true,
+            "title": "Popup Prompt",
+            "type": "boolean"
+          },
+          "start_date": {
+            "title": "Start Date",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 50,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "start_date",
+          "end_date",
+          "content"
+        ],
+        "title": "NoticeCreateBody",
+        "type": "object"
+      },
+      "NoticeItemOut": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "effective_status": {
+            "title": "Effective Status",
+            "type": "string"
+          },
+          "end_date": {
+            "title": "End Date",
+            "type": "string"
+          },
+          "end_time": {
+            "title": "End Time",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "notice_no": {
+            "title": "Notice No",
+            "type": "string"
+          },
+          "popup_prompt": {
+            "title": "Popup Prompt",
+            "type": "boolean"
+          },
+          "start_date": {
+            "title": "Start Date",
+            "type": "string"
+          },
+          "start_time": {
+            "title": "Start Time",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "updated_by": {
+            "title": "Updated By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "notice_no",
+          "title",
+          "content",
+          "start_time",
+          "end_time",
+          "start_date",
+          "end_date",
+          "popup_prompt",
+          "status",
+          "effective_status",
+          "created_by",
+          "created_at",
+          "updated_by",
+          "updated_at"
+        ],
+        "title": "NoticeItemOut",
+        "type": "object"
+      },
+      "NoticeUpdateBody": {
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Date"
+          },
+          "popup_prompt": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Popup Prompt"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "NoticeUpdateBody",
         "type": "object"
       },
       "NotifyReleaseBody": {
@@ -5948,6 +7162,44 @@
           "items"
         ],
         "title": "PendingLinearReviewResponse",
+        "type": "object"
+      },
+      "ProbeCapacityResponse": {
+        "properties": {
+          "action_type": {
+            "title": "Action Type",
+            "type": "string"
+          },
+          "can_transfer_human": {
+            "title": "Can Transfer Human",
+            "type": "boolean"
+          },
+          "idle_capacity": {
+            "title": "Idle Capacity",
+            "type": "integer"
+          },
+          "in_working_hours": {
+            "title": "In Working Hours",
+            "type": "boolean"
+          },
+          "online_agent_count": {
+            "title": "Online Agent Count",
+            "type": "integer"
+          },
+          "prompt_text": {
+            "title": "Prompt Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "can_transfer_human",
+          "in_working_hours",
+          "online_agent_count",
+          "idle_capacity",
+          "action_type",
+          "prompt_text"
+        ],
+        "title": "ProbeCapacityResponse",
         "type": "object"
       },
       "ProductLineIn": {
@@ -7427,6 +8679,17 @@
             ],
             "title": "Agent User Id"
           },
+          "ai_agent_cid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Agent Cid"
+          },
           "closed_at": {
             "anyOf": [
               {
@@ -8721,6 +9984,50 @@
           "total_processed"
         ],
         "title": "SyncReportOut",
+        "type": "object"
+      },
+      "TenantProfileRequest": {
+        "properties": {
+          "company_name": {
+            "title": "Company Name",
+            "type": "string"
+          },
+          "tax_no": {
+            "title": "Tax No",
+            "type": "string"
+          }
+        },
+        "required": [
+          "company_name",
+          "tax_no"
+        ],
+        "title": "TenantProfileRequest",
+        "type": "object"
+      },
+      "TenantProfileResponse": {
+        "properties": {
+          "purchased_products": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Purchased Products",
+            "type": "array"
+          },
+          "tenant_name": {
+            "title": "Tenant Name",
+            "type": "string"
+          },
+          "tenant_no": {
+            "title": "Tenant No",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tenant_no",
+          "tenant_name",
+          "purchased_products"
+        ],
+        "title": "TenantProfileResponse",
         "type": "object"
       },
       "TicketAnalyticsOut": {
@@ -10647,6 +11954,17 @@
       },
       "UpdateSubTaskBody": {
         "properties": {
+          "assigned_user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned User Id"
+          },
           "module": {
             "anyOf": [
               {
@@ -16470,6 +17788,50 @@
         ]
       }
     },
+    "/api/reception/agent/external-message": {
+      "post": {
+        "description": "接收第三方大模型异步调用回调推送的消息，并存入会话展示给客户。",
+        "operationId": "webhook_external_llm_reply_api_reception_agent_external_message_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalLlmReplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Webhook External Llm Reply Api Reception Agent External Message Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Webhook External Llm Reply",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
     "/api/reception/agents": {
       "get": {
         "description": "获取坐席列表，支持姓名、昵称、多状态过滤。",
@@ -16695,9 +18057,894 @@
         ]
       }
     },
+    "/api/reception/bot-config": {
+      "get": {
+        "description": "获取在线智能接待 Agent 档案、分流规则与转人工策略配置。",
+        "operationId": "get_bot_config_api_reception_bot_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotConfigData"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Bot Config",
+        "tags": [
+          "reception"
+        ]
+      },
+      "put": {
+        "description": "更新在线智能接待 Agent 档案、分流规则与转人工策略配置。",
+        "operationId": "update_bot_config_api_reception_bot_config_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotConfigData"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotConfigData"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Bot Config",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/client/fetch-tenant-profile": {
+      "post": {
+        "operationId": "client_fetch_tenant_profile_api_reception_client_fetch_tenant_profile_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TenantProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Client Fetch Tenant Profile",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/client/init-session": {
+      "post": {
+        "description": "客户信息提交与会话初始化",
+        "operationId": "client_init_session_api_reception_client_init_session_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientInitSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Client Init Session",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/client/lookup-phone": {
+      "get": {
+        "description": "根据手机号检索历史去重企业列表及租户/产品信息",
+        "operationId": "client_lookup_phone_api_reception_client_lookup_phone_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "phone",
+            "required": true,
+            "schema": {
+              "maxLength": 11,
+              "minLength": 11,
+              "title": "Phone",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientLookupPhoneResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Client Lookup Phone",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/client/notices": {
+      "get": {
+        "description": "获取面向客户端的重要通知列表（从数据库拉取当前上架且在生效期内的通知）",
+        "operationId": "client_get_notices_api_reception_client_notices_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ClientNoticeOut"
+                  },
+                  "title": "Response Client Get Notices Api Reception Client Notices Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Client Get Notices",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/client/probe-human-capacity": {
+      "get": {
+        "description": "实时在岗探针：检测当前是否处于工作时段以及是否有在线空闲坐席",
+        "operationId": "client_probe_human_capacity_api_reception_client_probe_human_capacity_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProbeCapacityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Client Probe Human Capacity",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/client/search-enterprises": {
+      "get": {
+        "description": "企业名称及税号模糊联想搜索接口（优先对接发票云企业抬头真实接口）",
+        "operationId": "client_search_enterprises_api_reception_client_search_enterprises_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "keyword",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Keyword",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EnterpriseSearchResult"
+                  },
+                  "title": "Response Client Search Enterprises Api Reception Client Search Enterprises Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Client Search Enterprises",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/client/sessions": {
+      "get": {
+        "description": "查询该手机号关联的会话列表（按「24小时内未关闭」与「已结束」分组）",
+        "operationId": "client_get_sessions_api_reception_client_sessions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "phone",
+            "required": true,
+            "schema": {
+              "maxLength": 11,
+              "minLength": 11,
+              "title": "Phone",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "items": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "title": "Response Client Get Sessions Api Reception Client Sessions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Client Get Sessions",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/client/sessions/{session_id}/close": {
+      "post": {
+        "description": "客户自主点击【结束】会话",
+        "operationId": "client_close_session_api_reception_client_sessions__session_id__close_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Client Close Session Api Reception Client Sessions  Session Id  Close Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Client Close Session",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/client/sessions/{session_id}/escalate-human": {
+      "post": {
+        "description": "客户确认转接人工坐席：将会话转入人工队列并触发自动分配",
+        "operationId": "client_escalate_human_api_reception_client_sessions__session_id__escalate_human_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Client Escalate Human",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/client/sessions/{session_id}/evaluate": {
+      "post": {
+        "description": "客户对已结束的会话进行满意度评价",
+        "operationId": "client_evaluate_session_api_reception_client_sessions__session_id__evaluate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientEvaluateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Client Evaluate Session Api Reception Client Sessions  Session Id  Evaluate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Client Evaluate Session",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/client/sessions/{session_id}/messages": {
+      "get": {
+        "description": "查询指定会话的所有对话消息记录",
+        "operationId": "client_get_messages_api_reception_client_sessions__session_id__messages_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MessageOut"
+                  },
+                  "title": "Response Client Get Messages Api Reception Client Sessions  Session Id  Messages Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Client Get Messages",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/client/sessions/{session_id}/resolve": {
+      "post": {
+        "description": "客户点击【👍 已解决】按钮，自动执行会话关闭并弹出评价窗口 (对齐节点 7.1)。",
+        "operationId": "client_resolve_session_api_reception_client_sessions__session_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Client Resolve Session Api Reception Client Sessions  Session Id  Resolve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Client Resolve Session",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/client/sessions/{session_id}/send-message": {
+      "post": {
+        "description": "客户发送消息（支持文本、图片、文件）",
+        "operationId": "client_send_message_api_reception_client_sessions__session_id__send_message_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientSendMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Client Send Message",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/client/sessions/{session_id}/submit-ticket": {
+      "post": {
+        "description": "客户一键提交售后工单，真实写入 tickets 表 (对齐泳道 5)。",
+        "operationId": "client_submit_ticket_api_reception_client_sessions__session_id__submit_ticket_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientSubmitTicketRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Client Submit Ticket Api Reception Client Sessions  Session Id  Submit Ticket Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Client Submit Ticket",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/client/sessions/{session_id}/unresolved": {
+      "post": {
+        "description": "客户点击【未解决】反馈，触发在岗探针并生成相应引导卡片消息",
+        "operationId": "client_mark_unresolved_api_reception_client_sessions__session_id__unresolved_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Client Mark Unresolved Api Reception Client Sessions  Session Id  Unresolved Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Client Mark Unresolved",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/client/tickets": {
+      "get": {
+        "description": "根据咨询人手机号匹配工单列表提单人手机号，仅返回提单人手机号严格等于咨询人手机号的工单记录",
+        "operationId": "client_get_tickets_api_reception_client_tickets_get",
+        "parameters": [
+          {
+            "description": "咨询人手机号（严格匹配工单提单人手机号）",
+            "in": "query",
+            "name": "phone",
+            "required": true,
+            "schema": {
+              "description": "咨询人手机号（严格匹配工单提单人手机号）",
+              "minLength": 5,
+              "title": "Phone",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ClientTicketOut"
+                  },
+                  "title": "Response Client Get Tickets Api Reception Client Tickets Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Client Get Tickets",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/client/tickets/{ticket_id}/confirm": {
+      "post": {
+        "description": "客户查看确认接口（确认已解决或未解决退回）",
+        "operationId": "client_confirm_ticket_api_reception_client_tickets__ticket_id__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticket_id",
+            "required": true,
+            "schema": {
+              "title": "Ticket Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientTicketConfirmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientTicketConfirmResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Client Confirm Ticket",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/client/tickets/{ticket_id}/remind": {
+      "post": {
+        "description": "客户催单接口（判断提单是否满24小时，超24小时记录审计并向处理人推送催单通知）",
+        "operationId": "client_remind_ticket_api_reception_client_tickets__ticket_id__remind_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticket_id",
+            "required": true,
+            "schema": {
+              "title": "Ticket Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientTicketRemindRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientTicketRemindResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Client Remind Ticket",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
     "/api/reception/eligible-users": {
       "get": {
-        "description": "获取系统基础配置中处于启用状态的人员（已配置在坐席中的可标记或全量可选）。",
+        "description": "获取系统基础配置中处于启用状态且未在当前坐席列表中的人员。",
         "operationId": "get_eligible_users_api_reception_eligible_users_get",
         "responses": {
           "200": {
@@ -16716,6 +18963,354 @@
           }
         },
         "summary": "Get Eligible Users",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/notices": {
+      "get": {
+        "description": "获取消息通知列表，支持按状态和创建时间区间筛选，按创建时间倒序返回",
+        "operationId": "list_notices_api_reception_notices_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "statuses",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Statuses",
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End Time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NoticeItemOut"
+                  },
+                  "title": "Response List Notices Api Reception Notices Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Notices",
+        "tags": [
+          "reception"
+        ]
+      },
+      "post": {
+        "description": "新建消息通知记录",
+        "operationId": "create_notice_api_reception_notices_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoticeCreateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoticeItemOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Notice",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/notices/batch-delete": {
+      "post": {
+        "description": "批量删除已下架的消息通知（若选中的记录包含上架状态则拒绝删除）",
+        "operationId": "batch_delete_notices_api_reception_notices_batch_delete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchNoticeIdsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Batch Delete Notices Api Reception Notices Batch Delete Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Delete Notices",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/notices/batch-publish": {
+      "post": {
+        "description": "批量上架消息通知",
+        "operationId": "batch_publish_notices_api_reception_notices_batch_publish_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchNoticeIdsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Batch Publish Notices Api Reception Notices Batch Publish Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Publish Notices",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/notices/batch-unpublish": {
+      "post": {
+        "description": "批量下架消息通知",
+        "operationId": "batch_unpublish_notices_api_reception_notices_batch_unpublish_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchNoticeIdsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Batch Unpublish Notices Api Reception Notices Batch Unpublish Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Unpublish Notices",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
+    "/api/reception/notices/{notice_id}": {
+      "get": {
+        "description": "获取消息通知详情",
+        "operationId": "get_notice_detail_api_reception_notices__notice_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notice_id",
+            "required": true,
+            "schema": {
+              "title": "Notice Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoticeItemOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Notice Detail",
+        "tags": [
+          "reception"
+        ]
+      },
+      "put": {
+        "description": "编辑/更新消息通知记录",
+        "operationId": "update_notice_api_reception_notices__notice_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notice_id",
+            "required": true,
+            "schema": {
+              "title": "Notice Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoticeUpdateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoticeItemOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Notice",
         "tags": [
           "reception"
         ]
@@ -17009,6 +19604,50 @@
         ]
       }
     },
+    "/api/reception/webhook/llm-reply": {
+      "post": {
+        "description": "接收第三方大模型异步调用回调推送的消息，并存入会话展示给客户。",
+        "operationId": "webhook_external_llm_reply_api_reception_webhook_llm_reply_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalLlmReplyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Webhook External Llm Reply Api Reception Webhook Llm Reply Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Webhook External Llm Reply",
+        "tags": [
+          "reception"
+        ]
+      }
+    },
     "/api/reception/workbench/assistant-search": {
       "get": {
         "description": "坐席助手多类型快捷搜索（知识库、工单、订单、企业权益）。",
@@ -17208,7 +19847,7 @@
     },
     "/api/reception/workbench/sessions/{session_id}/close": {
       "post": {
-        "description": "【关闭】会话：发送结束通知并标记为已关闭。",
+        "description": "【结束】会话并触发空位补位分发。",
         "operationId": "close_session_api_reception_workbench_sessions__session_id__close_post",
         "parameters": [
           {
@@ -17396,8 +20035,8 @@
     },
     "/api/reception/workbench/sessions/{session_id}/transfer-ticket": {
       "post": {
-        "description": "【转工单】：创建工单并给客户自动回复工单编号。",
-        "operationId": "transfer_session_to_ticket_api_reception_workbench_sessions__session_id__transfer_ticket_post",
+        "description": "【转工单】真实在 tickets 表创建工单并完成会话转换 (对齐泳道 5)。",
+        "operationId": "convert_to_ticket_api_reception_workbench_sessions__session_id__transfer_ticket_post",
         "parameters": [
           {
             "in": "path",
@@ -17425,7 +20064,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Transfer Session To Ticket Api Reception Workbench Sessions  Session Id  Transfer Ticket Post",
+                  "title": "Response Convert To Ticket Api Reception Workbench Sessions  Session Id  Transfer Ticket Post",
                   "type": "object"
                 }
               }
@@ -17443,7 +20082,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Transfer Session To Ticket",
+        "summary": "Convert To Ticket",
         "tags": [
           "reception"
         ]
@@ -19656,7 +22295,7 @@
     },
     "/api/tickets/quick-stats": {
       "get": {
-        "description": "Counts for top quick filters, scoped only by the caller's row visibility.",
+        "description": "Counts for top quick filters.",
         "operationId": "ticket_quick_stats_api_tickets_quick_stats_get",
         "responses": {
           "200": {
@@ -19792,6 +22431,60 @@
           }
         },
         "summary": "Upload Attachment",
+        "tags": [
+          "tickets"
+        ]
+      }
+    },
+    "/api/tickets/{ticket_id}/attachments/{attachment_id}": {
+      "delete": {
+        "description": "删除工单/子任务附件，确保删除或取消上传后前后端附件数一致。",
+        "operationId": "delete_attachment_api_tickets__ticket_id__attachments__attachment_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticket_id",
+            "required": true,
+            "schema": {
+              "title": "Ticket Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attachment_id",
+            "required": true,
+            "schema": {
+              "title": "Attachment Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Attachment Api Tickets  Ticket Id  Attachments  Attachment Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Attachment",
         "tags": [
           "tickets"
         ]

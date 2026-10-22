@@ -1497,6 +1497,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/reception/agent/external-message": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Webhook External Llm Reply
+         * @description 接收第三方大模型异步调用回调推送的消息，并存入会话展示给客户。
+         */
+        post: operations["webhook_external_llm_reply_api_reception_agent_external_message_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/reception/agents": {
         parameters: {
             query?: never;
@@ -1561,6 +1581,387 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/reception/bot-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Bot Config
+         * @description 获取在线智能接待 Agent 档案、分流规则与转人工策略配置。
+         */
+        get: operations["get_bot_config_api_reception_bot_config_get"];
+        /**
+         * Update Bot Config
+         * @description 更新在线智能接待 Agent 档案、分流规则与转人工策略配置。
+         */
+        put: operations["update_bot_config_api_reception_bot_config_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/client/fetch-tenant-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Client Fetch Tenant Profile */
+        post: operations["client_fetch_tenant_profile_api_reception_client_fetch_tenant_profile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/client/init-session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Client Init Session
+         * @description 客户信息提交与会话初始化
+         */
+        post: operations["client_init_session_api_reception_client_init_session_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/client/lookup-phone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Client Lookup Phone
+         * @description 根据手机号检索历史去重企业列表及租户/产品信息
+         */
+        get: operations["client_lookup_phone_api_reception_client_lookup_phone_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/client/notices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Client Get Notices
+         * @description 获取面向客户端的重要通知列表（从数据库拉取当前上架且在生效期内的通知）
+         */
+        get: operations["client_get_notices_api_reception_client_notices_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/client/probe-human-capacity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Client Probe Human Capacity
+         * @description 实时在岗探针：检测当前是否处于工作时段以及是否有在线空闲坐席
+         */
+        get: operations["client_probe_human_capacity_api_reception_client_probe_human_capacity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/client/search-enterprises": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Client Search Enterprises
+         * @description 企业名称及税号模糊联想搜索接口（优先对接发票云企业抬头真实接口）
+         */
+        get: operations["client_search_enterprises_api_reception_client_search_enterprises_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/client/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Client Get Sessions
+         * @description 查询该手机号关联的会话列表（按「24小时内未关闭」与「已结束」分组）
+         */
+        get: operations["client_get_sessions_api_reception_client_sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/client/sessions/{session_id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Client Close Session
+         * @description 客户自主点击【结束】会话
+         */
+        post: operations["client_close_session_api_reception_client_sessions__session_id__close_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/client/sessions/{session_id}/escalate-human": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Client Escalate Human
+         * @description 客户确认转接人工坐席：将会话转入人工队列并触发自动分配
+         */
+        post: operations["client_escalate_human_api_reception_client_sessions__session_id__escalate_human_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/client/sessions/{session_id}/evaluate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Client Evaluate Session
+         * @description 客户对已结束的会话进行满意度评价
+         */
+        post: operations["client_evaluate_session_api_reception_client_sessions__session_id__evaluate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/client/sessions/{session_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Client Get Messages
+         * @description 查询指定会话的所有对话消息记录
+         */
+        get: operations["client_get_messages_api_reception_client_sessions__session_id__messages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/client/sessions/{session_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Client Resolve Session
+         * @description 客户点击【👍 已解决】按钮，自动执行会话关闭并弹出评价窗口 (对齐节点 7.1)。
+         */
+        post: operations["client_resolve_session_api_reception_client_sessions__session_id__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/client/sessions/{session_id}/send-message": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Client Send Message
+         * @description 客户发送消息（支持文本、图片、文件）
+         */
+        post: operations["client_send_message_api_reception_client_sessions__session_id__send_message_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/client/sessions/{session_id}/submit-ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Client Submit Ticket
+         * @description 客户一键提交售后工单，真实写入 tickets 表 (对齐泳道 5)。
+         */
+        post: operations["client_submit_ticket_api_reception_client_sessions__session_id__submit_ticket_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/client/sessions/{session_id}/unresolved": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Client Mark Unresolved
+         * @description 客户点击【未解决】反馈，触发在岗探针并生成相应引导卡片消息
+         */
+        post: operations["client_mark_unresolved_api_reception_client_sessions__session_id__unresolved_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/client/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Client Get Tickets
+         * @description 根据咨询人手机号匹配工单列表提单人手机号，仅返回提单人手机号严格等于咨询人手机号的工单记录
+         */
+        get: operations["client_get_tickets_api_reception_client_tickets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/client/tickets/{ticket_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Client Confirm Ticket
+         * @description 客户查看确认接口（确认已解决或未解决退回）
+         */
+        post: operations["client_confirm_ticket_api_reception_client_tickets__ticket_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/client/tickets/{ticket_id}/remind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Client Remind Ticket
+         * @description 客户催单接口（判断提单是否满24小时，超24小时记录审计并向处理人推送催单通知）
+         */
+        post: operations["client_remind_ticket_api_reception_client_tickets__ticket_id__remind_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/reception/eligible-users": {
         parameters: {
             query?: never;
@@ -1570,10 +1971,118 @@ export interface paths {
         };
         /**
          * Get Eligible Users
-         * @description 获取系统基础配置中处于启用状态的人员（已配置在坐席中的可标记或全量可选）。
+         * @description 获取系统基础配置中处于启用状态且未在当前坐席列表中的人员。
          */
         get: operations["get_eligible_users_api_reception_eligible_users_get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/notices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Notices
+         * @description 获取消息通知列表，支持按状态和创建时间区间筛选，按创建时间倒序返回
+         */
+        get: operations["list_notices_api_reception_notices_get"];
+        put?: never;
+        /**
+         * Create Notice
+         * @description 新建消息通知记录
+         */
+        post: operations["create_notice_api_reception_notices_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/notices/batch-delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Batch Delete Notices
+         * @description 批量删除已下架的消息通知（若选中的记录包含上架状态则拒绝删除）
+         */
+        post: operations["batch_delete_notices_api_reception_notices_batch_delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/notices/batch-publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Batch Publish Notices
+         * @description 批量上架消息通知
+         */
+        post: operations["batch_publish_notices_api_reception_notices_batch_publish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/notices/batch-unpublish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Batch Unpublish Notices
+         * @description 批量下架消息通知
+         */
+        post: operations["batch_unpublish_notices_api_reception_notices_batch_unpublish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/notices/{notice_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Notice Detail
+         * @description 获取消息通知详情
+         */
+        get: operations["get_notice_detail_api_reception_notices__notice_id__get"];
+        /**
+         * Update Notice
+         * @description 编辑/更新消息通知记录
+         */
+        put: operations["update_notice_api_reception_notices__notice_id__put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1639,6 +2148,26 @@ export interface paths {
          */
         put: operations["update_schedule_settings_api_reception_settings_schedule_put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reception/webhook/llm-reply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Webhook External Llm Reply
+         * @description 接收第三方大模型异步调用回调推送的消息，并存入会话展示给客户。
+         */
+        post: operations["webhook_external_llm_reply_api_reception_webhook_llm_reply_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1756,7 +2285,7 @@ export interface paths {
         put?: never;
         /**
          * Close Session
-         * @description 【关闭】会话：发送结束通知并标记为已关闭。
+         * @description 【结束】会话并触发空位补位分发。
          */
         post: operations["close_session_api_reception_workbench_sessions__session_id__close_post"];
         delete?: never;
@@ -1835,10 +2364,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Transfer Session To Ticket
-         * @description 【转工单】：创建工单并给客户自动回复工单编号。
+         * Convert To Ticket
+         * @description 【转工单】真实在 tickets 表创建工单并完成会话转换 (对齐泳道 5)。
          */
-        post: operations["transfer_session_to_ticket_api_reception_workbench_sessions__session_id__transfer_ticket_post"];
+        post: operations["convert_to_ticket_api_reception_workbench_sessions__session_id__transfer_ticket_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2761,7 +3290,7 @@ export interface paths {
         };
         /**
          * Ticket Quick Stats
-         * @description Counts for top quick filters, scoped only by the caller's row visibility.
+         * @description Counts for top quick filters.
          */
         get: operations["ticket_quick_stats_api_tickets_quick_stats_get"];
         put?: never;
@@ -2828,6 +3357,26 @@ export interface paths {
          */
         post: operations["upload_attachment_api_tickets__ticket_id__attachments_upload_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tickets/{ticket_id}/attachments/{attachment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Attachment
+         * @description 删除工单/子任务附件，确保删除或取消上传后前后端附件数一致。
+         */
+        delete: operations["delete_attachment_api_tickets__ticket_id__attachments__attachment_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3416,6 +3965,11 @@ export interface components {
             /** Version */
             version: number;
         };
+        /** BatchNoticeIdsBody */
+        BatchNoticeIdsBody: {
+            /** Ids */
+            ids: number[];
+        };
         /** BatchRemoveAgentsBody */
         BatchRemoveAgentsBody: {
             /** Agent Ids */
@@ -3460,6 +4014,166 @@ export interface components {
             /** Skipped Count */
             skipped_count: number;
         };
+        /** BotAgentProfile */
+        BotAgentProfile: {
+            /**
+             * Agent Type
+             * @default normal
+             */
+            agent_type: string;
+            /**
+             * Avatar
+             * @default 🤖
+             */
+            avatar: string;
+            /**
+             * Code
+             * @default
+             */
+            code: string;
+            /**
+             * Created At
+             * @default
+             */
+            created_at: string;
+            /**
+             * Created By
+             * @default 系统管理员
+             */
+            created_by: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Id */
+            id: string;
+            /**
+             * Is Enabled
+             * @default true
+             */
+            is_enabled: boolean;
+            /** Name */
+            name: string;
+            /** Product Lines */
+            product_lines?: string[];
+            /** Skills */
+            skills?: string[];
+            /** Source Channels */
+            source_channels?: string[];
+            /**
+             * Support Transfer Human
+             * @default true
+             */
+            support_transfer_human: boolean;
+            /**
+             * System Prompt
+             * @default 你是一名专业的发票云技术支持专家，请热情、专业、准确地解答用户的问题。
+             */
+            system_prompt: string;
+            /**
+             * Temperature
+             * @default 0.3
+             */
+            temperature: number;
+            /**
+             * Transfer Human Rule
+             * @default 客户回复未解决且在人工工作时间有空闲坐席时触发转人工
+             */
+            transfer_human_rule: string;
+            /**
+             * Unresolved Prompt
+             * @default 很抱歉没能彻底解决您的问题。
+             */
+            unresolved_prompt: string;
+            /**
+             * Updated At
+             * @default
+             */
+            updated_at: string;
+            /** Webhook Url */
+            webhook_url?: string | null;
+            /**
+             * Welcome Message
+             * @default 您好！我是智能小助手，请问有什么可以帮您？
+             */
+            welcome_message: string;
+        };
+        /** BotConfigData */
+        BotConfigData: {
+            /** Agents */
+            agents?: components["schemas"]["BotAgentProfile"][];
+            /**
+             * Default Agent Id
+             * @default agent-general
+             */
+            default_agent_id: string;
+            escalation_strategy?: components["schemas"]["BotEscalationStrategy"];
+            /** Routing Rules */
+            routing_rules?: components["schemas"]["BotRoutingRule"][];
+        };
+        /** BotEscalationStrategy */
+        BotEscalationStrategy: {
+            /**
+             * Ask Transfer Text
+             * @default 很抱歉没能解决您的问题。当前有在线专业人工客服，是否为您转接人工坐席？
+             */
+            ask_transfer_text: string;
+            /**
+             * Enable Agent Reception
+             * @default true
+             */
+            enable_agent_reception: boolean;
+            /**
+             * No Human Guide Text
+             * @default 当前人工坐席均在忙碌中或已下班，建议您直接提交售后工单，我们将由技术专家加急排查并在第一时间答复您！
+             */
+            no_human_guide_text: string;
+            /**
+             * Probe Human Agents
+             * @default true
+             */
+            probe_human_agents: boolean;
+            /**
+             * Probe Working Hours
+             * @default true
+             */
+            probe_working_hours: boolean;
+            /**
+             * Show Ticket Button
+             * @default true
+             */
+            show_ticket_button: boolean;
+        };
+        /** BotRoutingCondition */
+        BotRoutingCondition: {
+            /** Company Keywords */
+            company_keywords?: string[];
+            /**
+             * Match Mode
+             * @default any
+             */
+            match_mode: string;
+            /** Message Keywords */
+            message_keywords?: string[];
+            /** Product Keywords */
+            product_keywords?: string[];
+        };
+        /** BotRoutingRule */
+        BotRoutingRule: {
+            conditions?: components["schemas"]["BotRoutingCondition"];
+            /** Id */
+            id: string;
+            /**
+             * Is Enabled
+             * @default true
+             */
+            is_enabled: boolean;
+            /** Name */
+            name: string;
+            /** Target Agent Id */
+            target_agent_id: string;
+        };
         /** CatalogModuleOut */
         CatalogModuleOut: {
             /** Code */
@@ -3488,6 +4202,204 @@ export interface components {
             status: string;
             /** Type */
             type: string;
+        };
+        /** ClientEvaluateRequest */
+        ClientEvaluateRequest: {
+            /**
+             * Comment
+             * @default
+             */
+            comment: string;
+            /** Score */
+            score: number;
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
+        };
+        /** ClientInitSessionRequest */
+        ClientInitSessionRequest: {
+            /** Company Name */
+            company_name: string;
+            /** Contact Name */
+            contact_name?: string | null;
+            /** Contact Phone */
+            contact_phone: string;
+            /**
+             * Is Historical
+             * @default false
+             */
+            is_historical: boolean;
+            /**
+             * Purchased Products
+             * @default []
+             */
+            purchased_products: string[];
+            /** Tax No */
+            tax_no: string;
+            /** Tenant Name */
+            tenant_name?: string | null;
+            /** Tenant No */
+            tenant_no?: string | null;
+        };
+        /** ClientLookupCompany */
+        ClientLookupCompany: {
+            /** Company Name */
+            company_name: string;
+            /** Contact Name */
+            contact_name?: string | null;
+            /**
+             * Purchased Products
+             * @default []
+             */
+            purchased_products: string[];
+            /** Tax No */
+            tax_no: string;
+            /** Tenant Name */
+            tenant_name?: string | null;
+            /** Tenant No */
+            tenant_no?: string | null;
+        };
+        /** ClientLookupPhoneResponse */
+        ClientLookupPhoneResponse: {
+            /** Count */
+            count: number;
+            /** Exists */
+            exists: boolean;
+            /** Items */
+            items: components["schemas"]["ClientLookupCompany"][];
+            /** Phone */
+            phone: string;
+        };
+        /** ClientNoticeOut */
+        ClientNoticeOut: {
+            /**
+             * Category
+             * @default 系统通知
+             */
+            category: string;
+            /** Content */
+            content: string;
+            /** Id */
+            id: string;
+            /**
+             * Is Important
+             * @default false
+             */
+            is_important: boolean;
+            /**
+             * Popup Prompt
+             * @default true
+             */
+            popup_prompt: boolean;
+            /** Publish Time */
+            publish_time: string;
+            /**
+             * Publisher
+             * @default 金蝶发票云服务团队
+             */
+            publisher: string;
+            /** Title */
+            title: string;
+        };
+        /** ClientSendMessageRequest */
+        ClientSendMessageRequest: {
+            /** Content */
+            content: string;
+            /**
+             * Sender Name
+             * @default 客户
+             */
+            sender_name: string;
+        };
+        /** ClientSubmitTicketRequest */
+        ClientSubmitTicketRequest: {
+            /** Company Name */
+            company_name?: string | null;
+            /** Contact Name */
+            contact_name?: string | null;
+            /** Contact Phone */
+            contact_phone?: string | null;
+            /** Description */
+            description: string;
+            /** Tax No */
+            tax_no?: string | null;
+            /** Title */
+            title: string;
+        };
+        /** ClientTicketConfirmRequest */
+        ClientTicketConfirmRequest: {
+            /** Action */
+            action: string;
+            /** Phone */
+            phone: string;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** ClientTicketConfirmResponse */
+        ClientTicketConfirmResponse: {
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+            /** Success */
+            success: boolean;
+        };
+        /** ClientTicketOut */
+        ClientTicketOut: {
+            /** Body */
+            body?: string | null;
+            /** Client Category */
+            client_category: string;
+            /** Created At */
+            created_at: string;
+            /** Handler Name */
+            handler_name: string | null;
+            /** Hours Since Created */
+            hours_since_created: number;
+            /** Id */
+            id: number;
+            /** Process Stage */
+            process_stage: string;
+            /** Reply At */
+            reply_at?: string | null;
+            /** Reply By */
+            reply_by?: string | null;
+            /** Reply Content */
+            reply_content?: string | null;
+            /** Reporter Mobile */
+            reporter_mobile?: string | null;
+            /** Reporter Name */
+            reporter_name?: string | null;
+            /** Short Code */
+            short_code: string;
+            /** Source Code */
+            source_code: string;
+            /** Source Name */
+            source_name: string;
+            /** Status */
+            status: string;
+            /** Ticket Number */
+            ticket_number: string;
+            /** Title */
+            title: string;
+        };
+        /** ClientTicketRemindRequest */
+        ClientTicketRemindRequest: {
+            /** Phone */
+            phone: string;
+        };
+        /** ClientTicketRemindResponse */
+        ClientTicketRemindResponse: {
+            /** Hours Since Created */
+            hours_since_created: number;
+            /** Message */
+            message: string;
+            /** Notified */
+            notified: boolean;
+            /** Success */
+            success: boolean;
         };
         /** CloseComplaintBody */
         CloseComplaintBody: {
@@ -3687,10 +4599,19 @@ export interface components {
         };
         /** CreateSubTaskBody */
         CreateSubTaskBody: {
+            /** Assigned User Id */
+            assigned_user_id?: number | null;
             /** Module */
             module?: string | null;
+            /**
+             * Primary For Transfer
+             * @default false
+             */
+            primary_for_transfer: boolean;
             /** Product Line Code */
             product_line_code?: string | null;
+            /** Solution */
+            solution?: string | null;
             /** Title */
             title: string;
             /** Type */
@@ -3997,6 +4918,23 @@ export interface components {
             /** Role */
             role: string;
         };
+        /** EnterpriseSearchResult */
+        EnterpriseSearchResult: {
+            /** Company Name */
+            company_name: string;
+            /**
+             * Legal Person
+             * @default
+             */
+            legal_person: string;
+            /**
+             * Status
+             * @default 存续
+             */
+            status: string;
+            /** Tax No */
+            tax_no: string;
+        };
         /** EscalationContextResponse */
         EscalationContextResponse: {
             /**
@@ -4098,6 +5036,17 @@ export interface components {
             decision_id: number;
             /** Parent Ticket Id */
             parent_ticket_id: number;
+        };
+        /** ExternalLlmReplyRequest */
+        ExternalLlmReplyRequest: {
+            /** Agent Code */
+            agent_code?: string | null;
+            /** Content */
+            content: string;
+            /** Sender Name */
+            sender_name?: string | null;
+            /** Session Id */
+            session_id: string;
         };
         /** FeatureIn */
         FeatureIn: {
@@ -4389,6 +5338,8 @@ export interface components {
             closed_at: string | null;
             /** Customer Verified At */
             customer_verified_at: string | null;
+            /** Dev Transferred At */
+            dev_transferred_at?: string | null;
             /** Expected Released At */
             expected_released_at: string | null;
             /** Expected Resolved At */
@@ -4475,8 +5426,6 @@ export interface components {
             reply_updated_at: string | null;
             /** Responsible User Name */
             responsible_user_name?: string | null;
-            /** Dev Transferred At */
-            dev_transferred_at?: string | null;
             /** Root Cause Analysis */
             root_cause_analysis: string | null;
             /** Scheduled Iteration */
@@ -5083,6 +6032,68 @@ export interface components {
             /** User Id */
             user_id: number;
         };
+        /** NoticeCreateBody */
+        NoticeCreateBody: {
+            /** Content */
+            content: string;
+            /** End Date */
+            end_date: string;
+            /**
+             * Popup Prompt
+             * @default true
+             */
+            popup_prompt: boolean;
+            /** Start Date */
+            start_date: string;
+            /** Title */
+            title: string;
+        };
+        /** NoticeItemOut */
+        NoticeItemOut: {
+            /** Content */
+            content: string;
+            /** Created At */
+            created_at: string;
+            /** Created By */
+            created_by: string;
+            /** Effective Status */
+            effective_status: string;
+            /** End Date */
+            end_date: string;
+            /** End Time */
+            end_time: string;
+            /** Id */
+            id: number;
+            /** Notice No */
+            notice_no: string;
+            /** Popup Prompt */
+            popup_prompt: boolean;
+            /** Start Date */
+            start_date: string;
+            /** Start Time */
+            start_time: string;
+            /** Status */
+            status: string;
+            /** Title */
+            title: string;
+            /** Updated At */
+            updated_at: string;
+            /** Updated By */
+            updated_by: string;
+        };
+        /** NoticeUpdateBody */
+        NoticeUpdateBody: {
+            /** Content */
+            content?: string | null;
+            /** End Date */
+            end_date?: string | null;
+            /** Popup Prompt */
+            popup_prompt?: boolean | null;
+            /** Start Date */
+            start_date?: string | null;
+            /** Title */
+            title?: string | null;
+        };
         /** NotifyReleaseBody */
         NotifyReleaseBody: {
             /** Fix Version */
@@ -5227,6 +6238,21 @@ export interface components {
         PendingLinearReviewResponse: {
             /** Items */
             items: components["schemas"]["PendingLinearReviewItem"][];
+        };
+        /** ProbeCapacityResponse */
+        ProbeCapacityResponse: {
+            /** Action Type */
+            action_type: string;
+            /** Can Transfer Human */
+            can_transfer_human: boolean;
+            /** Idle Capacity */
+            idle_capacity: number;
+            /** In Working Hours */
+            in_working_hours: boolean;
+            /** Online Agent Count */
+            online_agent_count: number;
+            /** Prompt Text */
+            prompt_text: string;
         };
         /**
          * ProductLineIn
@@ -5742,6 +6768,8 @@ export interface components {
             agent_name: string;
             /** Agent User Id */
             agent_user_id?: number | null;
+            /** Ai Agent Cid */
+            ai_agent_cid?: string | null;
             /** Closed At */
             closed_at?: string | null;
             /** Company Name */
@@ -6183,6 +7211,22 @@ export interface components {
             touched_user_ids: number[];
             /** Updated Count */
             updated_count: number;
+        };
+        /** TenantProfileRequest */
+        TenantProfileRequest: {
+            /** Company Name */
+            company_name: string;
+            /** Tax No */
+            tax_no: string;
+        };
+        /** TenantProfileResponse */
+        TenantProfileResponse: {
+            /** Purchased Products */
+            purchased_products: string[];
+            /** Tenant Name */
+            tenant_name: string;
+            /** Tenant No */
+            tenant_no: string;
         };
         /** TicketAnalyticsOut */
         TicketAnalyticsOut: {
@@ -6647,6 +7691,8 @@ export interface components {
         };
         /** UpdateSubTaskBody */
         UpdateSubTaskBody: {
+            /** Assigned User Id */
+            assigned_user_id?: number | null;
             /** Module */
             module?: string | null;
             /** Product Line Code */
@@ -10066,6 +11112,41 @@ export interface operations {
             };
         };
     };
+    webhook_external_llm_reply_api_reception_agent_external_message_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalLlmReplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_agents_api_reception_agents_get: {
         parameters: {
             query?: {
@@ -10205,6 +11286,634 @@ export interface operations {
             };
         };
     };
+    get_bot_config_api_reception_bot_config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotConfigData"];
+                };
+            };
+        };
+    };
+    update_bot_config_api_reception_bot_config_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BotConfigData"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotConfigData"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    client_fetch_tenant_profile_api_reception_client_fetch_tenant_profile_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    client_init_session_api_reception_client_init_session_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientInitSessionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    client_lookup_phone_api_reception_client_lookup_phone_get: {
+        parameters: {
+            query: {
+                phone: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientLookupPhoneResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    client_get_notices_api_reception_client_notices_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientNoticeOut"][];
+                };
+            };
+        };
+    };
+    client_probe_human_capacity_api_reception_client_probe_human_capacity_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProbeCapacityResponse"];
+                };
+            };
+        };
+    };
+    client_search_enterprises_api_reception_client_search_enterprises_get: {
+        parameters: {
+            query: {
+                keyword: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnterpriseSearchResult"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    client_get_sessions_api_reception_client_sessions_get: {
+        parameters: {
+            query: {
+                phone: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: {
+                            [key: string]: unknown;
+                        }[];
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    client_close_session_api_reception_client_sessions__session_id__close_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    client_escalate_human_api_reception_client_sessions__session_id__escalate_human_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    client_evaluate_session_api_reception_client_sessions__session_id__evaluate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientEvaluateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    client_get_messages_api_reception_client_sessions__session_id__messages_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    client_resolve_session_api_reception_client_sessions__session_id__resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    client_send_message_api_reception_client_sessions__session_id__send_message_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientSendMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    client_submit_ticket_api_reception_client_sessions__session_id__submit_ticket_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientSubmitTicketRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    client_mark_unresolved_api_reception_client_sessions__session_id__unresolved_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    client_get_tickets_api_reception_client_tickets_get: {
+        parameters: {
+            query: {
+                /** @description 咨询人手机号（严格匹配工单提单人手机号） */
+                phone: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientTicketOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    client_confirm_ticket_api_reception_client_tickets__ticket_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientTicketConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientTicketConfirmResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    client_remind_ticket_api_reception_client_tickets__ticket_id__remind_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientTicketRemindRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientTicketRemindResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_eligible_users_api_reception_eligible_users_get: {
         parameters: {
             query?: never;
@@ -10221,6 +11930,243 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EligibleUserOut"][];
+                };
+            };
+        };
+    };
+    list_notices_api_reception_notices_get: {
+        parameters: {
+            query?: {
+                statuses?: string[];
+                start_time?: string | null;
+                end_time?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoticeItemOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_notice_api_reception_notices_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoticeCreateBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoticeItemOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    batch_delete_notices_api_reception_notices_batch_delete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchNoticeIdsBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    batch_publish_notices_api_reception_notices_batch_publish_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchNoticeIdsBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    batch_unpublish_notices_api_reception_notices_batch_unpublish_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchNoticeIdsBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_notice_detail_api_reception_notices__notice_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notice_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoticeItemOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_notice_api_reception_notices__notice_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notice_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoticeUpdateBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoticeItemOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -10342,6 +12288,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScheduleSettings"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    webhook_external_llm_reply_api_reception_webhook_llm_reply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalLlmReplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
@@ -10633,7 +12614,7 @@ export interface operations {
             };
         };
     };
-    transfer_session_to_ticket_api_reception_workbench_sessions__session_id__transfer_ticket_post: {
+    convert_to_ticket_api_reception_workbench_sessions__session_id__transfer_ticket_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -12093,6 +14074,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AttachmentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_attachment_api_tickets__ticket_id__attachments__attachment_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket_id: number;
+                attachment_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

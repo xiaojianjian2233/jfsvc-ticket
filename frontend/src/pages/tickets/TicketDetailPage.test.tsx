@@ -19,6 +19,12 @@ function renderTicket(
   hubDetail?: Record<string, unknown>,
   customHandlers?: Parameters<typeof server.use>,
   initialSubtasks?: any[],
+  transferHooks?: {
+    failCreate?: string;
+    onCreate?: (body: any) => void;
+    onPatch?: (hubId: number, body: any) => void;
+    onConfirm?: (hubId: number, body: any) => void;
+  },
 ) {
   const baseTicket = {
     id: 10,
@@ -79,6 +85,10 @@ function renderTicket(
     http.get(`*/api/tickets/${tId}/subtasks`, () => HttpResponse.json(mockSubtasks)),
     http.post(`*/api/tickets/${tId}/subtasks`, async ({ request }) => {
       const body: any = await request.json();
+      transferHooks?.onCreate?.(body);
+      if (transferHooks?.failCreate) {
+        return HttpResponse.json({ detail: transferHooks.failCreate }, { status: 409 });
+      }
       const newSubtask = {
         id: 9000 + mockSubtasks.length + 1,
         short_code: `${ticket.short_code ?? `TKT-${tId}`}-${mockSubtasks.length + 1}`,
@@ -87,8 +97,10 @@ function renderTicket(
         type: body.type,
         product_line_code: body.product_line_code,
         module: body.module,
-        status: "draft",
-        solution: "",
+        status: body.primary_for_transfer ? "created" : "draft",
+        assigned_user_id: body.primary_for_transfer ? 88 : body.assigned_user_id,
+        assigned_user_name: body.primary_for_transfer ? "责任田研发" : null,
+        solution: body.solution ?? "",
       };
       mockSubtasks.push(newSubtask);
       return HttpResponse.json(newSubtask, { status: 201 });
@@ -103,6 +115,7 @@ function renderTicket(
     http.get("*/api/admin/users", () => HttpResponse.json([])),
     http.patch("*/api/hub-issues/:hub_issue_id/subtask", async ({ request, params }) => {
       const body = (await request.json()) as any;
+      transferHooks?.onPatch?.(Number(params.hub_issue_id), body);
       return HttpResponse.json({
         hub_issue_id: Number(params.hub_issue_id),
         status: "processing",
@@ -117,7 +130,9 @@ function renderTicket(
         solution: body.solution,
       });
     }),
-    http.post("*/api/hub-issues/:hub_issue_id/confirm-subtask", ({ params }) => {
+    http.post("*/api/hub-issues/:hub_issue_id/confirm-subtask", async ({ request, params }) => {
+      const body = (await request.json()) as any;
+      transferHooks?.onConfirm?.(Number(params.hub_issue_id), body);
       return HttpResponse.json({
         hub_issue_id: Number(params.hub_issue_id),
         status: "processing",
@@ -1661,6 +1676,90 @@ describe("TicketDetailPage 出站回写失败横幅", () => {
   });
 
   describe("场景2：处理说明已有内容时点击【转产研】增强与禁用联动", () => {
+    it("没有真实Hub的低置信度工单：先创建并绑定主Hub，再保存说明并推送Linear", async () => {
+      const calls: string[] = [];
+      let createBody: any = null;
+
+      renderTicket(
+        {
+          id: 1673,
+          status: "processing",
+          op_status: "processing",
+          short_code: "TKT-011676",
+          title: "扫码采集无反应",
+          predicted_type: "Bug_fix",
+          predicted_confidence: 0.7,
+          hub_issue_id: null,
+          product_line_code: "PROLINE6053",
+          module: "收票助手（发票采集）",
+          assigned_user_id: 42,
+          assigned_user_name: "苗一琳",
+          cached_reply_content: "已复现扫码采集无响应，转产研排查",
+        },
+        undefined,
+        undefined,
+        undefined,
+        {
+          onCreate: (body) => {
+            calls.push("create-hub");
+            createBody = body;
+          },
+          onPatch: () => calls.push("save-solution"),
+          onConfirm: (_hubId, body) => {
+            calls.push("push-linear");
+            expect(body.assignee_override_user_id).toBe(88);
+          },
+        },
+      );
+
+      expect(await screen.findByLabelText("处理环节：服务处理")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "转产研" }));
+
+      expect(await screen.findByLabelText("处理环节：产研处理")).toBeInTheDocument();
+      await waitFor(() => expect(calls).toEqual(["create-hub", "save-solution", "push-linear"]));
+      expect(createBody).toMatchObject({
+        type: "Bug_fix",
+        product_line_code: "PROLINE6053",
+        module: "收票助手（发票采集）",
+        solution: "已复现扫码采集无响应，转产研排查",
+        primary_for_transfer: true,
+      });
+    });
+
+    it("没有真实Hub时创建失败：保持服务处理且不再显示假成功", async () => {
+      let linearCalls = 0;
+      renderTicket(
+        {
+          id: 1674,
+          status: "processing",
+          op_status: "processing",
+          short_code: "TKT-011677",
+          predicted_type: "Demand",
+          hub_issue_id: null,
+          product_line_code: "pl-1",
+          module: "m-1",
+          cached_reply_content: "需求内容已确认，准备转产研",
+        },
+        undefined,
+        undefined,
+        undefined,
+        {
+          failCreate: "主 Hub 创建失败，请刷新后重试",
+          onConfirm: () => {
+            linearCalls += 1;
+          },
+        },
+      );
+
+      expect(await screen.findByLabelText("处理环节：服务处理")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "转产研" }));
+
+      expect((await screen.findAllByText("主 Hub 创建失败，请刷新后重试")).length).toBeGreaterThan(0);
+      expect(screen.getByLabelText("处理环节：服务处理")).toBeInTheDocument();
+      expect(linearCalls).toBe(0);
+      expect(screen.queryByText("已成功转产研，处理说明已同步")).not.toBeInTheDocument();
+    });
+
     it("单个需求任务：处理说明与字段完整时点击【转产研】，环节更新为产研处理，需求任务更新为处理中，去补充禁用，解决方案点击仅作只读查看", async () => {
       renderTicket({
         status: "draft",
@@ -1915,7 +2014,7 @@ describe("TicketDetailPage 出站回写失败横幅", () => {
       );
 
       expect(await screen.findByLabelText("处理环节：服务处理")).toBeInTheDocument();
-      expect(await screen.findByText("仅有占位符的需求任务")).toBeInTheDocument();
+      expect((await screen.findAllByText("仅有占位符的需求任务")).length).toBeGreaterThan(0);
       const transferDevBtn = screen.getByRole("button", { name: "转产研" });
 
       // 点击【转产研】

@@ -1282,6 +1282,11 @@ class CreateSubTaskBody(BaseModel):
     type: str = Field(..., pattern="^(Operation|Bug_fix|Demand|Internal_task)$")
     product_line_code: str | None = None
     module: str | None = None
+    solution: str | None = Field(default=None, max_length=20000)
+    assigned_user_id: int | None = None
+    # 转产研兜底：低置信度工单可能尚未毕业 Hub。此时第一条研发任务应
+    # 建成并绑定为主 Hub，而不是只生成一条没有 ticket.hub_issue_id 的子任务。
+    primary_for_transfer: bool = False
 
 
 class TicketReplyBody(BaseModel):
@@ -1413,6 +1418,95 @@ def create_ticket_subtask(
             status_code=403, detail="需要主管/管理员权限，或本工单的处理人才能创建子任务"
         )
 
+    if body.primary_for_transfer:
+        if body.type not in ("Bug_fix", "Demand"):
+            raise HTTPException(status_code=400, detail="转产研主任务类型必须是需求或BUG")
+        transfer_solution = (body.solution or "").strip()
+        if not transfer_solution:
+            raise HTTPException(status_code=400, detail="转产研前必须先录入任务解决方案")
+
+        from app.services.hub_issues.creator import (
+            HubIssueCreateError,
+            ensure_hub_issue_for_ticket,
+        )
+
+        try:
+            result = ensure_hub_issue_for_ticket(
+                ticket.id,
+                created_by=f"user:{user.name}",
+                type_override=body.type,
+                product_line_code=body.product_line_code,
+                module=body.module,
+                db=db,
+            )
+        except HubIssueCreateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        hub = db.get(HubIssue, result.hub_issue_id)
+        if hub is None or hub.deleted_at is not None:
+            raise HTTPException(status_code=409, detail="主 Hub 创建失败，请刷新后重试")
+        if hub.linear_uuid and hub.type != body.type:
+            raise HTTPException(status_code=409, detail="主 Hub 已推送 Linear，不能修改任务类型")
+
+        # ensure_hub_issue_for_ticket 在首次调用时已经按页面确认值创建研发 Hub；
+        # 下面同时覆盖幂等重试场景，保证类型、目录和说明都真实入库。
+        if hub.type == "Operation" and body.type in ("Bug_fix", "Demand"):
+            hub.op_status = None
+            hub.op_handler = None
+            hub.op_status_changed_at = None
+            hub.op_handler_user_id = None
+        hub.type = body.type
+        hub.title = body.title.strip()
+        hub.product_line_code = body.product_line_code or ticket.product_line_code
+        hub.module = body.module or ticket.module
+        hub.reply_content = transfer_solution
+        hub.reply_is_draft = False
+        upsert_catalog(
+            db,
+            product_line_code=hub.product_line_code,
+            module=hub.module,
+        )
+
+        from app.services.hub_issues.module_owner import peek_module_owner
+
+        owner = peek_module_owner(db, hub.product_line_code, hub.module)
+        if owner is not None:
+            hub.assigned_user_id = owner.id
+        elif body.assigned_user_id is not None:
+            hub.assigned_user_id = body.assigned_user_id
+
+        ticket.predicted_type = body.type
+        ticket.product_line_code = hub.product_line_code
+        ticket.module = hub.module
+        if hub.assigned_user_id is not None:
+            ticket.assigned_user_id = hub.assigned_user_id
+        db.commit()
+        db.refresh(hub)
+
+        assigned_name = None
+        if hub.assigned_user_id:
+            assigned = db.get(User, hub.assigned_user_id)
+            assigned_name = assigned.name if assigned else None
+        product_name = None
+        if hub.product_line_code:
+            product_name = db.execute(
+                select(ProductLine.name).where(ProductLine.code == hub.product_line_code)
+            ).scalar()
+        return SubTaskOut(
+            id=hub.id,
+            short_code=hub.short_code,
+            type=hub.type,
+            title=hub.title,
+            product_line_code=hub.product_line_code,
+            product_name=product_name,
+            module=hub.module,
+            status=hub.status,
+            linear_status=hub.linear_status,
+            assigned_user_id=hub.assigned_user_id,
+            assigned_user_name=assigned_name,
+            solution=hub.reply_content,
+        )
+
     plc = body.product_line_code or ticket.product_line_code
     mod = body.module or ticket.module
     if plc or mod:
@@ -1433,8 +1527,10 @@ def create_ticket_subtask(
         product_line_code=plc,
         module=mod,
         status="draft",
-        assigned_user_id=initial_assignee,
+        assigned_user_id=body.assigned_user_id or initial_assignee,
         occurrence_count=1,
+        reply_content=(body.solution or "").strip() or None,
+        reply_is_draft=False,
     )
     db.add(hub)
     db.commit()
