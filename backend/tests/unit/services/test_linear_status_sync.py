@@ -165,7 +165,7 @@ def test_linear_error_sets_failed_not_raises(db_session: Session) -> None:
 
 
 def test_completed_cascades_to_linked_tickets(db_session: Session) -> None:
-    """决策 14 联动：Linear Done → hub released → 源工单 released + outbox。"""
+    """决策 14 联动：Linear Done → hub/ticket answered + KSM 关单 outbox。"""
     from app.models import SyncOutbox
 
     db_session.add(Source(code="ksm", name="KSM"))

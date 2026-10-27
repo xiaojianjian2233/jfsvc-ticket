@@ -10,14 +10,15 @@ Write-back is two-layered:
     hub_issue.status (cascade) — CONSERVATIVE mapping, only the
                                 unambiguous transitions:
         state_type 'started'   → status 'in_progress'
-        state_type 'completed' → status 'released' (+ actual_released_at)
+        state_type 'completed' → status 'answered' (+ actual_released_at)
+                                 → status outbox 由 KSM sender 提交答复关单
         state_type 'canceled'  → NO status change — a dev cancelling an
                                  issue needs a supervisor's judgment (re-push?
                                  reject? reply to customer?), so it only
                                  surfaces via linear_status.
         triage/backlog/unstarted → record only.
 
-    Reopens are honored: released → in_progress when Linear moves an issue
+    Reopens are honored: answered → processing when Linear moves an issue
     back to started (Linear is the source of truth for dev state).
 
 Issues missing from the Linear response (deleted over there) are counted in

@@ -178,3 +178,14 @@ metadata:
 - 普通新增子任务沿用原流程，不受主 Hub 补建分支影响。
 
 **验证**：后端完整单测 `1630 passed`；工单详情前端测试 `52 passed`；后端 mypy/Ruff、前端 TypeScript 检查与生产构建通过。
+
+## Linear 完成但 KSM 未关闭（2026-10-27）
+
+**问题**：Linear 任务完成后，状态回同步会把 Hub 和关联工单收敛为 `answered` 并生成 `status` outbox。KSM sender 仅识别旧状态 `released`，遇到实际使用的 `answered` 会将出站记录标记为 `skipped`，造成 UAT 已完成、KSM 仍未关闭。
+
+**修复**：
+- KSM sender 同时支持 `status.answered` 和 `status.released`，两者均调用 `handleKsmOrder(is_deal=True)` 提交正式答复并推进 KSM 关单。
+- 关单话术优先使用 Hub 中已确认的处理说明；草稿或缺少正式说明时使用既有默认文案。
+- 外部调用成功后 outbox 标记 `sent`，工单保持“完成”环节并收敛为 `closed`；失败仍保留原有重试与错误记录。
+
+**验证**：Linear 状态、级联与 KSM 回写专项测试 `83 passed`；后端完整单测 `1631 passed`；Mypy、Ruff 和格式检查通过。

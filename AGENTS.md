@@ -59,6 +59,12 @@ Monorepo，三个独立子栈：
 - Hub 创建、任务保存或 Linear 推送任一步失败时，页面必须保持服务处理并显示真实错误；只有完整链路成功后才能提示转产研成功。
 - 补建主 Hub 操作应保持幂等，网络重试复用已绑定的 Hub，禁止生成重复 Hub。
 
+## 2026-10-27 Linear 完成后同步关闭 KSM
+
+- Linear 任务进入 `completed` 后，Hub 和关联工单收敛为 `answered` / 完成，并生成 `kind='status', to_status='answered'` 的出站记录。
+- KSM sender 必须将 `status.answered` 与历史 `status.released` 都解析为答复关单：使用 Hub 正式处理说明调用 `handleKsmOrder(is_deal=True)`，无正式说明时才回落默认完成文案。
+- KSM 返回成功后 outbox 标记 `sent`，本地工单保持处理环节“完成”并收敛为 `closed`；失败则保留错误和重试能力，不得误报关闭成功。
+
 ## 提示词记录维护规范（核心记忆）
 
 - **更新时机**：日常交互或修改过程中**不用每次都写入提示词记录**。

@@ -2,7 +2,7 @@
 
 Fake KSM client 记录调用并可注入异常；不触网。覆盖：
 开关/身份门控、dry_run、reply→lock+handle、status in_progress→lock、
-status released→handle(默认/hub回复)、已接管容错、refresh 刷新节点、
+status answered/released→handle(默认/hub回复)、已接管容错、refresh 刷新节点、
 失败 deferred/failed 重试、idempotency、batch 上限、ticket/billId 缺失跳过。
 """
 
@@ -814,7 +814,27 @@ def test_status_in_progress_locks_only(world: Session) -> None:
     assert row.status == "sent"
 
 
-# ---- status released → handle(close) ----------------------------------------
+# ---- status answered/released → handle(close) -------------------------------
+
+
+def test_status_answered_after_linear_completed_closes_ksm(world: Session) -> None:
+    """Linear completed 实际入队 answered，必须提交 KSM 答复关单。"""
+    hub = _hub(world, status="answered", reply_content="问题已修复，请验证")
+    t = _ticket(world, hub, status="answered", process_stage="完成")
+    row = _outbox(world, t, hub, kind="status", payload={"to_status": "answered"})
+    client = FakeKSMClient(detail=_SUBSCRIBE)
+
+    report = drain_ksm_outbox(world, client=client, settings=_settings())
+
+    assert report.sent == 1
+    assert len(client.handles) == 1
+    assert client.handles[0].deal_opinion == "问题已修复，请验证"
+    assert client.handles[0].is_deal is True
+    world.refresh(row)
+    world.refresh(t)
+    assert row.status == "sent"
+    assert t.status == "closed"
+    assert t.process_stage == "完成"
 
 
 def test_status_released_uses_hub_reply(world: Session) -> None:

@@ -10,7 +10,8 @@ Outbox → KSM mapping
     kind='reply'                 → lock → refresh → handleKsmOrder(is_deal=True)
                                    ("答复关单" — answer the customer + close)
     kind='status' in_progress    → lockKsmOrder                ("接管受理")
-    kind='status' released       → lock → refresh → handleKsmOrder(is_deal=True)
+    kind='status' answered/released
+                                 → lock → refresh → handleKsmOrder(is_deal=True)
                                    (close with the hub reply, else a default note)
     kind='supply'                → lock → refresh → supplyKsmOrder   ("补料")
 
@@ -459,7 +460,10 @@ class KSMWritebackSender:
             to_status = (row.payload or {}).get("to_status")
             if to_status == "in_progress":
                 return "lock"
-            if to_status == "released":
+            # Linear completed 目前统一收敛为 answered；旧数据和其它调用方
+            # 仍可能使用 released。两者都表示研发任务已结束，需要向
+            # KSM 提交正式答复并推进关单。
+            if to_status in ("answered", "released"):
                 return "close"
         return None
 
